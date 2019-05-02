@@ -28,9 +28,9 @@ def p():
                             return np.full(len(date_range),arg)
                         stack.append(Column('constant',str(arg),lit_col))
                     arg = lit
-                print(f'adding func {arg.__name__}')
+                #print(f'adding func {arg.__name__}')
                 funcs.append(arg)
-            print(f'funcs: [{",".join([func.__name__ for func in funcs])}]')
+            #print(f'funcs: [{",".join([func.__name__ for func in funcs])}]')
         trace = 'trace' in kwargs and kwargs['trace']
         if 'eval' in kwargs:
             date_range = kwargs['eval']
@@ -38,16 +38,16 @@ def p():
             for func in funcs:
                 #print(f'calling {func.__name__}')
                 func(stack)
-            cols = {} 
+            cols = []
+            headers = []
             for s in stack:
                 rows = s.row_function(date_range)                
-                header = s.trace if trace else s.header
-                if isinstance(rows,(np.ndarray, np.generic)):
-                  cols[header] = rows
-                else:
-                  cols[header] = np.full(len(date_range),str(type(rows)))
-            df = pd.DataFrame(cols, index=date_range)
-            return df
+                headers.append(s.trace if trace else s.header)
+                if not isinstance(rows,(np.ndarray, np.generic)):
+                  rows = np.full(len(date_range),str(type(rows)))
+                cols.append(rows)
+            mat = np.vstack(cols).T
+            return pd.DataFrame(mat, columns=headers, index=date_range)
         return exp
     return exp
                   
@@ -191,19 +191,21 @@ def each(start=0, end=-1, step=1, headers=[]):
             if not isinstance(headers, list):
                 headers = [headers]
             for header in headers:
-                this_stack = []
+                filtered_stack = []
                 to_del = []
-                for i,(h,f) in enumerate(stack):
-                    print(f'checking {h}')
-                    if not re.match(header,h) is None:
-                        print(f'matched {h}')
-                        this_stack.append(stack[i])
+                for i,col in enumerate(stack):
+                    #print(f'checking {col.header}')
+                    if not re.match(header,col.header) is None:
+                        #print(f'matched {col.header}')
+                        filtered_stack.append(stack[i])
                         to_del.append(i)
                 to_del.sort(reverse=True)
                 for i in to_del: 
                     del(stack[i])
-                quote.row_function(quoted_stack=this_stack)
-                output_stack += this_stack
+                for t in zip(*[iter(filtered_stack)]*step):
+                    this_stack = list(t)
+                    quote.row_function(quoted_stack=this_stack)
+                    output_stack += this_stack
         stack += output_stack
     return each
 
@@ -217,8 +219,9 @@ def hset(*args):
 
 def hformat(format_string):
     def hset(stack):
-        for i in range(len(stack)): 
-            stack[i] = Column(format_string.format(stack[i].header), stack[i].trace, stack[i].row_function)
+        col = stack.pop()
+        stack.append(Column(format_string.format(col.header),
+                        col.trace, col.row_function))
     return hset
 
 # Data cleaning
