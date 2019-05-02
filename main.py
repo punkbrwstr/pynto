@@ -1,6 +1,9 @@
 import numpy as np
 import pandas as pd
 import re
+from collections import namedtuple
+
+Column = namedtuple('Column',['header', 'trace', 'row_function'])
 
 def p():
     funcs = []
@@ -9,13 +12,11 @@ def p():
         if 'quoted_stack' in kwargs:
             stack = kwargs['quoted_stack']
             for func in funcs:
-                #print(f'quote calling {func.__name__}')      
-                #print(f'\tquote before stack: [{",".join([s[0] for s in stack])}]')
+                #print(f'calling quoted {func.__name__}')
                 func(stack)
-                #print(f'\tquote after stack: [{",".join([s[0] for s in stack])}]')
         elif len(args) == 1 and isinstance(args[0],list):
-            # quotation puts its on stack
-            args[0].append(('quote',exp))
+            # quotation puts itself into stack
+            args[0].append(Column('quotation','quotation', exp))
         elif len(args) == 1 and isinstance(args[0],pd.core.indexes.datetimes.DatetimeIndex):
             # evaluating quotation itself with combinator
             return exp
@@ -25,26 +26,26 @@ def p():
                     def lit(stack,arg=arg):
                         def lit_col(date_range):
                             return np.full(len(date_range),arg)
-                        stack.append((str(arg),lit_col))
+                        stack.append(Column('constant',str(arg),lit_col))
                     arg = lit
                 print(f'adding func {arg.__name__}')
                 funcs.append(arg)
             print(f'funcs: [{",".join([func.__name__ for func in funcs])}]')
+        trace = 'trace' in kwargs and kwargs['trace']
         if 'eval' in kwargs:
             date_range = kwargs['eval']
             stack = []
             for func in funcs:
                 #print(f'calling {func.__name__}')
-                #print(f'\tbefore stack: [{",".join([s[0] for s in stack])}]')
                 func(stack)
-                #print(f'\tafter stack: [{",".join([s[0] for s in stack])}]')
             cols = {} 
             for s in stack:
-                col = s[1](date_range)                
-                if isinstance(col,(np.ndarray, np.generic)):
-                  cols[s[0]] = col
+                rows = s.row_function(date_range)                
+                header = s.trace if trace else s.header
+                if isinstance(rows,(np.ndarray, np.generic)):
+                  cols[header] = rows
                 else:
-                  cols[s[0]] = np.full(len(date_range),str(type(col)))
+                  cols[header] = np.full(len(date_range),str(type(rows)))
             df = pd.DataFrame(cols, index=date_range)
             return df
         return exp
@@ -81,16 +82,16 @@ def _binary_operator(name, operation):
         col2 = stack.pop()
         col1 = stack.pop()
         def binary_operator_col(date_range):
-            return operation(col1[1](date_range),col2[1](date_range))
-        stack.append((f'({col1[0]} {col2[0]} {name})',binary_operator_col))
+            return operation(col1.row_function(date_range),col2.row_function(date_range))
+        stack.append(Column(col1.header,f'({col1.trace} {col2.trace} {name})',binary_operator_col))
     return binary_operator
 
 def _unary_operator(name, operation):
     def unary_operator(stack):
-        col1 = stack.pop()
+        col = stack.pop()
         def unary_operator_col(date_range):
-            return operation(col1[1](date_range))
-        stack.append((f'({col1[0]} {name})',unary_operator_col))
+            return operation(col.row_function(date_range))
+        stack.append(Column(col.header,f'({col.trace} {name})',unary_operator_col))
     return unary_operator
         
 plus = _binary_operator('plus', np.add)
@@ -101,12 +102,13 @@ mod = _binary_operator('mod', np.mod)
 exp = _binary_operator('exp', np.power)
 absolute = _unary_operator('absolute', np.abs)
 
+# Windows
 def rolling(window=2):
     def rolling(stack):
-        col1 = stack.pop()
+        col = stack.pop()
         def rolling_col(date_range):
             expanded_range = pd.date_range(date_range[0] - (window - 1) * date_range.freq,date_range[-1],freq=date_range.freq)
-            expanded_data = col1[1](expanded_range)
+            expanded_data = col.row_function(expanded_range)
             def window_generator():
                 for i in range(len(date_range)):
                     start = i
@@ -114,25 +116,26 @@ def rolling(window=2):
                         start -= 1
                     yield expanded_data[start:i + window]
             return window_generator
-        stack.append((f'({col1[0]} rolling({window}))',rolling_col))
+        stack.append(Column(col.header,f'({col.trace} rolling({window}))',rolling_col))
     return rolling
                   
 
 def expanding(stack):
-    col1 = stack.pop()
+    col = stack.pop()
     def expanding_col(date_range):
-        data = col1[1](date_range)
+        data = col.row_function(date_range)
         def window_generator():
             for i in range(len(date_range)):
                 yield data[0:i + 1]
         return window_generator
-    stack.append((f'({col1[0]} expanding)',expanding_col))
+    stack.append(Column(col.header, f'({col.trace} expanding)', expanding_col))
                   
 def crossing(stack):
     cols = [stack]
     stack.clear()
     def crossing_col(date_range):
-        data = [col[1](date_range) for col in cols]
+        data = [col.row_function(date_range) for col in cols]
+        headers = ','.join([col.header for col in cols])
         def window_generator():
             row = np.full(len(data),np.nan)
             for i in range(len(date_range)):
@@ -140,19 +143,19 @@ def crossing(stack):
                     row[j] = data[j][i]
                 yield row
         return window_generator
-    stack.append((f'(crossing)',crossing_col))
+    stack.append(Column('cross', f'({headers} crossing)',crossing_col))
 
 
 def window_operator(name, operation):
     def window_operator(stack):
-        col1 = stack.pop()
+        col = stack.pop()
         def window_operator_col(date_range):
-            generator = col1[1](date_range)
+            generator = col.row_function(date_range)
             output = np.full(len(date_range),np.nan)
             for i, window in enumerate(generator()):
                 output[i] = np.nan if np.isnan(window[-1]) else operation(window)
             return output
-        stack.append((f'({col1[0]} {name})', window_operator_col))
+        stack.append(Column(col.header, f'({col.trace} {name})', window_operator_col))
     return window_operator
 
 sum = window_operator('sum',np.nansum)
@@ -170,7 +173,7 @@ lag = window_operator('lag',lambda a: a[0])
 # Combinators
 def call(stack):
     quote = stack.pop()
-    quote[1](quoted_stack=stack)
+    quote.row_function(quoted_stack=stack)
 
 def each(start=0, end=-1, step=1, headers=[]):
     def each(stack,start=start,end=end,step=step,headers=headers):
@@ -181,7 +184,7 @@ def each(start=0, end=-1, step=1, headers=[]):
             for i in range(start,end,step):
                 last = i + step
                 this_stack = stack[i:last]
-                quote[1](quoted_stack=this_stack)
+                quote.row_function(quoted_stack=this_stack)
                 output_stack += this_stack
             del(stack[start:last])
         else:
@@ -199,7 +202,7 @@ def each(start=0, end=-1, step=1, headers=[]):
                 to_del.sort(reverse=True)
                 for i in to_del: 
                     del(stack[i])
-                quote[1](quoted_stack=this_stack)
+                quote.row_function(quoted_stack=this_stack)
                 output_stack += this_stack
         stack += output_stack
     return each
@@ -209,11 +212,21 @@ def hset(*args):
     def hset(stack):
         start = len(stack) - len(args)
         for i in range(start,len(stack)): 
-            stack[i] = (args[i - start],stack[i][1])
+            stack[i] = Column(args[i - start], stack[i].trace, stack[i].row_function)
     return hset
 
 def hformat(format_string):
     def hset(stack):
         for i in range(len(stack)): 
-            stack[i] = (format_string.format(stack[i][0]),stack[i][1])
+            stack[i] = Column(format_string.format(stack[i].header), stack[i].trace, stack[i].row_function)
     return hset
+
+# Data cleaning
+def ffill(stack):
+    col = stack.pop()
+    def ffill(date_range):
+        x = col.row_function(date_range)
+        idx = np.where(~np.isnan(x),np.arange(len(x)),0)
+        np.maximum.accumulate(idx,out=idx)
+        return x[idx]
+    stack.append(Column(col.header,f'({col.trace} ffill)',ffill))
