@@ -5,7 +5,7 @@ from collections import namedtuple
 
 Column = namedtuple('Column',['header', 'trace', 'row_function'])
 
-def _p():
+def _e():
     funcs = []
     def exp(*args,**kwargs):
         nonlocal funcs
@@ -51,8 +51,8 @@ def _p():
         return exp
     return exp
 
-def exp(*args,**kwargs):
-    return _p()(*args,**kwargs)
+def e(*args,**kwargs):
+    return _e()(*args,**kwargs)
                   
 # Stack manipulation
 def dup(stack):
@@ -121,6 +121,12 @@ def hpull(*args,clear=False):
 
 def hfilter(*args):
     return hpull(*args,clear=True)
+
+def compose(*args):
+    def composed(stack):
+        for func in args:
+            func(stack)
+    return composed
                   
 # Operators
 def _binary_operator(name, operation):
@@ -140,14 +146,14 @@ def _unary_operator(name, operation):
         stack.append(Column(col.header,f'{col.trace},{name},',unary_operator_col))
     return unary_operator
         
-plus = _binary_operator('plus', np.add)
-minus = _binary_operator('minus', np.subtract)
-multiply = _binary_operator('multiply', np.multiply)
-divide = _binary_operator('divide', np.divide)
+add = _binary_operator('add', np.add)
+sub = _binary_operator('sub', np.subtract)
+mul = _binary_operator('mul', np.multiply)
+div = _binary_operator('div', np.divide)
 mod = _binary_operator('mod', np.mod)
-pow = _binary_operator('pow', np.power)
-absolute = _unary_operator('absolute', np.abs)
-
+powr = _binary_operator('powr', np.power)
+absv = _unary_operator('absv', np.abs)
+sqrt = _unary_operator('sqrt', np.abs)
 # Windows
 def rolling(window=2):
     def rolling(stack):
@@ -164,8 +170,8 @@ def rolling(window=2):
             return window_generator
         stack.append(Column(col.header,f'{col.trace},rolling({window})',rolling_col))
     return rolling
-                  
 
+                  
 def expanding(stack):
     col = stack.pop()
     def expanding_col(date_range):
@@ -220,18 +226,22 @@ def window_operator(name, operation):
         stack.append(Column(col.header, f'{col.trace},{name}', window_operator_col))
     return window_operator
 
-sum = window_operator('sum',np.nansum)
+wsum = window_operator('sum',np.nansum)
 mean = window_operator('mean',np.nanmean)
 std = window_operator('std',np.nanstd)
 cumprod = window_operator('cumprod',np.nancumprod)
-max = window_operator('cumprod',np.nancumprod)
-min = window_operator('cumprod',np.nancumprod)
+wmax = window_operator('cumprod',np.nancumprod)
+wmin = window_operator('cumprod',np.nancumprod)
 median = window_operator('cumprod',np.nancumprod)
 pct_change = window_operator('pct_change',lambda a: a[-1] / a[0] -1)
 log_change = window_operator('log_change',lambda a: np.log(a[-1]) - np.log(a[0]))
 lag = window_operator('lag',lambda a: a[0])
-last = window_operator('lag',lambda a: a[-1])
+first = window_operator('first',lambda a: a[0])
+last = window_operator('last',lambda a: a[-1])
 
+
+def lag(number):
+    return compose(window(number+1),first)
 
 # Combinators
 def call(depth=None,copy=False):
@@ -323,6 +333,24 @@ def ffill(stack):
         return x[idx]
     stack.append(Column(col.header,f'{col.trace},ffill',ffill))
 
+def join(date):
+    def join(stack,date=date):
+        col2 = stack.pop()
+        col1 = stack.pop()
+        def join_col(date_range,date=date):
+            date = pd.to_datetime(date)
+            if date_range[-1] < date:
+                return col1.row_function(date_range)
+            if date_range[0] >= date:
+                return col2.row_function(date_range)
+            parts = []
+            parts.append(col1.row_function(pd.date_range(date_range[0],
+                    date -  date_range.freq,freq=date_range.freq)))
+            parts.append(col2.row_function(pd.date_range(date,
+                    date_range[-1],freq=date_range.freq)))
+            return np.concatenate(parts)
+        stack.append(Column('join',f'{col2.trace} {col2.trace} join({date})',join_col))
+    return join
 
 # Utils
 
