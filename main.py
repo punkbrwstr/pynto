@@ -70,9 +70,6 @@ def drop(stack):
 def clear(stack):
     stack.clear()
                
-def swap(stack):
-    stack.insert(-1,stack.pop())
-
 def interleave(count):
     def interleave(stack):
         place,last = 0,0
@@ -135,7 +132,7 @@ def _binary_operator(name, operation):
         col1 = stack.pop()
         def binary_operator_col(date_range):
             return operation(col1.row_function(date_range),col2.row_function(date_range))
-        stack.append(Column(col1.header,f'exp({col1.trace}),exp({col2.trace}),{name}',binary_operator_col))
+        stack.append(Column(col1.header,f'e({col1.trace}),e({col2.trace}),{name}',binary_operator_col))
     return binary_operator
 
 def _unary_operator(name, operation):
@@ -151,9 +148,9 @@ sub = _binary_operator('sub', np.subtract)
 mul = _binary_operator('mul', np.multiply)
 div = _binary_operator('div', np.divide)
 mod = _binary_operator('mod', np.mod)
-powr = _binary_operator('powr', np.power)
+exp = _binary_operator('exp', np.power)
 absv = _unary_operator('absv', np.abs)
-sqrt = _unary_operator('sqrt', np.abs)
+sqrt = _unary_operator('sqrt', np.sqrt)
 # Windows
 def rolling(window=2):
     def rolling(stack):
@@ -218,10 +215,11 @@ def window_operator(name, operation):
     def window_operator(stack):
         col = stack.pop()
         def window_operator_col(date_range):
+            nan_on_last_nan = col.row_function.__name__ != 'crossing_col'
             generator = col.row_function(date_range)
             output = np.full(len(date_range),np.nan)
             for i, window in enumerate(generator()):
-                output[i] = np.nan if np.isnan(window[-1]) else operation(window)
+                output[i] = np.nan if nan_on_last_nan and np.isnan(window[-1]) else operation(window)
             return output
         stack.append(Column(col.header, f'{col.trace},{name}', window_operator_col))
     return window_operator
@@ -235,13 +233,15 @@ wmin = window_operator('cumprod',np.nancumprod)
 median = window_operator('cumprod',np.nancumprod)
 pct_change = window_operator('pct_change',lambda a: a[-1] / a[0] -1)
 log_change = window_operator('log_change',lambda a: np.log(a[-1]) - np.log(a[0]))
-lag = window_operator('lag',lambda a: a[0])
 first = window_operator('first',lambda a: a[0])
 last = window_operator('last',lambda a: a[-1])
 
 
 def lag(number):
-    return compose(window(number+1),first)
+    return compose(rolling(number+1),first)
+
+def zscore():
+    return compose(e(std),e(last),e(mean),cleave(3),sub,swap,div)
 
 # Combinators
 def call(depth=None,copy=False):
