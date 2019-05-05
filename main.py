@@ -142,13 +142,21 @@ def _unary_operator(name, operation):
             return operation(col.row_function(date_range))
         stack.append(Column(col.header,f'{col.trace},{name},',unary_operator_col))
     return unary_operator
-        
+
 add = _binary_operator('add', np.add)
 sub = _binary_operator('sub', np.subtract)
 mul = _binary_operator('mul', np.multiply)
 div = _binary_operator('div', np.divide)
 mod = _binary_operator('mod', np.mod)
 exp = _binary_operator('exp', np.power)
+eq = _binary_operator('eq', lambda x,y: np.where(np.equal(x,y),1,0 ))
+ne = _binary_operator('ne', lambda x,y: np.where(np.not_equal(x,y),1,0))
+ge = _binary_operator('ge', lambda x,y: np.where(np.greater_equal(x,y),1,0))
+gt = _binary_operator('gt', lambda x,y: np.where(np.greater(x,y),1,0))
+le = _binary_operator('le', lambda x,y: np.where(np.less_equal(x,y),1,0))
+lt = _binary_operator('lt', lambda x,y: np.where(np.less(x,y),1,0))
+
+
 absv = _unary_operator('absv', np.abs)
 sqrt = _unary_operator('sqrt', np.sqrt)
 # Windows
@@ -228,6 +236,7 @@ wsum = window_operator('sum',np.nansum)
 mean = window_operator('mean',np.nanmean)
 std = window_operator('std',np.nanstd)
 cumprod = window_operator('cumprod',np.nancumprod)
+prod = window_operator('prod',np.nanprod)
 wmax = window_operator('cumprod',np.nancumprod)
 wmin = window_operator('cumprod',np.nancumprod)
 median = window_operator('cumprod',np.nancumprod)
