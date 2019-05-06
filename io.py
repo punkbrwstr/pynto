@@ -11,3 +11,7 @@ def read_frame(data_frame):
                 return col.reindex(date_range).values
             stack.append(Column(header,f'read_frame {header}',frame_col))
     return read_frame
+
+def read_csv(csv_file):
+    frame = pd.read_csv(csv_file, index_col=0, header=None, parse_dates=True)
+    return read_frame(frame)
