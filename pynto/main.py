@@ -41,7 +41,7 @@ def _e():
             cols = []
             headers = []
             for s in stack:
-                rows = s.row_function(date_range)                
+                rows = s.row_function(date_range)
                 headers.append(s.trace if trace else s.header)
                 if not isinstance(rows,(np.ndarray, np.generic)):
                   rows = np.full(len(date_range),str(type(rows)))
@@ -53,11 +53,11 @@ def _e():
 
 def e(*args,**kwargs):
     return _e()(*args,**kwargs)
-                  
+
 # Stack manipulation
 def dup(stack):
     stack.append(stack[-1])
-                  
+
 def roll(stack):
     stack.insert(0,stack.pop())
 
@@ -66,10 +66,10 @@ def swap(stack):
 
 def drop(stack):
     stack.pop()
-                  
+
 def clear(stack):
     stack.clear()
-               
+
 def interleave(count):
     def interleave(stack):
         place,last = 0,0
@@ -85,7 +85,7 @@ def interleave(count):
 def pull(start,end=None,clear=False):
     def pull(stack,start=start,end=end):
         end = -start - 1 if end is None else -end
-        start = len(stack) if start == 0 else -start 
+        start = len(stack) if start == 0 else -start
         pulled = stack[end:start]
         if clear:
             del(stack[:])
@@ -109,7 +109,7 @@ def hpull(*args,clear=False):
                     filtered_stack.append(stack[i])
                     to_del.append(i)
             to_del.sort(reverse=True)
-            for i in to_del: 
+            for i in to_del:
                 del(stack[i])
         if clear:
             del(stack[:])
@@ -124,7 +124,7 @@ def compose(*args):
         for func in args:
             func(stack)
     return composed
-                  
+
 # Operators
 def _binary_operator(name, operation):
     def binary_operator(stack):
@@ -176,7 +176,7 @@ def rolling(window=2):
         stack.append(Column(col.header,f'{col.trace},rolling({window})',rolling_col))
     return rolling
 
-                  
+
 def expanding(stack):
     col = stack.pop()
     def expanding_col(date_range):
@@ -186,7 +186,7 @@ def expanding(stack):
                 yield data[0:i + 1]
         return window_generator
     stack.append(Column(col.header, f'{col.trace},expanding', expanding_col))
-                  
+
 def crossing(stack):
     cols = stack[:]
     stack.clear()
@@ -298,7 +298,7 @@ def each(start=0, end=None, step=1, copy=False):
     def each(stack,start=start,end=end,step=step, copy=copy):
         quote = stack.pop()
         end = 0 if end is None else -end
-        start = len(stack) if start == 0 else -start 
+        start = len(stack) if start == 0 else -start
         selected = stack[end:start]
         if len(selected) % step != 0:
             raise Exception('Stack not evenly divisible by step')
@@ -314,7 +314,7 @@ def each(start=0, end=None, step=1, copy=False):
 def hset(*args):
     def hset(stack):
         start = len(stack) - len(args)
-        for i in range(start,len(stack)): 
+        for i in range(start,len(stack)):
             stack[i] = Column(args[i - start], stack[i].trace, stack[i].row_function)
     return hset
 
