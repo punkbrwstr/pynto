@@ -333,6 +333,16 @@ def happly(func):
     return happly
 
 # Data cleaning
+def fill(value):
+    def fill(stack, value=value):
+        col = stack.pop()
+        def fill(date_range):
+            x = col.row_function(date_range)
+            x[np.isnan(x)] = 0.0
+            return x
+        stack.append(Column(col.header,f'{col.trace},fill',fill))
+    return fill
+
 def ffill(stack):
     col = stack.pop()
     def ffill(date_range):
