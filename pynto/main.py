@@ -240,6 +240,7 @@ prod = window_operator('prod',np.nanprod)
 wmax = window_operator('cumprod',np.nancumprod)
 wmin = window_operator('cumprod',np.nancumprod)
 median = window_operator('cumprod',np.nancumprod)
+change = window_operator('change',lambda a: a[-1] - a[0])
 pct_change = window_operator('pct_change',lambda a: a[-1] / a[0] -1)
 log_change = window_operator('log_change',lambda a: np.log(a[-1]) - np.log(a[0]))
 first = window_operator('first',lambda a: a[0])
@@ -281,12 +282,16 @@ def every(step,copy=False):
             stack += this_stack
     return every
 
-def cleave(depth):
-    def cleave(stack):
-        quotes = stack[-depth:]
-        del(stack[-depth:])
-        copied_stack = stack[:]
-        del(stack[:])
+def cleave(num_quotations, depth=None, copy=False):
+    def cleave(stack, depth=depth):
+        quotes = stack[-num_quotations:]
+        del(stack[-num_quotations:])
+        depth = len(stack) if depth is None else depth
+        copied_stack = stack[-depth:] if depth != 0 else []
+        if not copy and depth != 0:
+            del(stack[-depth:])
+        #copied_stack = stack[:]
+        #del(stack[:])
         for quote in quotes:
             this_stack = copied_stack[:]
             quote.row_function(quoted_stack=this_stack)
