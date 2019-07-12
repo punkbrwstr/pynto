@@ -1,9 +1,24 @@
+import re
+import warnings
 import numpy as np
 import pandas as pd
-import re
 from collections import namedtuple
+from lima.time import get_index, get_date
 
 Column = namedtuple('Column',['header', 'trace', 'row_function'])
+Range = namedtuple('Range',['start', 'end', 'periodicity'])
+
+
+def get_range(start, end, periodicity):
+    return Range(get_index(periodicity, start),
+                    get_index(periodicity, end), periodicity)
+
+def range_size(r):
+    return r.end - r.start + 1
+
+def to_date_range(r):
+    return pd.date_range(get_date(r.periodicity,r.start),
+                get_date(r.periodicity,r.end), freq=r.periodicity)
 
 def _e():
     funcs = []
@@ -25,7 +40,7 @@ def _e():
                 if isinstance(arg,(int, float, complex)):
                     def lit(stack,arg=arg):
                         def lit_col(date_range):
-                            return np.full(len(date_range),arg)
+                            return np.full(range_size(date_range),arg)
                         stack.append(Column('constant',str(arg),lit_col))
                     arg = lit
                 #print(f'adding func {arg.__name__}')
@@ -44,10 +59,10 @@ def _e():
                 rows = s.row_function(date_range)
                 headers.append(s.trace if trace else s.header)
                 if not isinstance(rows,(np.ndarray, np.generic)):
-                  rows = np.full(len(date_range),str(type(rows)))
+                  rows = np.full(range_size(date_range),str(type(rows)))
                 cols.append(rows)
             mat = np.vstack(cols).T
-            return pd.DataFrame(mat, columns=headers, index=date_range)
+            return pd.DataFrame(mat, columns=headers, index=to_date_range(date_range))
         return exp
     return exp
 
@@ -131,7 +146,9 @@ def _binary_operator(name, operation):
         col2 = stack.pop()
         col1 = stack.pop()
         def binary_operator_col(date_range):
-            return operation(col1.row_function(date_range),col2.row_function(date_range))
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                return operation(col1.row_function(date_range),col2.row_function(date_range))
         stack.append(Column(col1.header,f'e({col1.trace}),e({col2.trace}),{name}',binary_operator_col))
     return binary_operator
 
@@ -159,20 +176,32 @@ lt = _binary_operator('lt', lambda x,y: np.where(np.less(x,y),1,0))
 
 absv = _unary_operator('absv', np.abs)
 sqrt = _unary_operator('sqrt', np.sqrt)
+zeroToNa = _unary_operator('zeroToNa', lambda x: np.where(np.equal(x,0),np.nan,x))
+
 # Windows
-def rolling(window=2):
+def rolling(window=2, exclude_nans=True, lookback_multiplier=2):
     def rolling(stack):
         col = stack.pop()
-        def rolling_col(date_range):
-            expanded_range = pd.date_range(date_range[0] - (window - 1) * date_range.freq,date_range[-1],freq=date_range.freq)
-            expanded_data = col.row_function(expanded_range)
-            def window_generator():
-                for i in range(len(date_range)):
-                    start = i
-                    while start > 0 and np.count_nonzero(~np.isnan(expanded_data[start:i + window])) < window:
-                        start -= 1
-                    yield expanded_data[start:i + window]
-            return window_generator
+        def rolling_col(date_range,lookback_multiplier=lookback_multiplier):
+            if not exclude_nans:
+                lookback_multiplier = 1
+            lookback = (window - 1) * lookback_multiplier
+            expanded_range = get_range(date_range.start - lookback,
+                                    date_range.end,date_range.periodicity)
+            expanded = col.row_function(expanded_range)
+            mask = ~np.isnan(expanded) if exclude_nans else np.full(expanded.shape,True)
+            no_nans = expanded[mask]
+            # Indexes of no_nan values in expanded
+            indexes = np.add.accumulate(np.where(mask))[0]
+            if no_nans.shape[-1] - window < 0:
+                #warnings.warn('Insufficient non-nan values in lookback.')
+                no_nans = np.hstack([np.full(window - len(no_nans),np.nan),no_nans])
+            shape = no_nans.shape[:-1] + (no_nans.shape[-1] - window + 1, window)
+            strides = no_nans.strides + (no_nans.strides[-1],)
+            windows = np.lib.stride_tricks.as_strided(no_nans, shape=shape, strides=strides)
+            td = np.full((expanded.shape[0],window), np.nan)
+            td[indexes[-windows.shape[0]:],:] = windows
+            return td[lookback:]
         stack.append(Column(col.header,f'{col.trace},rolling({window})',rolling_col))
     return rolling
 
@@ -180,11 +209,7 @@ def rolling(window=2):
 def expanding(stack):
     col = stack.pop()
     def expanding_col(date_range):
-        data = col.row_function(date_range)
-        def window_generator():
-            for i in range(len(date_range)):
-                yield data[0:i + 1]
-        return window_generator
+        return col.row_function(date_range)
     stack.append(Column(col.header, f'{col.trace},expanding', expanding_col))
 
 def crossing(stack):
@@ -192,65 +217,63 @@ def crossing(stack):
     stack.clear()
     headers = ','.join([col.header for col in cols])
     def crossing_col(date_range):
-        data = [col.row_function(date_range) for col in cols]
-        def window_generator():
-            row = np.full(len(data),np.nan)
-            for i in range(len(date_range)):
-                for j in range(row.shape[0]):
-                    row[j] = data[j][i]
-                yield row
-        return window_generator
+        return np.column_stack([col.row_function(date_range) for col in cols])
     stack.append(Column('cross', f'{headers},crossing',crossing_col))
 
-def fwd_rolling(window=2):
-    def fwd_rolling(stack):
-        col = stack.pop()
-        def rolling_col(date_range):
-            expanded_range = pd.date_range(date_range[0],(window - 1) * date_range.freq + date_range[-1],freq=date_range.freq)
-            expanded_data = col.row_function(expanded_range)
-            def window_generator():
-                for i in range(len(date_range)):
-                    end = i + window
-                    while end <= len(expanded_data) and np.count_nonzero(~np.isnan(expanded_data[i:end])) < window:
-                        end += 1
-                    yield expanded_data[i:end]
-            return window_generator
-        stack.append(Column(col.header,f'{col.trace},rolling({window})',rolling_col))
-    return fwd_rolling
-
-
-def window_operator(name, operation):
+def _window_operator(name, twod_operation, oned_operation):
     def window_operator(stack):
         col = stack.pop()
         def window_operator_col(date_range):
-            nan_on_last_nan = col.row_function.__name__ != 'crossing_col'
-            generator = col.row_function(date_range)
-            output = np.full(len(date_range),np.nan)
-            for i, window in enumerate(generator()):
-                output[i] = np.nan if nan_on_last_nan and np.isnan(window[-1]) else operation(window)
-            return output
+            #nan_on_last_nan = col.row_function.__name__ != 'crossing_col'
+            values = col.row_function(date_range)
+            if len(values.shape) == 2:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", category=RuntimeWarning)
+                    return np.where(np.all(np.isnan(values),axis=1), np.nan,
+                                twod_operation(values, axis=1))
+            else:
+                return oned_operation(values)
         stack.append(Column(col.header, f'{col.trace},{name}', window_operator_col))
     return window_operator
 
-wsum = window_operator('sum',np.nansum)
-mean = window_operator('mean',np.nanmean)
-std = window_operator('std',np.nanstd)
-cumprod = window_operator('cumprod',np.nancumprod)
-prod = window_operator('prod',np.nanprod)
-wmax = window_operator('cumprod',np.nancumprod)
-wmin = window_operator('cumprod',np.nancumprod)
-median = window_operator('cumprod',np.nancumprod)
-change = window_operator('change',lambda a: a[-1] - a[0])
-pct_change = window_operator('pct_change',lambda a: a[-1] / a[0] -1)
-log_change = window_operator('log_change',lambda a: np.log(a[-1]) - np.log(a[0]))
-first = window_operator('first',lambda a: a[0])
-last = window_operator('last',lambda a: a[-1])
+def _expanding_mean(x):
+    nan_mask = np.isnan(x)
+    cumsum = np.add.accumulate(np.where(nan_mask, 0, x))
+    count = np.add.accumulate(np.where(nan_mask, 0, x / x))
+    return np.where(nan_mask, np.nan, cumsum) / count
+
+def _expanding_var(x):
+    nan_mask = np.isnan(x)
+    cumsum = np.add.accumulate(np.where(nan_mask, 0, x))
+    cumsumOfSquares = np.add.accumulate(np.where(nan_mask, 0, x * x))
+    count = np.add.accumulate(np.where(nan_mask, 0, x / x))
+    return (cumsumOfSquares - cumsum * cumsum / count) / (count - 1)
+
+def _make_expanding(ufunc):
+    def expanding(x):
+        mask = np.isnan(x)
+        return np.where(mask, np.nan, ufunc.accumulate(np.where(mask,0,x)))
+    return expanding
+
+wsum = _window_operator('wsum',np.nansum, _make_expanding(np.add))
+wmean = _window_operator('wmean',np.nanmean, _expanding_mean)
+wprod = _window_operator('wprod',np.nanprod, _make_expanding(np.multiply))
+wvar = _window_operator('wvar', np.nanvar, _expanding_var)
+wstd = _window_operator('wstd', np.nanstd, _expanding_var)
+wchange = _window_operator('wchange',lambda x, axis: x[:,-1] - x[:,0],
+                                        lambda x, axis: x - x[0])
+wpct_change = _window_operator('wpct_change',lambda x, axis: x[:,-1] / x[:,0] - 1,
+                                        lambda x, axis: x / x[0] - 1)
+wlog_change = _window_operator('wlog_change', lambda x, axis: np.log(x[:,-1] / x[:,0]),
+                                        lambda x, axis: np.log( x / x[0]))
+first = _window_operator('first',lambda x: x[:,0], lambda x: np.full(a.shape,a[0]))
+last = _window_operator('last',lambda x: x[:,-1], lambda x: x)
 
 
-def lag(number):
-    return compose(rolling(number+1),first)
+def wlag(number):
+    return compose(rolling(number+1),wfirst)
 
-def zscore():
+def wzscore():
     return compose(e(std),e(last),e(mean),cleave(3),sub,swap,div)
 
 # Combinators
@@ -273,7 +296,7 @@ def every(step,copy=False):
         quote = stack.pop()
         copied_stack = stack[:]
         if len(copied_stack) % step != 0:
-            raise Exception('Stack not evenly divisible by step')
+            raise ValueError('Stack not evenly divisible by step')
         if not copy:
             del(stack[:])
         for t in zip(*[iter(copied_stack)]*step):
@@ -306,7 +329,7 @@ def each(start=0, end=None, step=1, copy=False):
         start = len(stack) if start == 0 else -start
         selected = stack[end:start]
         if len(selected) % step != 0:
-            raise Exception('Stack not evenly divisible by step')
+            raise ValueError('Stack not evenly divisible by step')
         if not copy:
             del(stack[end:start])
         for t in zip(*[iter(selected)]*step):
@@ -362,21 +385,15 @@ def join(date):
         col2 = stack.pop()
         col1 = stack.pop()
         def join_col(date_range,date=date):
-            date = pd.to_datetime(date)
-            if date_range[-1] < date:
+            date = get_index(date_range.periodicity, date)
+            if date_range.end < date:
                 return col1.row_function(date_range)
-            if date_range[0] >= date:
+            if date_range.start >= date:
                 return col2.row_function(date_range)
             parts = []
-            parts.append(col1.row_function(pd.date_range(date_range[0],
-                    date -  date_range.freq,freq=date_range.freq)))
-            parts.append(col2.row_function(pd.date_range(date,
-                    date_range[-1],freq=date_range.freq)))
+            parts.append(col1.row_function(get_range(date_range.start, date - 1, date_range.periodicity)))
+            parts.append(col2.row_function(get_range(date, date_range.end, date_range.periodicity)))
             return np.concatenate(parts)
         stack.append(Column('join',f'{col2.trace} {col2.trace} join({date})',join_col))
     return join
-
-# Utils
-
-yest = lambda : pd.date_range(pd.datetime.today().date() - pd.tseries.offsets.BDay(),pd.datetime.today().date() - pd.tseries.offsets.BDay(),freq='B')
 
