@@ -6,11 +6,11 @@ from collections import namedtuple
 from lima.time import get_index, get_date
 
 Column = namedtuple('Column',['header', 'trace', 'row_function'])
-Range = namedtuple('Range',['start', 'end', 'periodicity'])
+_Range = namedtuple('_Range',['start', 'end', 'periodicity'])
 
 
 def get_range(start, end, periodicity):
-    return Range(get_index(periodicity, start),
+    return _Range(get_index(periodicity, start),
                     get_index(periodicity, end), periodicity)
 
 def range_size(r):
@@ -85,8 +85,9 @@ def drop(stack):
 def clear(stack):
     stack.clear()
 
-def interleave(count):
-    def interleave(stack):
+def interleave(count=None, split_into=2):
+    def interleave(stack, count=count, split_into=split_into):
+        count = len(stack) // split_into if count is None else count
         place,last = 0,0
         lists = []
         for i in range(len(stack)+1):
@@ -148,7 +149,10 @@ def _binary_operator(name, operation):
         def binary_operator_col(date_range):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", category=RuntimeWarning)
-                return operation(col1.row_function(date_range),col2.row_function(date_range))
+                values1 = col1.row_function(date_range)
+                values2 = col2.row_function(date_range)
+                return np.where(np.logical_or(np.isnan(values1), np.isnan(values2)),
+                                    np.nan, operation(values1,values2))
         stack.append(Column(col1.header,f'e({col1.trace}),e({col2.trace}),{name}',binary_operator_col))
     return binary_operator
 
@@ -169,7 +173,7 @@ exp = _binary_operator('exp', np.power)
 eq = _binary_operator('eq', lambda x,y: np.where(np.equal(x,y),1,0 ))
 ne = _binary_operator('ne', lambda x,y: np.where(np.not_equal(x,y),1,0))
 ge = _binary_operator('ge', lambda x,y: np.where(np.greater_equal(x,y),1,0))
-gt = _binary_operator('gt', lambda x,y: np.where(np.greater(x,y),1,0))
+gt = _binary_operator('gt', lambda x,y: np.greater(x,y))
 le = _binary_operator('le', lambda x,y: np.where(np.less_equal(x,y),1,0))
 lt = _binary_operator('lt', lambda x,y: np.where(np.less(x,y),1,0))
 
@@ -281,11 +285,14 @@ def call(depth=None,copy=False):
     def call(stack,depth=depth,copy=copy):
         quote = stack.pop()
         depth = len(stack) if depth is None else depth
-        this_stack = stack[-depth:]
-        if not copy:
-            del(stack[-depth:])
+        if depth != 0:
+            this_stack = stack[-depth:]
+            if not copy:
+                del(stack[-depth:])
+        else:
+            this_stack = []
         quote.row_function(quoted_stack=this_stack)
-        stack += this_stack
+        stack.extend(this_stack)
     return call
 
 def keep(depth=None):
