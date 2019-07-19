@@ -61,8 +61,7 @@ def _e():
                 if not isinstance(rows,(np.ndarray, np.generic)):
                   rows = np.full(range_size(date_range),str(type(rows)))
                 cols.append(rows)
-            mat = np.vstack(cols).T
-            return pd.DataFrame(mat, columns=headers, index=to_date_range(date_range))
+            return pd.DataFrame(np.column_stack(cols), columns=headers, index=to_date_range(date_range))
         return exp
     return exp
 
@@ -270,15 +269,15 @@ wpct_change = _window_operator('wpct_change',lambda x, axis: x[:,-1] / x[:,0] - 
                                         lambda x, axis: x / x[0] - 1)
 wlog_change = _window_operator('wlog_change', lambda x, axis: np.log(x[:,-1] / x[:,0]),
                                         lambda x, axis: np.log( x / x[0]))
-first = _window_operator('first',lambda x: x[:,0], lambda x: np.full(a.shape,a[0]))
-last = _window_operator('last',lambda x: x[:,-1], lambda x: x)
+wfirst = _window_operator('first',lambda x, axis: x[:,0], lambda x: np.full(a.shape,a[0]))
+wlast = _window_operator('last',lambda x, axis: x[:,-1], lambda x: x)
 
 
 def wlag(number):
     return compose(rolling(number+1),wfirst)
 
 def wzscore():
-    return compose(e(std),e(last),e(mean),cleave(3),sub,swap,div)
+    return compose(e(wstd),e(wlast),e(wmean),cleave(3),sub,swap,div)
 
 # Combinators
 def call(depth=None,copy=False):
