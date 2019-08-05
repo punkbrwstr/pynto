@@ -3,22 +3,9 @@ import warnings
 import numpy as np
 import pandas as pd
 from collections import namedtuple
-from lima.time import get_index, get_date
+from lima.time import *
 
 Column = namedtuple('Column',['header', 'trace', 'row_function'])
-_Range = namedtuple('_Range',['start', 'end', 'periodicity'])
-
-
-def get_range(start, end, periodicity):
-    return _Range(get_index(periodicity, start),
-                    get_index(periodicity, end), periodicity)
-
-def range_size(r):
-    return r.end - r.start + 1
-
-def to_date_range(r):
-    return pd.date_range(get_date(r.periodicity,r.start),
-                get_date(r.periodicity,r.end), freq=r.periodicity)
 
 def _e():
     funcs = []
@@ -61,7 +48,7 @@ def _e():
                 if not isinstance(rows,(np.ndarray, np.generic)):
                   rows = np.full(range_size(date_range),str(type(rows)))
                 cols.append(rows)
-            return pd.DataFrame(np.column_stack(cols), columns=headers, index=to_date_range(date_range))
+            return pd.DataFrame(np.column_stack(cols), columns=headers, index=to_pandas_range(date_range))
         return exp
     return exp
 

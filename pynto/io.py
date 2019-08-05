@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from pynto.main import Column, to_date_range
+from pynto.main import Column, to_pandas_range
 from lima import read_series, read_frame_headers
 
 
