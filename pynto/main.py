@@ -168,6 +168,33 @@ absv = _unary_operator('absv', np.abs)
 sqrt = _unary_operator('sqrt', np.sqrt)
 zeroToNa = _unary_operator('zeroToNa', lambda x: np.where(np.equal(x,0),np.nan,x))
 
+def ewma(window):
+    def ewma(stack):
+        col = stack.pop()
+        def ewma_col(date_range, window=window):
+            alpha = 2 /(window + 1.0)
+            alpha_rev = 1-alpha
+
+            data = col.row_function(date_range)
+            idx = np.cumsum(np.where(~np.isnan(data),1,0)) - 1
+            starting_nans = np.where(idx == -1,np.nan,1)
+            data = data[~np.isnan(data)]
+            n = data.shape[0]
+    
+            pows = alpha_rev**(np.arange(n+1))
+    
+            scale_arr = 1/pows[:-1]
+            offset = data[0]*pows[1:]
+            pw0 = alpha*alpha_rev**(n-1)
+    
+            mult = data*pw0*scale_arr
+            cumsums = mult.cumsum()
+            out = offset + cumsums*scale_arr[::-1]
+            return out[idx] * starting_nans
+        stack.append(Column(col.header,f'{col.trace},ewma,',ewma_col))
+    return ewma
+
+
 # Windows
 def rolling(window=2, exclude_nans=True, lookback_multiplier=2):
     def rolling(stack):
@@ -359,7 +386,7 @@ def fill(value):
         col = stack.pop()
         def fill(date_range):
             x = col.row_function(date_range)
-            x[np.isnan(x)] = 0.0
+            x[np.isnan(x)] = value
             return x
         stack.append(Column(col.header,f'{col.trace},fill',fill))
     return fill
