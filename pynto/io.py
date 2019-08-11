@@ -23,7 +23,7 @@ def pandas_frame(data_frame, header=0):
     def read_frame(stack):
         for header, col in data_frame.iteritems():
             def frame_col(date_range,col=col):
-                return col.reindex(to_date_range(date_range), method='ffill').values
+                return col.reindex(to_pandas_range(date_range), method='ffill').values
             stack.append(Column(header,f'read_frame {header}',frame_col))
     return read_frame
 

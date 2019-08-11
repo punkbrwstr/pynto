@@ -179,6 +179,8 @@ def ewma(window):
             idx = np.cumsum(np.where(~np.isnan(data),1,0)) - 1
             starting_nans = np.where(idx == -1,np.nan,1)
             data = data[~np.isnan(data)]
+            if len(data) == 0:
+                return np.full(idx.shape[0],np.nan)
             n = data.shape[0]
     
             pows = alpha_rev**(np.arange(n+1))
