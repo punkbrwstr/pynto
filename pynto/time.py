@@ -4,34 +4,11 @@ from collections import namedtuple
 from dateutil.relativedelta import relativedelta
 import pandas as pd
 
-
-def as_of_dt():
+def now():
     d = datetime.date.today()
     if datetime.datetime.now().hour < 17:
         d = offset('B',d,-1)
     return d
-
-class Range(object):
-    __slots__ = ['start', 'end', 'periodicity']
-
-    def __init__(self, start, end=None, periodicity='B'):
-        self.periodicity = periodicity
-        self.start = get_index(self.periodicity, start)
-        self.end = get_index(self.periodicity, as_of_dt() if end is None else end)
-
-    def __len__(self):
-        return self.end - self.start + 1
-
-    def __getitem__(self, key):
-        length = len(self)
-        if key < 0:
-            key += length
-        assert key >= 0 and key < length 
-        return get_date(self.periodicity, self.start + key)
-
-    def to_pandas(self):
-        return pd.date_range(get_date(self.periodicity,self.start),
-                get_date(self.periodicity,self.end), freq=self.periodicity)
 
 def parse_date(date):
     if isinstance(date, datetime.datetime):

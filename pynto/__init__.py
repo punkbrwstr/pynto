@@ -1,4 +1,4 @@
 from pynto.main import *
-from pynto.io import *
+from pynto.time import *
 
 name = 'pynto'
