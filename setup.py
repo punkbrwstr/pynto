@@ -8,7 +8,7 @@ setuptools.setup(
     version="0.0.1",
     author="Peter Graf",
     author_email="magnumpi@gmail.com",
-    description="Time series analysis using a concatenative paradigm",
+    description="Data analysis using a concatenative paradigm",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/punkbrwstr/pynto",

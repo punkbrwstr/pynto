@@ -57,6 +57,9 @@ class Range(object):
         else:
             return pd.date_range(time.get_date(self.step,self.start),
                 time.get_date(self.step,self.stop), freq=self.step)[:-1]
+                
+    def __repr__(self):
+        return '[' + str(self.start) + ':' + str(self.stop) + ':' + str(self.step) + ']'
 
 
 class _Word(object):
@@ -80,7 +83,6 @@ class _Word(object):
         assert not hasattr(self, 'quoted'), 'Cannot evaluate quotation.'
         current = self._head()[0]
         while True:
-            print(current)
             if hasattr(current, 'quoted'):
                 stack.append(Column('quotation','quotation', current.quoted))
             else:
@@ -192,19 +194,14 @@ c_range = _c_range()
 def _frame_to_columns(stack, frame):
     if isinstance(frame.index, pd.core.indexes.datetimes.DatetimeIndex):
         index_type = 'datetime'
-        frame.index.freq = pd.infer_freq(frame.index)
+        if frame.index.freq is None:
+            frame.index.freq = pd.infer_freq(frame.index)
     else:
         index_type = 'int'
     for header, col in frame.iteritems():
         def frame_col(row_range, col=col, index_type=index_type):
             assert not (index_type == 'int' and row_range.type == 'datetime'), 'Cannot evaluate int-indexed frame over datetime range'
             if row_range.type == 'int':
-                if not row_range.start:
-                    row_range.start = col.index[0]
-                if not row_range.stop:
-                    row_range.stop = len(col.index)
-                if not row_range.step:
-                    row_range.step = 1
                 if row_range.start < 0:
                     row_range.start += len(col.index)
                 if row_range.stop < 0:
@@ -219,7 +216,9 @@ def _frame_to_columns(stack, frame):
                     row_range.step = col.index.freq.name
                 if col.index.freq.name == row_range.step:
                     start = time.get_index(row_range.step, col.index[0])
-                    values =  col.values[row_range.start - start:row_range.stop - start]
+                    values =  col.values[max(row_range.start - start,0):row_range.stop - start]
+                    if row_range.start - start < 0:
+                        values = np.concatenate([np.full(start - row_range.start, np.nan), values])
                 else:
                     values =  col.reindex(row_range.to_index(), method='ffill').values
             if len(values) < len(row_range):
@@ -259,7 +258,7 @@ class _csv(_Word):
 csv = _csv()
 
 def _get_binary_operator(name, op):
-    def _operation(stack):
+    def stack_function(stack):
         col2 = stack.pop()
         col1 = stack.pop()
         def binary_operator_col(row_range):
@@ -268,17 +267,17 @@ def _get_binary_operator(name, op):
                 values1 = col1.rows(row_range)
                 values2 = col2.rows(row_range)
                 return np.where(np.logical_or(np.isnan(values1), np.isnan(values2)),
-                                    np.nan, self.op(values1,values2))
-        stack.append(Column(col1.header,f'{col1.trace}) + {col2.trace} + {self.name}',binary_operator_col))
-    return _NoArgWord(name, _operation)
+                                    np.nan, op(values1,values2))
+        stack.append(Column(col1.header,f'{col1.trace}) + {col2.trace} + {name}',binary_operator_col))
+    return _NoArgWord(name, stack_function)
 
 def _get_unary_operator(name, op):
-    def _operation(stack):
+    def stack_function(stack):
         col = stack.pop()
         def unary_operator_col(row_range):
-            return self.operation(col.rows(row_range))
-        stack.append(Column(col.header,f'{col.trace},{self.name},',unary_operator_col))
-    return _NoArgWord(name, _operation)
+            return op(col.rows(row_range))
+        stack.append(Column(col.header,f'{col.trace},{name},',unary_operator_col))
+    return _NoArgWord(name, stack_function)
 
 add = _get_binary_operator('add', np.add)
 sub = _get_binary_operator('sub', np.subtract)
@@ -292,6 +291,7 @@ ge = _get_binary_operator('ge', np.greater_equal)
 gt = _get_binary_operator('gt', np.greater)
 le = _get_binary_operator('le', np.less_equal)
 lt = _get_binary_operator('lt', np.less)
+neg = _get_unary_operator('neg', np.negative)
 absv = _get_unary_operator('absv', np.abs)
 sqrt = _get_unary_operator('sqrt', np.sqrt)
 zeroToNa = _get_unary_operator('zeroToNa', lambda x: np.where(np.equal(x,0),np.nan,x))
@@ -309,7 +309,7 @@ class _interleave(_Word):
     def __call__(self, count=None, split_into=2): return super().__call__(locals())
 
     def _operation(self, stack, args):
-        count = args['count'] if 'count' in args else len(stack) // split_into
+        count = args['count'] if args['count'] else len(stack) // args['split_into']
         place,last = 0,0
         lists = []
         for i in range(len(stack)+1):
@@ -341,14 +341,11 @@ class _hpull(_Word):
     def __call__(self, *headers, clear=False):
         return super().__call__(locals())
     def _operation(self, stack, args):
-        print(args)
         filtered_stack = []
         for header in args['headers']:
             to_del = []
             for i,col in enumerate(stack):
-                print(f'checking {col.header} against {header}')
                 if not re.match(header,col.header) is None:
-                    print(f'matched {col.header}')
                     filtered_stack.append(stack[i])
                     to_del.append(i)
             to_del.sort(reverse=True)
@@ -379,84 +376,6 @@ class _ewma(_Word):
         stack.append(Column(col.header,f'{col.trace},ewma,',ewma_col))
 ewma = _ewma()
 
-# Windows
-class _rolling(_Word):
-    def __init__(self): super().__init__('rolling')
-    def __call__(self, window=2, exclude_nans=True, lookback_multiplier=2).__call__(locals())
-    def _operation(self, stack, args):
-        col = stack.pop()
-        def rolling_col(row_range,window=args['window'], exclude_nans=args['exclude_nans'],
-                            lookback_multiplier=args['lookback_multiplier']):
-            if not exclude_nans:
-                lookback_multiplier = 1
-            lookback = (window - 1) * lookback_multiplier
-            expanded_range = copy.copy(row_range)
-            if row_range.start >= lookback or row_range.type == 'datetime':
-                expanded_range = row_range.start - lookback
-                expanded = col.rows(expanded_range)
-            else:
-                expanded_range = 0
-                fill = np.full(lookback - row_range.start, np.nan)
-                expanded = np.concatenate([fill,col.rows(expanded_range)])
-            mask = ~np.isnan(expanded) if exclude_nans else np.full(expanded.shape,True)
-            no_nans = expanded[mask]
-            # Indexes of no_nan values in expanded
-            indexes = np.add.accumulate(np.where(mask))[0]
-            if no_nans.shape[-1] - window < 0:
-                #warnings.warn('Insufficient non-nan values in lookback.')
-                no_nans = np.hstack([np.full(window - len(no_nans),np.nan),no_nans])
-            shape = no_nans.shape[:-1] + (no_nans.shape[-1] - window + 1, window)
-            strides = no_nans.strides + (no_nans.strides[-1],)
-            windows = np.lib.stride_tricks.as_strided(no_nans, shape=shape, strides=strides)
-            td = np.full((expanded.shape[0],window), np.nan)
-            td[indexes[-windows.shape[0]:],:] = windows
-            return td[lookback:]
-        stack.append(Column(col.header,f'{col.trace},rolling({window})',rolling_col))
-rolling = _rolling()
-
-def _crossing_op(stack):
-    cols = stack[:]
-    stack.clear()
-    headers = ','.join([col.header for col in cols])
-    def crossing_col(row_range):
-        return np.column_stack([col.rows(row_range) for col in cols])
-    stack.append(Column('cross', f'{headers},crossing',crossing_col))
-
-crossing = _NoArgWord('crossing', _crossing_op)
-
-def _get_window_operator(name,  twod_operation, oned_operation):
-    def _operation(self, stack, args):
-            col = stack.pop()
-            def window_operator_col(row_range):
-                values = col.rows(row_range)
-                if len(values.shape) == 2:
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore", category=RuntimeWarning)
-                        return np.where(np.all(np.isnan(values),axis=1), np.nan,
-                                    twod_operation(values, axis=1))
-                else:
-                    return oned_operation(values)
-            stack.append(Column(col.header, f'{col.trace},{name}', window_operator_col))
-    return _NoArgWord(name, _operation)
-
-
-wsum = _get_window_operator('wsum',np.nansum, make_expanding(np.add))
-wmean = _get_window_operator('wmean',np.nanmean, expanding_mean)
-wprod = _get_window_operator('wprod',np.nanprod, make_expanding(np.multiply))
-wvar = _get_window_operator('wvar', np.nanvar, expanding_var)
-wstd = _get_window_operator('wstd', np.nanstd, expanding_var)
-wchange = _get_window_operator('wchange',lambda x, axis: x[:,-1] - x[:,0], lambda x, axis: x - x[0])
-wpct_change = _get_window_operator('wpct_change',lambda x, axis: x[:,-1] / x[:,0] - 1, lambda x, axis: x / x[0] - 1)
-wlog_change = _get_window_operator('wlog_change', lambda x, axis: np.log(x[:,-1] / x[:,0]), lambda x, axis: np.log( x / x[0]))
-wfirst = _get_window_operator('first',lambda x, axis: x[:,0], lambda x: np.full(a.shape,a[0]))
-wlast = _get_window_operator('last',lambda x, axis: x[:,-1], lambda x: x)
-
-
-def wlag(number):
-    return rolling(number+1) + wfirst()
-
-wzscore = quote(wstd) + [wlast] + [wmean] + cleave(3, depth=1) + sub + swap + div
-
 # Combinators
 class _call(_Word):
     def __init__(self): super().__init__('call')
@@ -485,12 +404,12 @@ class _each(_Word):
         end = 0 if args['end'] is None else -args['end']
         start = len(stack) if args['start'] == 0 else -args['start']
         selected = stack[end:start]
-        assert len(selected) % args['every'] != 0, 'Stack not evenly divisible by every'
+        assert len(selected) % args['every'] == 0, 'Stack not evenly divisible by every'
         if not args['copy']:
             del(stack[end:start])
         for t in zip(*[iter(selected)]*args['every']):
             this_stack = list(t)
-            quote.evaluate(this_stack)
+            quote._evaluate(this_stack)
             stack += this_stack
 each = _each()
 
@@ -506,7 +425,7 @@ class _cleave(_Word):
             del(stack[-depth:])
         for quote in quotes:
             this_stack = copied_stack[:]
-            quote.evaluate(this_stack)
+            quote._evaluate(this_stack)
             stack += this_stack
 cleave = _cleave()
 
@@ -537,6 +456,86 @@ class _happly(_Word):
         col = stack.pop()
         stack.append(Column(args['header_function'](col.header), col.trace, col.rows))
 happly = _happly()
+
+# Windows
+class _rolling(_Word):
+    def __init__(self): super().__init__('rolling')
+    def __call__(self, window=2, exclude_nans=True, lookback_multiplier=2): return super().__call__(locals())
+    def _operation(self, stack, args):
+        col = stack.pop()
+        def rolling_col(row_range,window=args['window'], exclude_nans=args['exclude_nans'],
+                            lookback_multiplier=args['lookback_multiplier']):
+            if not exclude_nans:
+                lookback_multiplier = 1
+            lookback = (window - 1) * lookback_multiplier
+            expanded_range = copy.copy(row_range)
+            if row_range.start >= lookback or row_range.type == 'datetime':
+                expanded_range.start = row_range.start - lookback
+            else:
+                expanded_range.start = 0
+            expanded = col.rows(expanded_range)
+            if expanded.shape[0] < len(row_range) + lookback:
+                fill = np.full(len(row_range) + lookback - expanded.shape[0], np.nan)
+                expanded = np.concatenate([fill,col.rows(expanded_range)])
+            mask = ~np.isnan(expanded) if exclude_nans else np.full(expanded.shape,True)
+            no_nans = expanded[mask]
+            # Indexes of no_nan values in expanded
+            indexes = np.add.accumulate(np.where(mask))[0]
+            if no_nans.shape[-1] - window < 0:
+                #warnings.warn('Insufficient non-nan values in lookback.')
+                no_nans = np.hstack([np.full(window - len(no_nans),np.nan),no_nans])
+            shape = no_nans.shape[:-1] + (no_nans.shape[-1] - window + 1, window)
+            strides = no_nans.strides + (no_nans.strides[-1],)
+            windows = np.lib.stride_tricks.as_strided(no_nans, shape=shape, strides=strides)
+            td = np.full((expanded.shape[0],window), np.nan)
+            td[indexes[-windows.shape[0]:],:] = windows
+            return td[lookback:]
+        stack.append(Column(col.header,f'{col.trace},rolling({args["window"]})',rolling_col))
+rolling = _rolling()
+
+def _crossing_op(stack):
+    cols = stack[:]
+    stack.clear()
+    headers = ','.join([col.header for col in cols])
+    def crossing_col(row_range):
+        return np.column_stack([col.rows(row_range) for col in cols])
+    stack.append(Column('cross', f'{headers},crossing',crossing_col))
+
+crossing = _NoArgWord('crossing', _crossing_op)
+
+def _get_window_operator(name,  twod_operation, oned_operation):
+    def _operation(stack):
+            col = stack.pop()
+            def window_operator_col(row_range):
+                values = col.rows(row_range)
+                if len(values.shape) == 2:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore", category=RuntimeWarning)
+                        return np.where(np.all(np.isnan(values),axis=1), np.nan,
+                                    twod_operation(values, axis=1))
+                else:
+                    return oned_operation(values)
+            stack.append(Column(col.header, f'{col.trace},{name}', window_operator_col))
+    return _NoArgWord(name, _operation)
+
+
+wsum = _get_window_operator('wsum',np.nansum, make_expanding(np.add))
+wmean = _get_window_operator('wmean',np.nanmean, expanding_mean)
+wprod = _get_window_operator('wprod',np.nanprod, make_expanding(np.multiply))
+wvar = _get_window_operator('wvar', np.nanvar, expanding_var)
+wstd = _get_window_operator('wstd', np.nanstd, expanding_var)
+wchange = _get_window_operator('wchange',lambda x, axis: x[:,-1] - x[:,0], lambda x, axis: x - x[0])
+wpct_change = _get_window_operator('wpct_change',lambda x, axis: x[:,-1] / x[:,0] - 1, lambda x, axis: x / x[0] - 1)
+wlog_change = _get_window_operator('wlog_change', lambda x, axis: np.log(x[:,-1] / x[:,0]), lambda x, axis: np.log( x / x[0]))
+wfirst = _get_window_operator('first',lambda x, axis: x[:,0], lambda x: np.full(a.shape,a[0]))
+wlast = _get_window_operator('last',lambda x, axis: x[:,-1], lambda x: x)
+
+
+def wlag(number):
+    return rolling(number+1) + wfirst()
+
+wzscore = wstd + ~wlast + ~wmean + cleave(3, depth=1) + sub + swap + div
+
 
 # Data cleaning
 class _fill(_Word):
@@ -569,18 +568,15 @@ class _join(_Word):
         col1 = stack.pop()
         def join_col(row_range,date=args['date']):
             if row_range.type == 'datetime':
-                date = get_index(row_range.step, date)
+                date = time.get_index(row_range.step, date)
             if row_range.stop < date:
                 return col1.rows(row_range)
             if row_range.start >= date:
                 return col2.rows(row_range)
-            parts = []
-            r = copy.copy(row_range)
-            r.stop = date - 1
-            parts.append(col1.rows(r))
-            r = copy.copy(row_range)
-            r.start = date
-            parts.append(col2.rows(r))
-            return np.concatenate(parts)
-        stack.append(Column('join',f'{col2.trace} {col2.trace} join({date})',join_col))
+            r_first = copy.copy(row_range)
+            r_first.stop = date
+            r_second = copy.copy(row_range)
+            r_second.start = date
+            return np.concatenate([col1.rows(r_first), col2.rows(r_second)])
+        stack.append(Column('join',f'{col2.trace} {col2.trace} join({args["date"]})',join_col))
 join = _join()
