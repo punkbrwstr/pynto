@@ -371,21 +371,7 @@ class _ewma(_Word):
             data = data[~np.isnan(data)]
             if len(data) == 0:
                 return np.full(idx.shape[0],np.nan)
-<<<<<<< HEAD
             out = ewma_vectorized_safe(data,alpha)
-=======
-            n = data.shape[0]
-    
-            pows = alpha_rev**(np.arange(n+1))
-    
-            scale_arr = 1/pows[:-1]
-            offset = data[0]*pows[1:]
-            pw0 = alpha*alpha_rev**(n-1)
-    
-            mult = data*pw0*scale_arr
-            cumsums = mult.cumsum()
-            out = offset + cumsums*scale_arr[::-1]
->>>>>>> e7dfd201546c805d1977f0abf392e5acb5ab16a6
             return out[idx] * starting_nans
         stack.append(Column(col.header,f'{col.trace},ewma,',ewma_col))
 ewma = _ewma()
