@@ -1,4 +1,4 @@
-## pynto: Data analysis in Python using a concatenative paradigm
+## pynto: Data analysis in Python using the concatenative paradigm
 
 ## Introduction
 
