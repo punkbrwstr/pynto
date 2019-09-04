@@ -1,9 +1,8 @@
-# pynto
-Data analysis in Python using a concatenative paradigm.
+## pynto: Data analysis in Python using a concatenative paradigm
 
 ## Introduction
 
-Pynto lets you to perform the same types of analysis as Pandas, but with the expressiveness and code reusability of concatenative programming.  In pynto, you define manipulatations of tabular data as combinations of functions.  In the lingo of concatenative programming these functions are called "words" and the combination of words are called "expressions".
+pynto lets you use Python to analyze tabular data with the expressiveness and code reusability of concatenative programming.  In pynto, you work with data by stringing together functions called "words" into combinations called "expressions".  The words in an expression form a pipeline: the table outputted from one word becomes the input for the following word.  Words treat the table of data like a stack of independent columns.  The rightmost column is at the top of the stack.  pynto expressions define operations on the columns of a table and are row-agnostic--they can be evaluated over any range of rows.  
 
 
 
@@ -11,7 +10,7 @@ Pynto lets you to perform the same types of analysis as Pandas, but with the exp
 
 
 
-## Pynto words 
+## Pynto vocabulary 
 
 ### Data acquisition words
 Name | Parameters |Stack effect|Description
@@ -19,7 +18,7 @@ Name | Parameters |Stack effect|Description
 c|value| -- c|Constant
 
 
-### Window functions
+### Window words
 Name | Parameters |Stack effect|Description
 :---:|:---|:---|:---
 rolling| | | 
