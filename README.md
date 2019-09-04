@@ -11,6 +11,13 @@ pynto lets you use Python to analyze tabular data with the expressiveness and co
 
 ### A simple example
 
+```
+ma_diff = dup + rolling(20) + wmean + sub
+stocks_ma = csv('stocks.csv') + ~ma_diff + each
+stocks_ma['2019-01-01':]
+
+```
+
 ## pynto reference
 
 ### Word parameters
