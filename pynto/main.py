@@ -11,55 +11,69 @@ Column = namedtuple('Column',['header', 'trace', 'rows'])
 
 class Range(object):
 
-    def __init__(self, indexer):
-        self.type = 'int'
+    @classmethod
+    def from_indexer(cls, indexer):
         if isinstance(indexer, slice):
-            self.start = indexer.start
-            self.stop = indexer.stop
-            self.step = indexer.step
-            if self.start is None and self.stop is None:
-                self.type = 'all'
-            elif (self.start and isinstance(self.start, int)) or (self.stop and isinstance(self.stop, int)):
-                if self.start is None:
-                    self.start = 0
-                if self.step is None:
-                    self.step = 1
+            if (indexer.start and isinstance(indexer.start, int)) or (indexer.stop and isinstance(indexer.stop, int)):
+                return cls(indexer.start, indexer.stop, indexer.step, 'int')
             else:
-                self.type = 'datetime'
-                if not self.step:
-                    self.step = 'B'
-                if self.start:
-                    self.start = time.get_index(self.step, self.start)
-                if self.stop:
-                    self.stop = time.get_index(self.step, self.stop)
-                else:
-                    self.stop = time.get_index(self.step, time.now()) + 1
+                return cls.from_dates(indexer.start, indexer.stop, indexer.step)
         else:
-            self.start = indexer
-            self.step = 1
-            if not isinstance(self.start, int):
-                self.type = 'datetime'
-                self.start = time.get_index('B', self.start)
-                self.step = 'B'
-            self.stop = self.start + 1
+            if isinstance(indexer, int):
+                return cls(indexer, indexer + 1, 1, 'int')
+            else:
+                start = time.get_index('B', indexer)
+                return cls(start, start + 1, 'B', 'datetime')
 
-    def _check(self):
-        assert not (self.stop is None or self.start is None)
+    @classmethod
+    def from_dates(cls, start, stop, step):
+        if not step:
+            step = 'B'
+        if start:
+            start = time.get_index(step, start)
+        if stop:
+            stop = time.get_index(step, stop)
+        return cls(start, stop, step, 'datetime')
+
+    def __init__(self, start, stop, step, range_type):
+        self.start = start
+        self.stop = stop
+        self.step = step
+        self.type = range_type
 
     def __len__(self):
-        self._check()
+        self.fill_blanks()
         return self.stop - self.start
 
+                
+    def __repr__(self):
+        if self.type == 'int':
+            return '[' + str(self.start) + ':' + str(self.stop) + ':' + str(self.step) + ']'
+        else:
+            return "['" + time.get_date(self.step,
+            self.start).strftime('%Y-%m-%d') + "':'" + time.get_date(self.step,
+            self.stop).strftime('%Y-%m-%d') + "':'" + str(self.step) + "']"
+
+    def fill_blanks(self):
+        if self.type == 'int':
+            assert not self.stop is None, 'Range is missing stop'
+            if not self.start:
+                self.start = 0
+            if not self.step:
+                self.step = 1
+        else:
+            assert not self.start is None, 'Range is missing start'
+            if not self.stop:
+                self.stop = time.get_index(self.step, time.now()) + 1
+            
+
     def to_index(self):
-        self._check()
-        if isinstance(self.step,int):
+        self.fill_blanks()
+        if self.type == 'int':
             return range(self.start, self.stop, self.step)
         else:
             return pd.date_range(time.get_date(self.step,self.start),
                 time.get_date(self.step,self.stop), freq=self.step)[:-1]
-                
-    def __repr__(self):
-        return '[' + str(self.start) + ':' + str(self.stop) + ':' + str(self.step) + ']'
 
 
 class _Word(object):
@@ -76,7 +90,7 @@ class _Word(object):
         return other
 
     def __getitem__(self, key):
-        row_range = key if isinstance(key, Range) else Range(key)
+        row_range = key if isinstance(key, Range) else Range.from_indexer(key)
         return self._evaluate([], row_range)
 
     def _evaluate(self, stack, row_range=None):
@@ -153,7 +167,6 @@ class _NoArgWord(_Word):
 class _quote(_Word):
 
     def __init__(self, quoted):
-        self.quote = True
         self.quoted = quoted
         super().__init__('quote')
 
@@ -571,7 +584,7 @@ class _join(_Word):
                 date = time.get_index(row_range.step, date)
             if row_range.stop < date:
                 return col1.rows(row_range)
-            if row_range.start >= date:
+            if row_range.start and row_range.start >= date:
                 return col2.rows(row_range)
             r_first = copy.copy(row_range)
             r_first.stop = date

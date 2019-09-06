@@ -112,7 +112,7 @@ def get_date(periodicity, index):
 def offset(periodicity, date, offset):
     return get_date(periodicity, get_index(periodicity, date) + offset)
 
-def get_date_range(periodicity, start, end):
+def get_datetimeindex(periodicity, start, end):
     return pd.date_range(get_date(periodicity,start),
                                 get_date(periodicity,end),
-                                freq=periodicity)
+                                freq=periodicity)[:-1]
