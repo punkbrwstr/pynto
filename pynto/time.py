@@ -6,8 +6,8 @@ import pandas as pd
 
 def now():
     d = datetime.date.today()
-    if datetime.datetime.now().hour < 17:
-        d = offset('B',d,-1)
+    if datetime.datetime.now().hour >= 17:
+        d = offset('B', d, 1)
     return d
 
 def parse_date(date):

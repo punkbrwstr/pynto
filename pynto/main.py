@@ -87,15 +87,15 @@ class _Word(object):
         other = other._head()[0]
         this.next = other
         other.prev = this
-        return other
+        return other._tail()
 
     def __getitem__(self, key):
         row_range = key if isinstance(key, Range) else Range.from_indexer(key)
         return self._evaluate([], row_range)
 
     def _evaluate(self, stack, row_range=None):
-        assert not hasattr(self, 'quoted'), 'Cannot evaluate quotation.'
         current = self._head()[0]
+        #assert not hasattr(current, 'quoted'), 'Cannot evaluate quotation.'
         while True:
             if hasattr(current, 'quoted'):
                 stack.append(Column('quotation','quotation', current.quoted))
@@ -145,6 +145,12 @@ class _Word(object):
             count += 1
             current = current.prev
         return (current, count)
+
+    def _tail(self):
+        current = self
+        while hasattr(current, 'next'):
+            current = current.next
+        return current
 
     def __call__(self, args):
         this = copy.deepcopy(self)
@@ -407,7 +413,6 @@ class _call(_Word):
         stack.extend(this_stack)
 call = _call()
 
-
 class _each(_Word):
     def __init__(self): super().__init__('each')
     def __call__(self, start=0, end=None, every=1, copy=False): return super().__call__(locals())
@@ -547,7 +552,7 @@ wlast = _get_window_operator('last',lambda x, axis: x[:,-1], lambda x: x)
 def wlag(number):
     return rolling(number+1) + wfirst()
 
-wzscore = wstd + ~wlast + ~wmean + cleave(3, depth=1) + sub + swap + div
+wzscore = ~wstd + ~wlast + ~wmean + cleave(3, depth=1) + sub + swap + div
 
 
 # Data cleaning
