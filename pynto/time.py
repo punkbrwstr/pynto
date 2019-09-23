@@ -73,29 +73,33 @@ def count_b(d1, d2):
     return days - daysSinceMonday1 + daysSinceMonday2
     
 
-Periodicity = namedtuple('Periodicity',['epoque','round_function','count_function','offset_function'])
+Periodicity = namedtuple('Periodicity',['epoque','round_function','count_function','offset_function', 'id'])
 
 PERIODICITIES = {
     'B' : Periodicity(
             datetime.date(1970,1,1),
             round_b,
             count_b,
-            add_b),
+            add_b,
+            0),
     'W-FRI' : Periodicity(
             datetime.date(1970,1,2),
             round_w_fri,
             lambda d1, d2: (d2 - d1).days // 7,
-            lambda d, i: d + datetime.timedelta(days=i * 7)),
+            lambda d, i: d + datetime.timedelta(days=i * 7), 
+            1),
     'BM' : Periodicity(
             datetime.date(1970,1,30),
             round_bm,
             lambda d2, d1: (d1.year - d2.year) * 12 + d1.month - d2.month,
-            lambda d, i: add_bm(d,i)),
+            lambda d, i: add_bm(d,i), 
+            2),
     'BQ-DEC' : Periodicity(
             datetime.date(1970,3,31),
             round_bq_dec,
             lambda d2, d1: ((d1.year - d2.year) * 12 + d1.month - d2.month) // 3,
-            lambda d, i: add_bm(d, i * 3))
+            lambda d, i: add_bm(d, i * 3), 
+            3)
 }
 
 
@@ -116,3 +120,5 @@ def get_datetimeindex(periodicity, start, end):
     return pd.date_range(get_date(periodicity,start),
                                 get_date(periodicity,end),
                                 freq=periodicity)[:-1]
+def get_id(periodicity):
+    return PERIODICITIES[periodicity].id
