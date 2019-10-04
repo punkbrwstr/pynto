@@ -415,17 +415,21 @@ class _rolling(_Word):
     def __call__(self, window=2, exclude_nans=True, lookback_multiplier=2): return super().__call__(locals())
     def _operation(self, stack, args):
         col = stack.pop()
-        def rolling_col(row_range,window=args['window'], exclude_nans=args['exclude_nans'],
-                            lookback_multiplier=args['lookback_multiplier']):
+        def rolling_col(row_range,window=args['window'],
+                exclude_nans=args['exclude_nans'],
+                lookback_multiplier=args['lookback_multiplier']):
             if not exclude_nans:
                 lookback_multiplier = 1
             lookback = (window - 1) * lookback_multiplier
             expanded_range = copy.copy(row_range)
-            if row_range.start >= lookback or row_range.type == 'datetime':
+            if ((not row_range.start is None and row_range.start >= lookback)
+                    or row_range.type == 'datetime'):
                 expanded_range.start = row_range.start - lookback
             else:
                 expanded_range.start = 0
             expanded = col.rows(expanded_range)
+            if row_range.stop is None:
+                row_range.stop = expanded_range.stop
             if expanded.shape[0] < len(row_range) + lookback:
                 fill = np.full(len(row_range) + lookback - expanded.shape[0], np.nan)
                 expanded = np.concatenate([fill,col.rows(expanded_range)])

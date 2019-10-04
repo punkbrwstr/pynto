@@ -9,7 +9,9 @@ class Range(object):
     @classmethod
     def from_indexer(cls, indexer):
         if isinstance(indexer, slice):
-            if (indexer.start and isinstance(indexer.start, int)) or (indexer.stop and isinstance(indexer.stop, int)):
+            if ((indexer.start and isinstance(indexer.start, int)) or
+            (indexer.stop and isinstance(indexer.stop, int)) or (indexer.start
+            is None and indexer.stop is None and indexer.step is None)):
                 return cls(indexer.start, indexer.stop, indexer.step, 'int')
             else:
                 return cls.from_dates(indexer.start, indexer.stop, indexer.step)
@@ -21,14 +23,22 @@ class Range(object):
                 return cls(start, start + 1, 'B', 'datetime')
 
     @classmethod
-    def from_dates(cls, start, stop, step):
-        if not step:
-            step = 'B'
+    def all(cls):
+        return cls(None, None, 1, 'int')
+
+    @classmethod
+    def from_dates(cls, start=None, stop=None, periodicity='B'):
+        if not periodicity:
+            periodicity = 'B'
         if start:
-            start = get_index(step, start)
+            start = get_index(periodicity, start)
         if stop:
-            stop = get_index(step, stop)
-        return cls(start, stop, step, 'datetime')
+            stop = get_index(periodicity, stop)
+        return cls(start, stop, periodicity, 'datetime')
+
+    @classmethod
+    def from_indicies(cls, start=0, stop=None, step=1):
+        return cls(start, stop, step, 'int')
 
     def __init__(self, start, stop, step, range_type):
         self.start = start
@@ -37,33 +47,30 @@ class Range(object):
         self.type = range_type
 
     def __len__(self):
-        self.fill_blanks()
+        self._fill_blanks()
         return self.stop - self.start
 
                 
     def __repr__(self):
-        if self.type == 'int':
-            return '[' + str(self.start) + ':' + str(self.stop) + ':' + str(self.step) + ']'
-        else:
+        if self.type == 'datetime':
+            return f'[{str(self.start)}:{str(self.stop)}:{str(self.step)}] {self.type}'
             return "['" + get_date(self.step,
             self.start).strftime('%Y-%m-%d') + "':'" + get_date(self.step,
             self.stop).strftime('%Y-%m-%d') + "':'" + str(self.step) + "']"
+        else:
+            return f'[{str(self.start)}:{str(self.stop)}:{str(self.step)}]'
 
-    def fill_blanks(self):
+    def _fill_blanks(self):
         if self.type == 'int':
             assert not self.stop is None, 'Range is missing stop'
             if not self.start:
                 self.start = 0
             if not self.step:
                 self.step = 1
-        else:
-            assert not self.start is None, 'Range is missing start'
-            if not self.stop:
-                self.stop = get_index(self.step, now()) + 1
             
 
     def to_index(self):
-        self.fill_blanks()
+        self._fill_blanks()
         if self.type == 'int':
             return range(self.start, self.stop, self.step)
         else:
