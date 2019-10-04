@@ -4,17 +4,18 @@ pynto lets you use Python to analyze tabular data with the expressiveness and co
 
 ## Why pynto?
 
- - Expressive: Simple syntax, combinators to tame the stack, parameters modify word behavior 
- - Batteries included:  Integrated tools for time-series ranges and statistical analysis
+ - Expressive: Simple syntax, parameters to modify word behavior, combinators to tame the stack  
+ - Batteries included:  Time-based row ranges, moving window statistics
  - Performant: Efficient numpy-based internals
  - Interoperable: Integrates seemlessly with pandas 
 
 ### A simple example
 
 ```
-ma_diff = dup + rolling(20) + wmean + sub
-stocks_ma = csv('stocks.csv') + ~ma_diff + each
-stocks_ma['2019-01-01':]
+>>> from pynto import *
+>>> ma_diff = dup + rolling(20) + wmean + sub
+>>> stocks_ma = csv('stocks.csv') + ~ma_diff + each
+>>> stocks_ma['2019-01-01':]
 
 ```
 
