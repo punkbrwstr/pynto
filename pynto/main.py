@@ -3,77 +3,11 @@ import copy
 import warnings
 import numpy as np
 import pandas as pd
-import pynto.time as time
+from pynto.ranges import Range, get_index
 from pynto.tools import *
 from collections import namedtuple
 
 Column = namedtuple('Column',['header', 'trace', 'rows'])
-
-class Range(object):
-
-    @classmethod
-    def from_indexer(cls, indexer):
-        if isinstance(indexer, slice):
-            if (indexer.start and isinstance(indexer.start, int)) or (indexer.stop and isinstance(indexer.stop, int)):
-                return cls(indexer.start, indexer.stop, indexer.step, 'int')
-            else:
-                return cls.from_dates(indexer.start, indexer.stop, indexer.step)
-        else:
-            if isinstance(indexer, int):
-                return cls(indexer, indexer + 1, 1, 'int')
-            else:
-                start = time.get_index('B', indexer)
-                return cls(start, start + 1, 'B', 'datetime')
-
-    @classmethod
-    def from_dates(cls, start, stop, step):
-        if not step:
-            step = 'B'
-        if start:
-            start = time.get_index(step, start)
-        if stop:
-            stop = time.get_index(step, stop)
-        return cls(start, stop, step, 'datetime')
-
-    def __init__(self, start, stop, step, range_type):
-        self.start = start
-        self.stop = stop
-        self.step = step
-        self.type = range_type
-
-    def __len__(self):
-        self.fill_blanks()
-        return self.stop - self.start
-
-                
-    def __repr__(self):
-        if self.type == 'int':
-            return '[' + str(self.start) + ':' + str(self.stop) + ':' + str(self.step) + ']'
-        else:
-            return "['" + time.get_date(self.step,
-            self.start).strftime('%Y-%m-%d') + "':'" + time.get_date(self.step,
-            self.stop).strftime('%Y-%m-%d') + "':'" + str(self.step) + "']"
-
-    def fill_blanks(self):
-        if self.type == 'int':
-            assert not self.stop is None, 'Range is missing stop'
-            if not self.start:
-                self.start = 0
-            if not self.step:
-                self.step = 1
-        else:
-            assert not self.start is None, 'Range is missing start'
-            if not self.stop:
-                self.stop = time.get_index(self.step, time.now()) + 1
-            
-
-    def to_index(self):
-        self.fill_blanks()
-        if self.type == 'int':
-            return range(self.start, self.stop, self.step)
-        else:
-            return pd.date_range(time.get_date(self.step,self.start),
-                time.get_date(self.step,self.stop), freq=self.step)[:-1]
 
 
 class _Word(object):
@@ -228,13 +162,13 @@ def _frame_to_columns(stack, frame):
                 values =  col.values[row_range.start:row_range.stop:row_range.step]
             else:
                 if not row_range.start:
-                    row_range.start = time.get_index(col.index.freq.name, col.index[0])
+                    row_range.start = get_index(col.index.freq.name, col.index[0])
                 if not row_range.stop:
-                    row_range.stop = 1 + time.get_index(col.index.freq.name, col.index[-1])
+                    row_range.stop = 1 + get_index(col.index.freq.name, col.index[-1])
                 if not row_range.step:
                     row_range.step = col.index.freq.name
                 if col.index.freq.name == row_range.step:
-                    start = time.get_index(row_range.step, col.index[0])
+                    start = get_index(row_range.step, col.index[0])
                     values =  col.values[max(row_range.start - start,0):row_range.stop - start]
                     if row_range.start - start < 0:
                         values = np.concatenate([np.full(start - row_range.start, np.nan), values])
@@ -586,7 +520,7 @@ class _join(_Word):
         col1 = stack.pop()
         def join_col(row_range,date=args['date']):
             if row_range.type == 'datetime':
-                date = time.get_index(row_range.step, date)
+                date = get_index(row_range.step, date)
             if row_range.stop < date:
                 return col1.rows(row_range)
             if row_range.start and row_range.start >= date:

@@ -1,4 +1,4 @@
 from pynto.main import *
-from pynto.time import *
+from pynto.ranges import Range
 
 name = 'pynto'
