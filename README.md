@@ -39,7 +39,7 @@ The word `c` that adds a constant-value column to the stack.  Like many pynto wo
 ```
 To evaluate your expression specify the range of rows you want using standard Python `[start:stop:step]` indexing and slicing.  Indices can be ints or datetimes.  For a datetime index the step is the periodicity.  
 ```
->>> expr[:2]                   # evaluate first two rows                                                                                                                                      
+>>> expr[:2]                   # evaluate first two rows                                                     
    constant
 0     100.0
 1     100.0
@@ -54,15 +54,46 @@ _Combinators_ are higher-order functions that allow pynto to do more complicated
 
 ## pynto vocabulary
 
-### Data acquisition words
-Name | Parameters |Stack effect|Description
-:---:|:---|:---|:---
-c|value| -- c|Constant
+### Words for adding columns
+Name | Parameters |Stack effect<br> _before_ -- _after_|Description
+:---|:---|:---|:---
+c|value| -- c|Adds a constant-_value_ column
+csv|csv_file, index_col=0, header='infer'| -- c (c)|Adds columns from _csv_file_
+pandas|frame_or_series| -- c (c)|Adds columns from a pandas data structure
 
-### Arithmetic words
+### Words for arithmetic or logical operators
+Name | Parameters |Stack effect<br> _before_ -- _after_|Description
+:---|:---|:---|:---
+add|| a b -- c| a + b
+sub|| a b -- c| a - b
+mul|| a b -- c| a * b
+div|| a b -- c| a / b
+mod|| a b -- c| a % b
+exp|| a b -- c| a ** b
+eq|| a b -- c| a == b
+ne|| a b -- c| a != b
+ge|| a b -- c| a >= b
+gt|| a b -- c| a > b
+le|| a b -- c| a <= b
+lt|| a b -- c| a < b
+neg|| a -- c| a * -1
+absv|| a -- c| abs(a)
+sqrt|| a -- c| a ** 0.5
+zeroToNa|| a -- c| Replaces zeros with np.nan
+
+### Words to manipulate columns
+Name | Parameters |Stack effect<br> _before_ -- _after_|Description
+:---|:---|:---|:---
+dup|| a -- a a| Duplicate top column
+roll|| a b c -- c a b| Permute columns
+swap|| a b -- b a| Swap top two columns
+drop|| a b c -- a b| Drop top column
+clear|| a b c -- | Clear columns
+interleave|count=None, split_into=2|a b c d -- a c b d|Divide columns into two groups and interleave group elements 
+
 
 ### Window words
 Name | Parameters |Stack effect|Description
-:---:|:---|:---|:---
+:---|:---|:---|:---
 rolling| | | 
 
