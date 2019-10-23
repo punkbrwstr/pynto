@@ -41,7 +41,8 @@ class _Word(object):
                 break
             current = current.next
         if not row_range is None:
-            return pd.DataFrame(np.column_stack([col.rows(row_range) for col in stack]),
+            values = np.column_stack([col.rows(row_range) for col in stack])
+            return pd.DataFrame(values,
                         columns=[col.header for col in stack], index=row_range.to_index())
 
     def __invert__(self):
