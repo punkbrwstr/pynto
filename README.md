@@ -45,6 +45,12 @@ To evaluate your expression specify the range of rows you want using standard Py
 1     100.0
 ```
 _Combinators_ are higher-order functions that allow pynto to do more complicated things like branching and looping.  Combinators operate on _quotations_, expressions that are pushed to the stack instead of operating on the stack.  To create a quotation use the `~` operator before a word `~square` or before an expression in parentheses `~(dup | mul)` for an anonymous quotation.
+```
+>>> expr = c(9.) | c(10.) | ~square | each
+>>> expr[0]
+   constant  constant
+0      81.0     100.0
+```
 
 ## pynto vocabulary
 
