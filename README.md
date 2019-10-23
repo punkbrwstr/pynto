@@ -1,36 +1,49 @@
 ## pynto: Data analysis in Python using the concatenative paradigm
 
-pynto lets you manipulate tabular data in Python with the expressiveness and code reusability of [concatenative](https://en.wikipedia.org/wiki/Concatenative_programming_language) programming.  In pynto you create a formal definition for your data, an _expression_, by stringing together functions called _words_ .  The expression works like a pipeline: the output from one word becomes the input for the following word.  The data is kept in a table that is treated like a stack of independent columns.  The rightmost column in the table is the top of the stack.  pynto words operate on the columns and are row-agnostic--an expression can be evaluated over any range of rows.  
+pynto is a Python package that lets you manipulate tabular data using the expressiveness and code reusability of [concatenative](https://en.wikipedia.org/wiki/Concatenative_programming_language) programming.  With pynto you create a formal definition for your data, an _expression_, by stringing together functions called _words_ .  The expression works like a pipeline: the output from one word becomes the input for the following word.  Data is kept in a table that is treated like a stack of independent columns.  The rightmost column in the table is the top of the stack.  Words can add, remove or modify columns, but they are row-agnostic--expressions can be evaluated over any range of rows.  
 
 ## Why pynto?
 
- - Expressive: Intuitive syntax; parameters expand word functionality; combinators tame the stack  
+ - Expressive: Intuitive postfix syntax; parameters expand word functionality; combinators tame the stack  
  - Batteries included:  Datetime-based row ranges; moving window statistics
- - Performant: No loops; efficient numpy-based internals
- - Interoperable: Integrates seemlessly with pandas/numpy 
+ - Performant: Efficient numpy-based internals--no Python loops
+ - Interoperable: Seemlessly integration with pandas/numpy 
 
 ### What does it look like?
 
 ```
 >>> from pynto import * 
->>> stocks = csv('stocks.csv')                   # a word that adds some columns to the stack
->>> ma_diff = dup | rolling(20) | wmean | sub    # a word that defines an operation on one column
->>> stocks_ma = stocks | ~ma_diff | each         # apply operation to all columns using quotation/combinator pattern
+>>> stocks = csv('stocks.csv')                   # add columns to the stack
+>>> ma_diff = dup | rolling(20) | wmean | sub    # define an operation
+>>> stocks_ma = stocks | ~ma_diff | each         # operate on columns using quotation/combinator pattern
 >>> stocks_ma['2019-01-01':]                     # evaluate your expression over certain rows
 
 ```
 
 ## pynto reference
 
-### Basics
+### The Basics
 
-#### Creating expressions
-pynto expressions are created by _concatenating_ words together with the `|` operator.  When you assign an expression to a Python variable that variable name can be used as word.
+pynto expressions are created by _concatenating_ pynto words together with the `|` operator.  When you assign an expression to a Python variable the variable name can be used as word in other expressions.
+```
+>>> square = dup | mul      # adds duplicate of top column to the stack, then multiplies top two columns 
+```
+There are no literals, but the word `c` adds a constant-value column to the stack.  Like many pynto words, `c` takes a _parameter_ in parentheses to specify the constant value `c(10.0)`. pynto can handle any NumPy data type.  All rows in a column will have the same type.  
 
-#### Literals and types
-Actually there are no literals, but `c` adds a constant-valued column to the stack.  Column values can be any NumPy data type, but the type will be consistent for all rows in the column.
+```
+>>> expr = c(10.0) | square  # concatenates square expression with constant columns of 10s
+```
+
+
+```
+>>> expr[:2]                     # evaluate two rows                                                                                                                                      
+   constant
+0     100.0
+1     100.0
+```
 
 ### Word parameters
+
 
 #### Row indexing
 
