@@ -4,9 +4,9 @@ pynto is a Python package that lets you manipulate tabular data with the express
 
 ## Why pynto?
 
- - Expressive: Intuitive postfix syntax; parameters expand word functionality; combinators tame the stack  
+ - Expressive: Intuitive syntax with parameters that expand word functionality and combinators tame the stack  
  - Batteries included:  Datetime-based row ranges; moving window statistics
- - Performant: Efficient numpy-based internals--no Python loops
+ - Performant: Efficient numpy internals
  - Interoperable: Seemlessly integration with pandas/numpy 
 
 ## What does it look like?
@@ -28,7 +28,7 @@ pip install pynto
 
 ### The Basics
 
-Create expressions by composing words together with the `|` operator.  When you assign an expression to a Python variable the variable name can be used as word in other expressions.
+Create expressions by _composing_ words together with `|`.  Words operate in left-to-right order, with operators following their operands in _postfix_ style.  When you assign an expression to a Python variable the variable name can be used as word in other expressions.
 ```
 >>> square = dup | mul         # adds duplicate of top column to the stack, then multiplies top two columns 
 ```
