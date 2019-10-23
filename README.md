@@ -30,16 +30,16 @@ pip install pynto
 
 Create expressions by composing words together with the `|` operator.  When you assign an expression to a Python variable the variable name can be used as word in other expressions.
 ```
->>> square = dup | mul      # adds duplicate of top column to the stack, then multiplies top two columns 
+>>> square = dup | mul         # adds duplicate of top column to the stack, then multiplies top two columns 
 ```
 The word `c` that adds a constant-value column to the stack.  Like many pynto words, `c` takes a _parameter_ in parentheses to specify the constant value `c(10.0)`. pynto can handle any NumPy data type, but all rows in a column have to have the same type.
 
 ```
->>> expr = c(10.0) | square  # apply square expression to a columns of 10s
+>>> expr = c(10.0) | square    # apply square expression to a columns of 10s
 ```
 To evaluate your expression specify the range of rows you want using standard Python `[start:stop:step]` indexing and slicing.  Indices can be ints or datetimes.  For a datetime index the step is the periodicity.  
 ```
->>> expr[:2]                 # evaluate first two rows                                                                                                                                      
+>>> expr[:2]                   # evaluate first two rows                                                                                                                                      
    constant
 0     100.0
 1     100.0
