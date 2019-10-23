@@ -15,7 +15,7 @@ class _Word(object):
     def __init__(self, name):
         self.name = name
 
-    def __add__(self, other):
+    def __or__(self, other):
         this = copy.deepcopy(self)
         other = copy.deepcopy(other)
         other = other._head()[0]
@@ -64,7 +64,7 @@ class _Word(object):
                             a.append(str(k) + '=' + str(v))
                     s += '(' + ', '.join(a) + ')'
             if hasattr(current, 'next'):
-                s += ' + '
+                s += ' | '
                 current = current.next
             else:
                 break
@@ -222,7 +222,7 @@ def _get_binary_operator(name, op):
                 values2 = col2.rows(row_range)
                 return np.where(np.logical_or(np.isnan(values1), np.isnan(values2)),
                                     np.nan, op(values1,values2))
-        stack.append(Column(col1.header,f'{col1.trace}) + {col2.trace} + {name}',binary_operator_col))
+        stack.append(Column(col1.header,f'{col1.trace} | {col2.trace} | {name}',binary_operator_col))
     return _NoArgWord(name, stack_function)
 
 def _get_unary_operator(name, op):
@@ -491,7 +491,7 @@ wlast = _get_window_operator('last',lambda x, axis: x[:,-1], lambda x: x)
 def wlag(number):
     return rolling(number+1) + wfirst()
 
-wzscore = ~wstd + ~wlast + ~wmean + cleave(3, depth=1) + sub + swap + div
+wzscore = ~wstd | ~wlast | ~wmean | cleave(3, depth=1) | sub | swap | div
 
 
 # Data cleaning
