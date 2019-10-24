@@ -11,16 +11,16 @@ pynto is a Python package that lets you manipulate tabular data with the express
 ```
 
 ## Why pynto?
- - Expressive: Foolproof syntax; ideal for modular, reusable code 
- - Batteries included:  Datetime-based row ranges; moving window statistics
+ - Expressive: Foolproof syntax; Ideal for modular, reusable code 
  - Performant: Efficient NumPy internals
- - Interoperable: Seemlessly integration with data analysis workflows 
+ - Interoperable: Seemlessly integration with data analysis workflows
+ - Batteries included:  Datetime-based row ranges; Moving window statistics
 
 ## Get pynto
 ```
 pip install pynto
 ```
-## pynto reference
+## Reference
 
 ### The Basics
 
@@ -59,22 +59,22 @@ _Combinators_ are higher-order functions that allow pynto to do more complicated
 ## pynto vocabulary
 
 ### Words for adding columns
-Name | Parameters |Stack effect<br> _before_ -- _after_|Description
+Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
 :---|:---|:---|:---
-c|value| -- c|Adds a constant-_value_ column
-csv|csv_file, index_col=0, header='infer'| -- c (c)|Adds columns from _csv_file_
-pandas|frame_or_series| -- c (c)|Adds columns from a pandas data structure
-c_range|value| -- c (c)|Add constant int columns from 0 to _value_
+c|value| -- c|Adds a constant-_value_ column.
+csv|csv_file, index_col=0, header='infer'| -- c (c)|Adds columns from _csv_file_.
+pandas|frame_or_series| -- c (c)|Adds columns from a pandas data structure.
+c_range|value| -- c (c)|Add constant int columns from 0 to _value_.
 
 ### Combinators
-Name | Parameters |Stack effect<br> _before_ -- _after_|Description
+Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
 :---|:---|:---|:---
 call|depth=None, copy=False| a q -- c| Apply quotation to stack, up to _depth_ if specified.  Optionally leaves stack in place with _copy_.
 each|start=0, stop=None, every=1, copy=False| a b q -- c d| Apply quotation stack elements from _start_ to _end_ in groups of _every_.  Optionally leaves stack in place with _copy_.
 cleave|num_quotations, depth=None, copy=False| a q q -- c d| Apply _num_quotations_ quotations to copies of stack elements up to _depth_.  Optionally leaves stack in place with _copy_.
 
 ### Words to manipulate columns
-Name | Parameters |Stack effect<br> _before_ -- _after_|Description
+Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
 :---|:---|:---|:---
 dup|| a -- a a| Duplicate top column.
 roll|| a b c -- c a b| Permute columns.
@@ -87,14 +87,14 @@ hpull|\*headers, clear=False|a b c -- b c a|Bring columns with headers matching 
 hfilter|\*headers, clear=False|a b c -- a|Shortcut for hpull with _clear_=True
 
 ### Words to manipulate headers
-Name | Parameters |Stack effect<br> _before_ -- _after_|Description
+Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
 :---|:---|:---|:---
 hset|\*headers| a b -- a b|Set top columns' headers to _headers_.
 hformat|format_string| a -- a|Apply _format_string_ to existing headers.
 happly|header_function| a -- a|Apply _header_function_ to existing header.
 
 ### Words for arithmetic or logical operators
-Name | Parameters |Stack effect<br> _before_ -- _after_|Description
+Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
 :---|:---|:---|:---
 add||a b -- c|a + b
 sub||a b -- c|a - b
@@ -114,13 +114,13 @@ sqrt||a -- c|a ** 0.5
 zeroToNa|| a -- c|Replaces zeros with np.nan
 
 ### Words for creating window columns
-Name | Parameters |Stack effect|Description
+Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
 :---|:---|:---|:---
 rolling|window=2, exclude_nans=True, lookback_multiplier=2|a -- w|Create window column with values from most recent _window_ rows.  Exclude nan-valued rows from count unless _exclude_nans_.  Extend history up to _lookback_multiplier_ to look for non-nan rows.  
 crossing||a b c -- w|Create window column with cross-sectional values from the same rows of all columns. 
 
 ### Words for calculating statistics on window columns
-Name | Parameters |Stack effect|Description
+Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
 :---|:---|:---|:---
 wsum||w -- c|Sums of windows.
 wmean||w -- c|Means of windows.
@@ -134,14 +134,14 @@ wlast||w -- c|Last rows of windows.
 wzscore||w -- c|Z-score of most recent rows within windows.
 
 ### Words for cleaning up data
-Name | Parameters |Stack effect|Description
+Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
 :---|:---|:---|:---
 fill|value|a -- a|Fill nans with _value_.
 ffill||a -- a|Last observation carry-forward.
 join|date|a b -- c|Join top two columns, switching from second to first on _date_ index.
 
 ### Other words
-Name | Parameters |Stack effect<br> _before_ -- _after_|Description
+Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
 :---|:---|:---|:---
 ewma|window, fill_nans=True|a -- c|Calculates exponentially-weighted moving average with half-life _window_. 
 wlag|number|w -- c|Lag _number_ rows.
