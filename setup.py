@@ -20,7 +20,7 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    keywords='data analysis quantitative concatenative'
+    keywords='data analysis quantitative tabular concatenative functional',
     python_requires='>=3.6',
     install_requires=['numpy','pandas','dateutil'],
 )
