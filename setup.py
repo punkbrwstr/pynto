@@ -14,9 +14,13 @@ setuptools.setup(
     url="https://github.com/punkbrwstr/pynto",
     packages=setuptools.find_packages(),
     classifiers=[
+        "Development Status :: 3 - Alpha",
         "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.7",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
+    keywords='data analysis quantitative concatenative'
     python_requires='>=3.6',
+    install_requires=['numpy','pandas','dateutil'],
 )
