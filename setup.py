@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="pynto",
-    version="0.1",
+    version="0.1.1",
     author="Peter Graf",
     author_email="peter@pynto.tech",
     description="Data analysis using a concatenative paradigm",
@@ -22,5 +22,5 @@ setuptools.setup(
     ],
     keywords='data analysis quantitative tabular concatenative functional',
     python_requires='>=3.6',
-    install_requires=['numpy','pandas','dateutil'],
+    install_requires=['numpy','pandas','python-dateutil'],
 )
