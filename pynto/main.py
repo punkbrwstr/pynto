@@ -156,9 +156,13 @@ def _frame_to_columns(stack, frame):
         def frame_col(row_range, col=col, index_type=index_type):
             assert not (index_type == 'int' and row_range.type == 'datetime'), 'Cannot evaluate int-indexed frame over datetime range'
             if row_range.type == 'int':
-                if row_range.start < 0:
+                if row_range.start is None:
+                    row_range.start = 0
+                elif row_range.start < 0:
                     row_range.start += len(col.index)
-                if row_range.stop < 0:
+                if row_range.stop is None:
+                    row_range.stop = len(col.index)
+                elif row_range.stop < 0:
                     row_range.stop += len(col.index)
                 values =  col.values[row_range.start:row_range.stop:row_range.step]
             else:
