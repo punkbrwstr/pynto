@@ -4,7 +4,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="pynto-punkbrwstr",
+    name="pynto",
     version="0.1",
     author="Peter Graf",
     author_email="peter@pynto.tech",
