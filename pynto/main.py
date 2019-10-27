@@ -260,6 +260,7 @@ roll = _NoArgWord('roll', lambda stack: stack.insert(0,stack.pop()))
 swap = _NoArgWord('swap', lambda stack: stack.insert(-1,stack.pop()))
 drop = _NoArgWord('drop', lambda stack: stack.pop())
 clear = _NoArgWord('dup', lambda stack: stack.clear())
+hsort = _NoArgWord('hsort', lambda stack: stack.sort(key=lambda c: c.header))
 
 class _interleave(_Word):
 
@@ -370,6 +371,25 @@ class _each(_Word):
             stack += this_stack
 each = _each()
 
+def _heach(stack):
+    assert stack[-1].header == 'quotation'
+    quote = stack.pop().rows
+    new_stack = []
+    for header in set([c.header for c in stack]):
+        to_del, filtered_stack = [], []
+        for i,col in enumerate(stack):
+            if header == col.header:
+                filtered_stack.append(stack[i])
+                to_del.append(i)
+        quote._evaluate(filtered_stack)
+        new_stack += filtered_stack
+        to_del.sort(reverse=True)
+        for i in to_del:
+            del(stack[i])
+    del(stack[:])
+    stack += new_stack
+heach = _NoArgWord('heach',_heach)
+
 class _cleave(_Word):
     def __init__(self): super().__init__('cleave')
     def __call__(self, num_quotations, depth=None, copy=False): return super().__call__(locals())
@@ -460,7 +480,7 @@ def _crossing_op(stack):
     headers = ','.join([col.header for col in cols])
     def crossing_col(row_range):
         return np.column_stack([col.rows(row_range) for col in cols])
-    stack.append(Column('cross', f'{headers},crossing',crossing_col))
+    stack.append(Column(cols[0].header, f'{headers},crossing',crossing_col))
 
 crossing = _NoArgWord('crossing', _crossing_op)
 
@@ -493,7 +513,7 @@ wlast = _get_window_operator('last',lambda x, axis: x[:,-1], lambda x: x)
 
 
 def wlag(number):
-    return rolling(number+1) + wfirst()
+    return rolling(number+1) | wfirst()
 
 wzscore = ~wstd | ~wlast | ~wmean | cleave(3, depth=1) | sub | swap | div
 
