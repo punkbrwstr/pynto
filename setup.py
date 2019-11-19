@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="pynto",
-    version="0.1.1",
+    version="0.1.2",
     author="Peter Graf",
     author_email="peter@pynto.tech",
     description="Data analysis using a concatenative paradigm",
