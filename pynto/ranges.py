@@ -38,7 +38,8 @@ class Range(object):
 
     @classmethod
     def from_indicies(cls, start=0, stop=None, step=1):
-        return cls(start, stop, step, 'int')
+        range_type = 'int' if isinstance(step, int) else 'datetime'
+        return cls(start, stop, step, range_type)
 
     def __init__(self, start, stop, step, range_type):
         self.start = start
@@ -67,7 +68,22 @@ class Range(object):
                 self.start = 0
             if not self.step:
                 self.step = 1
-            
+
+    def expand(self, by):   
+        expanded = self.__class__(self.start, self.stop, self.step, self.type)
+        if by > 0:
+            expanded.stop += by
+        elif by < 0:
+            expanded.start += by
+        return expanded
+
+    def start_date(self):
+        assert not isinstance(self.step, int), 'Ordinal range'
+        return get_date(self.step,self.start)
+
+    def end_date(self):
+        assert not isinstance(self.step, int), 'Ordinal range'
+        return get_date(self.step,self.stop)
 
     def to_index(self):
         self._fill_blanks()
