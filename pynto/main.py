@@ -437,26 +437,36 @@ happly = _happly()
 # Windows
 class _rolling(_Word):
     def __init__(self): super().__init__('rolling')
-    def __call__(self, window=2, exclude_nans=True, lookback_multiplier=2): return super().__call__(locals())
+    def __call__(self, window=2, periodicity=None, exclude_nans=True, lookback_multiplier=2): return super().__call__(locals())
     def _operation(self, stack, args):
         col = stack.pop()
         def rolling_col(row_range,window=args['window'],
+                periodicity=args['periodicity'],
                 exclude_nans=args['exclude_nans'],
                 lookback_multiplier=args['lookback_multiplier']):
             if not exclude_nans:
                 lookback_multiplier = 1
             lookback = (window - 1) * lookback_multiplier
-            expanded_range = copy.copy(row_range)
-            if ((not row_range.start is None and row_range.start >= lookback)
-                    or row_range.type == 'datetime'):
-                expanded_range.start = row_range.start - lookback
+            if periodicity is None or periodicity == row_range.step:
+                resample = False
+                expanded_range = copy.copy(row_range)
+                length = len(row_range)
+            else:
+                assert row_range.type == 'datetime', "Cannot change periodicity for int step range"
+                resample = True
+                expanded_range = Range.from_dates(row_range.start_date(),
+                                        row_range.end_date(), periodicity)
+                length = len(expanded_range)
+            if ((not expanded_range.start is None and expanded_range.start >= lookback)
+                    or expanded_range.type == 'datetime'):
+                expanded_range.start = expanded_range.start - lookback
             else:
                 expanded_range.start = 0
             expanded = col.rows(expanded_range)
             if row_range.stop is None:
                 row_range.stop = expanded_range.stop
-            if expanded.shape[0] < len(row_range) + lookback:
-                fill = np.full(len(row_range) + lookback - expanded.shape[0], np.nan)
+            if expanded.shape[0] < length + lookback:
+                fill = np.full(length + lookback - expanded.shape[0], np.nan)
                 expanded = np.concatenate([fill,col.rows(expanded_range)])
             mask = ~np.isnan(expanded) if exclude_nans else np.full(expanded.shape,True)
             no_nans = expanded[mask]
@@ -470,7 +480,12 @@ class _rolling(_Word):
             windows = np.lib.stride_tricks.as_strided(no_nans, shape=shape, strides=strides)
             td = np.full((expanded.shape[0],window), np.nan)
             td[indexes[-windows.shape[0]:],:] = windows
-            return td[lookback:]
+            if not resample:
+                return td[lookback:]
+            else:
+                expanded_range.start = expanded_range.start + lookback
+                return pd.DataFrame(td[lookback:],
+                            index=expanded_range.to_index()).reindex(row_range.to_index())
         stack.append(Column(col.header,f'{col.trace},rolling({args["window"]})',rolling_col))
 rolling = _rolling()
 
