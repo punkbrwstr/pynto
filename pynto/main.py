@@ -437,7 +437,7 @@ happly = _happly()
 # Windows
 class _rolling(_Word):
     def __init__(self): super().__init__('rolling')
-    def __call__(self, window=2, periodicity=None, exclude_nans=True, lookback_multiplier=2): return super().__call__(locals())
+    def __call__(self, window=2, exclude_nans=True, periodicity=None, lookback_multiplier=2): return super().__call__(locals())
     def _operation(self, stack, args):
         col = stack.pop()
         def rolling_col(row_range,window=args['window'],
