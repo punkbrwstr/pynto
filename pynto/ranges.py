@@ -131,6 +131,11 @@ def round_bm(date):
     last_day = next_month - datetime.timedelta(days=next_month.day)
     return last_day - datetime.timedelta(days=max(0,last_day.weekday() - 4))
 
+def round_ba_dec(date):
+    date = parse_date(date)
+    date = date +  relativedelta(months=12-date.month)
+    return round_bm(date)
+
 def round_bq_dec(date):
     date = parse_date(date)
     remainder = date.month % 3
@@ -188,6 +193,12 @@ PERIODICITIES = {
             round_bq_dec,
             lambda d2, d1: ((d1.year - d2.year) * 12 + d1.month - d2.month) // 3,
             lambda d, i: add_bm(d, i * 3), 
+            3),
+    'BA-DEC' : Periodicity(
+            datetime.date(1970,12,31),
+            round_ba_dec,
+            lambda d2, d1: d1.year - d2.year,
+            lambda d, i: add_bm(d, i * 12), 
             3)
 }
 
