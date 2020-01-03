@@ -45,7 +45,7 @@ class Range(object):
         self.start = start
         self.stop = stop
         self.step = step
-        self.type = range_type
+        self.range_type = range_type
 
     def __len__(self):
         self._fill_blanks()
@@ -53,8 +53,8 @@ class Range(object):
 
                 
     def __repr__(self):
-        if self.type == 'datetime':
-            return f'[{str(self.start)}:{str(self.stop)}:{str(self.step)}] {self.type}'
+        if self.range_type == 'datetime':
+            return f'[{str(self.start)}:{str(self.stop)}:{str(self.step)}] {self.range_type}'
             return "['" + get_date(self.step,
             self.start).strftime('%Y-%m-%d') + "':'" + get_date(self.step,
             self.stop).strftime('%Y-%m-%d') + "':'" + str(self.step) + "']"
@@ -62,7 +62,7 @@ class Range(object):
             return f'[{str(self.start)}:{str(self.stop)}:{str(self.step)}]'
 
     def _fill_blanks(self):
-        if self.type == 'int':
+        if self.range_type == 'int':
             assert not self.stop is None, 'Range is missing stop'
             if not self.start:
                 self.start = 0
@@ -70,7 +70,7 @@ class Range(object):
                 self.step = 1
 
     def expand(self, by):   
-        expanded = self.__class__(self.start, self.stop, self.step, self.type)
+        expanded = self.__class__(self.start, self.stop, self.step, self.range_type)
         if by > 0:
             expanded.stop += by
         elif by < 0:
@@ -87,7 +87,7 @@ class Range(object):
 
     def to_index(self):
         self._fill_blanks()
-        if self.type == 'int':
+        if self.range_type == 'int':
             return range(self.start, self.stop, self.step)
         else:
             return pd.date_range(get_date(self.step,self.start),

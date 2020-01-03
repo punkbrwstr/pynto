@@ -154,8 +154,8 @@ def _frame_to_columns(stack, frame):
         index_type = 'int'
     for header, col in frame.iteritems():
         def frame_col(row_range, col=col, index_type=index_type):
-            assert not (index_type == 'int' and row_range.type == 'datetime'), 'Cannot evaluate int-indexed frame over datetime range'
-            if row_range.type == 'int':
+            assert not (index_type == 'int' and row_range.range_type == 'datetime'), 'Cannot evaluate int-indexed frame over datetime range'
+            if row_range.range_type == 'int':
                 if row_range.start is None:
                     row_range.start = 0
                 elif row_range.start < 0:
@@ -452,13 +452,13 @@ class _rolling(_Word):
                 expanded_range = copy.copy(row_range)
                 length = len(row_range)
             else:
-                assert row_range.type == 'datetime', "Cannot change periodicity for int step range"
+                assert row_range.range_type == 'datetime', "Cannot change periodicity for int step range"
                 resample = True
                 expanded_range = Range.from_dates(row_range.start_date(),
                                         row_range.end_date(), periodicity)
                 length = len(expanded_range)
             if ((not expanded_range.start is None and expanded_range.start >= lookback)
-                    or expanded_range.type == 'datetime'):
+                    or expanded_range.range_type == 'datetime'):
                 expanded_range.start = expanded_range.start - lookback
             else:
                 expanded_range.start = 0
@@ -563,7 +563,7 @@ class _join(_Word):
         col2 = stack.pop()
         col1 = stack.pop()
         def join_col(row_range,date=args['date']):
-            if row_range.type == 'datetime':
+            if row_range.range_type == 'datetime':
                 date = get_index(row_range.step, date)
             if row_range.stop < date:
                 return col1.rows(row_range)
