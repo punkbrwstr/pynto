@@ -54,10 +54,11 @@ class Range(object):
                 
     def __repr__(self):
         if self.range_type == 'datetime':
-            return f'[{str(self.start)}:{str(self.stop)}:{str(self.step)}] {self.range_type}'
-            return "['" + get_date(self.step,
-            self.start).strftime('%Y-%m-%d') + "':'" + get_date(self.step,
-            self.stop).strftime('%Y-%m-%d') + "':'" + str(self.step) + "']"
+            r = '['
+            r += ':' if self.start is None else f"'{self.start_date().strftime('%Y-%m-%d')}':"
+            r += '' if self.stop is None else f"'{self.end_date().strftime('%Y-%m-%d')}':"
+            r +=  self.step + ']'
+            return r
         else:
             return f'[{str(self.start)}:{str(self.stop)}:{str(self.step)}]'
 

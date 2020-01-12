@@ -510,7 +510,7 @@ def _get_window_operator(name,  twod_operation, oned_operation):
                         return np.where(np.all(np.isnan(values),axis=1), np.nan,
                                     twod_operation(values, axis=1))
                 else:
-                    return oned_operation(values)
+                    return oned_operation(values, axis=None)
             stack.append(Column(col.header, f'{col.trace},{name}', window_operator_col))
     return _NoArgWord(name, _operation)
 

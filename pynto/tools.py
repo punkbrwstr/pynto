@@ -1,12 +1,12 @@
 import numpy as np
 
-def expanding_mean(x):
+def expanding_mean(x, axis=None):
     nan_mask = np.isnan(x)
     cumsum = np.add.accumulate(np.where(nan_mask, 0, x))
     count = np.add.accumulate(np.where(nan_mask, 0, x / x))
     return np.where(nan_mask, np.nan, cumsum) / count
 
-def expanding_var(x):
+def expanding_var(x, axis=None):
     nan_mask = np.isnan(x)
     cumsum = np.add.accumulate(np.where(nan_mask, 0, x))
     cumsumOfSquares = np.add.accumulate(np.where(nan_mask, 0, x * x))
@@ -14,7 +14,7 @@ def expanding_var(x):
     return (cumsumOfSquares - cumsum * cumsum / count) / (count - 1)
 
 def make_expanding(ufunc):
-    def expanding(x):
+    def expanding(x, axis=None):
         mask = np.isnan(x)
         return np.where(mask, np.nan, ufunc.accumulate(np.where(mask,0,x)))
     return expanding
