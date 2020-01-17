@@ -35,6 +35,19 @@ class Range(object):
         if stop:
             stop = get_index(periodicity, stop)
         return cls(start, stop, periodicity, 'datetime')
+    
+    @classmethod
+    def from_date_range(cls, date_range):
+        periodicity = date_range.freq.name
+        start = get_index(periodicity, date_range[0])
+        stop = get_index(periodicity, date_range[-1]) + 1
+        return cls(start, stop, periodicity, 'datetime')
+
+    @classmethod
+    def change_periodicity(cls, date_range, periodicity):
+        start = get_index(periodicity, date_range.start_date())
+        stop = get_index(periodicity, get_date(date_range.step, date_range.stop - 1)) + 1
+        return cls(start, stop, periodicity, 'datetime')
 
     @classmethod
     def from_indicies(cls, start=0, stop=None, step=1):
@@ -57,7 +70,7 @@ class Range(object):
             r = '['
             r += ':' if self.start is None else f"'{self.start_date().strftime('%Y-%m-%d')}':"
             r += '' if self.stop is None else f"'{self.end_date().strftime('%Y-%m-%d')}':"
-            r +=  self.step + ']'
+            r +=  f"'{self.step}']"
             return r
         else:
             return f'[{str(self.start)}:{str(self.stop)}:{str(self.step)}]'
@@ -168,7 +181,8 @@ def count_b(d1, d2):
     return days - daysSinceMonday1 + daysSinceMonday2
     
 
-Periodicity = namedtuple('Periodicity',['epoque','round_function','count_function','offset_function', 'id'])
+Periodicity = namedtuple('Periodicity',['epoque','round_function',
+                'count_function','offset_function', 'id', 'annualization_factor'])
 
 PERIODICITIES = {
     'B' : Periodicity(
@@ -176,31 +190,36 @@ PERIODICITIES = {
             round_b,
             count_b,
             add_b,
-            0),
+            0,
+            250),
     'W-FRI' : Periodicity(
             datetime.date(1970,1,2),
             round_w_fri,
             lambda d1, d2: (d2 - d1).days // 7,
             lambda d, i: d + datetime.timedelta(days=i * 7), 
-            1),
+            1,
+            52),
     'BM' : Periodicity(
             datetime.date(1970,1,30),
             round_bm,
             lambda d2, d1: (d1.year - d2.year) * 12 + d1.month - d2.month,
             lambda d, i: add_bm(d,i), 
-            2),
+            2,
+            12),
     'BQ-DEC' : Periodicity(
             datetime.date(1970,3,31),
             round_bq_dec,
             lambda d2, d1: ((d1.year - d2.year) * 12 + d1.month - d2.month) // 3,
             lambda d, i: add_bm(d, i * 3), 
-            3),
+            3,
+            4),
     'BA-DEC' : Periodicity(
             datetime.date(1970,12,31),
             round_ba_dec,
             lambda d2, d1: d1.year - d2.year,
             lambda d, i: add_bm(d, i * 12), 
-            3)
+            3,
+            1)
 }
 
 
@@ -223,3 +242,6 @@ def get_datetimeindex(periodicity, start, end):
                                 freq=periodicity)[:-1]
 def get_id(periodicity):
     return PERIODICITIES[periodicity].id
+
+def get_annualization_factor(periodicity):
+    return PERIODICITIES[periodicity].annualization_factor
