@@ -450,13 +450,11 @@ class _rolling(_Word):
             if periodicity is None or periodicity == row_range.step:
                 resample = False
                 expanded_range = copy.copy(row_range)
-                length = len(row_range)
             else:
                 assert row_range.range_type == 'datetime', "Cannot change periodicity for int step range"
                 resample = True
                 expanded_range = Range.from_dates(row_range.start_date(),
                                         row_range.end_date(), periodicity)
-                length = len(expanded_range)
             if ((not expanded_range.start is None and expanded_range.start >= lookback)
                     or expanded_range.range_type == 'datetime'):
                 expanded_range.start = expanded_range.start - lookback
@@ -465,9 +463,10 @@ class _rolling(_Word):
             expanded = col.rows(expanded_range)
             if row_range.stop is None:
                 row_range.stop = expanded_range.stop
-            if expanded.shape[0] < length + lookback:
-                fill = np.full(length + lookback - expanded.shape[0], np.nan)
-                expanded = np.concatenate([fill,col.rows(expanded_range)])
+            #length = len(expanded_range)
+            #if expanded.shape[0] < length + lookback:
+                #fill = np.full(length + lookback - expanded.shape[0], np.nan)
+                #expanded = np.concatenate([fill,col.rows(expanded_range)])
             mask = ~np.isnan(expanded) if exclude_nans else np.full(expanded.shape,True)
             no_nans = expanded[mask]
             # Indexes of no_nan values in expanded
@@ -546,15 +545,25 @@ class _fill(_Word):
         stack.append(Column(col.header,f'{col.trace},fill',fill))
 fill = _fill()
 
-def _ffill(stack):
-    col = stack.pop()
-    def ffill(row_range):
-        x = col.rows(row_range)
-        idx = np.where(~np.isnan(x),np.arange(len(x)),0)
-        np.maximum.accumulate(idx,out=idx)
-        return x[idx]
-    stack.append(Column(col.header,f'{col.trace},ffill',ffill))
-ffill = _NoArgWord('ffill',_ffill)
+class _ffill(_Word):
+    def __init__(self): super().__init__('ffill')
+    def __call__(self, lookback=0): return super().__call__(locals())
+    def _operation(self, stack, args):
+        col = stack.pop()
+        def ffill(row_range):
+            lookback = abs(args['lookback']) 
+            if row_range.start is None and lookback != 0:
+                col.rows(row_range)
+            expanded_range = copy.copy(row_range)
+            expanded_range.start -= lookback
+            x = col.rows(expanded_range)
+            if row_range.stop is None:
+                row_range.stop = expanded_range.stop
+            idx = np.where(~np.isnan(x),np.arange(len(x)),0)
+            np.maximum.accumulate(idx,out=idx)
+            return x[idx][lookback:]
+        stack.append(Column(col.header,f'{col.trace},ffill',ffill))
+ffill = _ffill()
 
 class _join(_Word):
     def __init__(self): super().__init__('join')
