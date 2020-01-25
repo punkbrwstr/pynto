@@ -298,18 +298,13 @@ pull = _pull()
 class _hpull(_Word):
     def __init__(self): super().__init__('hpull')
     def __call__(self, *headers, clear=False):
-        print(type(headers))
         return super().__call__(locals())
     def _operation(self, stack, args):
         filtered_stack = []
-        print(args['headers'])
         for header in args['headers']:
             to_del = []
-            print(f'header {header}')
             for i,col in enumerate(stack):
-                print(f'col.header {col.header}')
                 if not re.match(header,col.header) is None:
-                    print('match')
                     filtered_stack.append(stack[i])
                     to_del.append(i)
             to_del.sort(reverse=True)
