@@ -95,9 +95,9 @@ class Range(object):
         assert not isinstance(self.step, int), 'Ordinal range'
         return get_date(self.step,self.start) if not self.start is None else None
 
-    def end_date(self):
+    def end_date(self, exclusive=True):
         assert not isinstance(self.step, int), 'Ordinal range'
-        return get_date(self.step,self.stop) if not self.stop is None else None
+        return get_date(self.step,self.stop - 1) if not self.stop is None else None
 
     def to_index(self):
         self._fill_blanks()
