@@ -2,6 +2,7 @@ import re
 import copy
 import warnings
 import numpy as np
+import numpy.ma as ma
 import pandas as pd
 from pynto.ranges import Range, get_index
 from pynto.tools import *
@@ -269,7 +270,7 @@ class _interleave(_Word):
 
     def _operation(self, stack, args):
         count = args['count'] if args['count'] else len(stack) // args['split_into']
-        place,last = 0,0
+        last = 0
         lists = []
         for i in range(len(stack)+1):
             if i % count == 0 and i != 0:
@@ -324,7 +325,6 @@ class _ewma(_Word):
         col = stack.pop()
         def ewma_col(row_range, window=args['window']):
             alpha = 2 /(args['window'] + 1.0)
-            alpha_rev = 1-alpha
             data = col.rows(row_range)
             idx = np.cumsum(np.where(~np.isnan(data),1,0)) - 1
             starting_nans = np.where(idx == -1,np.nan,1)
@@ -489,6 +489,27 @@ class _rolling(_Word):
         stack.append(Column(col.header,f'{col.trace},rolling({args["window"]})',rolling_col))
 rolling = _rolling()
 
+class _expanding(_Word):
+    def __init__(self): super().__init__('expanding')
+    def __call__(self, start_date): return super().__call__(locals())
+    def _operation(self, stack, args):
+        col = stack.pop()
+        def expanding_col(row_range,start_date=args['start_date']):
+            index = get_index(row_range.step, start_date)
+            if row_range.start is None:
+                row_range.start = index
+                return col.rows(row_range)
+            expanded_range = copy.copy(row_range)
+            offset = expanded_range.start - index
+            expanded_range.start = index
+            values = col.rows(expanded_range).view(ma.MaskedArray)
+            values[:offset] = ma.masked
+            if row_range.stop is None:
+                row_range.stop = expanded_range.stop
+            return values
+        stack.append(Column(col.header,f'{col.trace},expanding({args["start_date"]})',expanding_col))
+expanding = _expanding()
+
 def _crossing_op(stack):
     cols = stack[:]
     stack.clear()
@@ -510,7 +531,10 @@ def _get_window_operator(name,  twod_operation, oned_operation):
                         return np.where(np.all(np.isnan(values),axis=1), np.nan,
                                     twod_operation(values, axis=1))
                 else:
-                    return oned_operation(values, axis=None)
+                    cum = oned_operation(values, axis=None)
+                    if isinstance(values,ma.MaskedArray):
+                        return ma.array(cum,mask=values.mask).compressed()
+                    return cum 
             stack.append(Column(col.header, f'{col.trace},{name}', window_operator_col))
     return _NoArgWord(name, _operation)
 
@@ -523,7 +547,7 @@ wstd = _get_window_operator('wstd', np.nanstd, expanding_var)
 wchange = _get_window_operator('wchange',lambda x, axis: x[:,-1] - x[:,0], lambda x, axis: x - x[0])
 wpct_change = _get_window_operator('wpct_change',lambda x, axis: x[:,-1] / x[:,0] - 1, lambda x, axis: x / x[0] - 1)
 wlog_change = _get_window_operator('wlog_change', lambda x, axis: np.log(x[:,-1] / x[:,0]), lambda x, axis: np.log( x / x[0]))
-wfirst = _get_window_operator('first',lambda x, axis: x[:,0], lambda x: np.full(a.shape,a[0]))
+wfirst = _get_window_operator('first',lambda x, axis: x[:,0], lambda x: np.full(x.shape,x[0]))
 wlast = _get_window_operator('last',lambda x, axis: x[:,-1], lambda x: x)
 
 
