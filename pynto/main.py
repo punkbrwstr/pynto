@@ -120,14 +120,14 @@ class _c(_Word):
     def __init__(self):
         super().__init__('c')
 
-    def __call__(self, value):
+    def __call__(self, *values):
         return super().__call__(locals())
 
     def _operation(self, stack, args):
-        def const_col(row_range):
-            return np.full(len(row_range), self.args['value'])
-        stack.append(Column('constant', str(self.args['value']), const_col))
-
+        for value in args['values']:
+            def const_col(row_range, value=value):
+                return np.full(len(row_range), value)
+            stack.append(Column('constant', str(value), const_col))
 c = _c()
 
 class _c_range(_Word):
