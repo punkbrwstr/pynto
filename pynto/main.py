@@ -7,11 +7,25 @@ import pandas as pd
 from pynto.ranges import Range, get_index
 from pynto.tools import *
 from collections import namedtuple
+from dataclasses import dataclass
+from typing import Callable
 
-Column = namedtuple('Column',['header', 'trace', 'rows'])
+#Column = namedtuple('Column',['header', 'trace', 'rows'])
 
+@dataclass
+class Column:
+    header : str
+    trace: str
+    rows_function: Callable[[Range], np.ndarray]
 
-class _Word(object):
+    def rows(self, range_):
+        try:
+            return self.rows_function(range_)
+        except Exception as e:
+            raise ValueError(f'{e} in rows for column "{self.header}" ({self.trace})') from e
+            
+
+class _Word:
 
     def __init__(self, name):
         self.name = name
@@ -37,7 +51,10 @@ class _Word(object):
             else:
                 if not hasattr(current, 'args'):
                     current = current()
-                current._operation(stack, current.args)
+                try:
+                    current._operation(stack, current.args)
+                except Exception as e:
+                    raise SyntaxError(f'{e} in word {current.name}') from e
             if not hasattr(current, 'next'):
                 break
             current = current.next
@@ -114,6 +131,8 @@ class _quote(_Word):
 
     def __call__(self):
         return super().__call__(locals())
+
+dummy = _NoArgWord('dummy', lambda stack: None)
 
 class _c(_Word):
 
@@ -241,9 +260,9 @@ def _get_unary_operator(name, op):
 add = _get_binary_operator('add', np.add)
 sub = _get_binary_operator('sub', np.subtract)
 mul = _get_binary_operator('mul', np.multiply)
+power = _get_binary_operator('power', np.power)
 div = _get_binary_operator('div', np.divide)
 mod = _get_binary_operator('mod', np.mod)
-exp = _get_binary_operator('exp', np.power)
 eq = _get_binary_operator('eq', np.equal)
 ne = _get_binary_operator('ne', np.not_equal)
 ge = _get_binary_operator('ge', np.greater_equal)
@@ -253,6 +272,8 @@ lt = _get_binary_operator('lt', np.less)
 neg = _get_unary_operator('neg', np.negative)
 absv = _get_unary_operator('absv', np.abs)
 sqrt = _get_unary_operator('sqrt', np.sqrt)
+exp = _get_unary_operator('exp', np.exp)
+log = _get_unary_operator('log', np.log)
 zeroToNa = _get_unary_operator('zeroToNa', lambda x: np.where(np.equal(x,0),np.nan,x))
 
 # Stack manipulation
@@ -342,7 +363,7 @@ class _call(_Word):
     def __call__(self, depth=None, copy=False): return super().__call__(locals())
     def _operation(self, stack, args):
         assert stack[-1].header == 'quotation'
-        quoted = stack.pop().rows
+        quoted = stack.pop().rows_function
         depth = len(stack) if args['depth'] is None else args['depth']
         if depth != 0:
             this_stack = stack[-depth:]
@@ -359,7 +380,7 @@ class _each(_Word):
     def __call__(self, start=0, end=None, every=1, copy=False): return super().__call__(locals())
     def _operation(self, stack, args):
         assert stack[-1].header == 'quotation'
-        quote = stack.pop().rows
+        quote = stack.pop().rows_function
         end = 0 if args['end'] is None else -args['end']
         start = len(stack) if args['start'] == 0 else -args['start']
         selected = stack[end:start]
@@ -374,7 +395,7 @@ each = _each()
 
 def _heach(stack):
     assert stack[-1].header == 'quotation'
-    quote = stack.pop().rows
+    quote = stack.pop().rows_function
     new_stack = []
     for header in set([c.header for c in stack]):
         to_del, filtered_stack = [], []
@@ -395,7 +416,7 @@ class _cleave(_Word):
     def __init__(self): super().__init__('cleave')
     def __call__(self, num_quotations, depth=None, copy=False): return super().__call__(locals())
     def _operation(self, stack, args):
-        quotes = [quote.rows for quote in stack[-args['num_quotations']:]]
+        quotes = [quote.rows_function for quote in stack[-args['num_quotations']:]]
         del(stack[-args['num_quotations']:])
         depth = len(stack) if args['depth'] is None else args['depth']
         copied_stack = stack[-depth:] if depth != 0 else []
@@ -415,7 +436,7 @@ class _hset(_Word):
     def _operation(self, stack, args):
         start = len(stack) - len(args['headers'])
         for i in range(start,len(stack)):
-            stack[i] = Column(args['headers'][i - start], stack[i].trace, stack[i].rows)
+            stack[i] = Column(args['headers'][i - start], stack[i].trace, stack[i].rows_function)
 hset = _hset()
 
 class _hformat(_Word):
@@ -432,7 +453,7 @@ class _happly(_Word):
     def __call__(self, header_function): return super().__call__(locals())
     def _operation(self, stack, args):
         col = stack.pop()
-        stack.append(Column(args['header_function'](col.header), col.trace, col.rows))
+        stack.append(Column(args['header_function'](col.header), col.trace, col.rows_function))
 happly = _happly()
 
 # Windows
