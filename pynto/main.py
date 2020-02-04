@@ -319,16 +319,22 @@ pull = _pull()
 
 class _hpull(_Word):
     def __init__(self): super().__init__('hpull')
-    def __call__(self, *headers, clear=False):
+    def __call__(self, *headers, clear=False, is_re=False):
         return super().__call__(locals())
     def _operation(self, stack, args):
+        is_re = args['is_re']
         filtered_stack = []
         for header in args['headers']:
             to_del = []
             for i,col in enumerate(stack):
-                if not re.match(header,col.header) is None:
-                    filtered_stack.append(stack[i])
-                    to_del.append(i)
+                if is_re:
+                    if not re.match(header,col.header) is None:
+                        filtered_stack.append(stack[i])
+                        to_del.append(i)
+                else:
+                    if header == col.header:
+                        filtered_stack.append(stack[i])
+                        to_del.append(i)
             to_del.sort(reverse=True)
             for i in to_del:
                 del(stack[i])
@@ -336,8 +342,8 @@ class _hpull(_Word):
             del(stack[:])
         stack += filtered_stack
 hpull = _hpull()
-def hfilter(*headers):
-    return _hpull()(*headers, clear=True)
+def hfilter(*headers, is_re=False):
+    return _hpull()(*headers, clear=True, is_re=is_re)
 
 class _ewma(_Word):
     def __init__(self): super().__init__('ewma')
