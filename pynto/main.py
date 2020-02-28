@@ -440,9 +440,12 @@ class _hset(_Word):
     def __init__(self): super().__init__('hset')
     def __call__(self, *headers): return super().__call__(locals())
     def _operation(self, stack, args):
-        start = len(stack) - len(args['headers'])
+        headers = args['headers']
+        if len(headers) == 1 and headers[0].find(',') != -1:
+            headers = headers[0].split(',')
+        start = len(stack) - len(headers)
         for i in range(start,len(stack)):
-            stack[i] = Column(args['headers'][i - start], stack[i].trace, stack[i].rows_function)
+            stack[i] = Column(headers[i - start], stack[i].trace, stack[i].rows_function)
 hset = _hset()
 
 class _hformat(_Word):
@@ -568,6 +571,8 @@ def _get_window_operator(name,  twod_operation, oned_operation):
 
 wsum = _get_window_operator('wsum',np.nansum, make_expanding(np.add))
 wmean = _get_window_operator('wmean',np.nanmean, expanding_mean)
+wmax = _get_window_operator('wmax',np.nanmax, make_expanding(np.maximum))
+wmin = _get_window_operator('wmin',np.nanmin, make_expanding(np.minimum))
 wprod = _get_window_operator('wprod',np.nanprod, make_expanding(np.multiply))
 wvar = _get_window_operator('wvar', np.nanvar, expanding_var)
 wstd = _get_window_operator('wstd', np.nanstd, expanding_var)
@@ -626,7 +631,7 @@ class _join(_Word):
         def join_col(row_range,date=args['date']):
             if row_range.range_type == 'datetime':
                 date = get_index(row_range.step, date)
-            if row_range.stop < date:
+            if row_range.stop is not None and row_range.stop < date:
                 return col1.rows(row_range)
             if row_range.start and row_range.start >= date:
                 return col2.rows(row_range)
@@ -634,6 +639,12 @@ class _join(_Word):
             r_first.stop = date
             r_second = copy.copy(row_range)
             r_second.start = date
-            return np.concatenate([col1.rows(r_first), col2.rows(r_second)])
+            v_first = col1.rows(r_first)
+            v_second = col2.rows(r_second)
+            if row_range.stop is None:
+                row_range.stop = r_second.stop
+            if row_range.start is None:
+                row_range.start = r_first.start
+            return np.concatenate([v_first, v_second])
         stack.append(Column('join',f'{col2.trace} {col2.trace} join({args["date"]})',join_col))
 join = _join()
