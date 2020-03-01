@@ -109,7 +109,7 @@ class Range(object):
 
 def now():
     d = datetime.date.today()
-    if datetime.datetime.now().hour >= 17:
+    if d.weekday() < 5 and datetime.datetime.now().hour >= 17:
         d = offset('B', d, 1)
     return d
 
