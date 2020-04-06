@@ -99,7 +99,7 @@ class Range(object):
         assert not isinstance(self.step, int), 'Ordinal range'
         if self.stop is None:
             return None
-        return get_date(self.step,self.stop - 0 if exclusive else 1) 
+        return get_date(self.step,self.stop - (0 if exclusive else 1))
 
     def to_index(self):
         self._fill_blanks()
@@ -110,10 +110,11 @@ class Range(object):
                 get_date(self.step,self.stop), freq=self.step)[:-1]
 
 def now():
-    d = datetime.date.today()
+    d = datetime.datetime.now()
     if d.weekday() < 5 and datetime.datetime.now().hour >= 17:
-        d = offset('B', d, 1)
-    return d
+        return offset('B', d, 1)
+    else:
+        return d.date()
 
 def parse_date(date):
     if isinstance(date, datetime.datetime):
