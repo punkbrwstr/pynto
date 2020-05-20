@@ -22,5 +22,5 @@ setuptools.setup(
     ],
     keywords='data analysis quantitative tabular concatenative functional',
     python_requires='>=3.6',
-    install_requires=['numpy','pandas','python-dateutil'],
+    install_requires=['numpy','pandas','python-dateutil', 'timestamps'],
 )
