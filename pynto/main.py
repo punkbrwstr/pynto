@@ -254,7 +254,7 @@ def _get_unary_operator(name, op):
         col = stack.pop()
         def unary_operator_col(row_range):
             return op(col.rows(row_range))
-        stack.append(Column(col.header,f'{col.trace},{name},',unary_operator_col))
+        stack.append(Column(col.header,f'{col.trace} | {name}',unary_operator_col))
     return _NoArgWord(name, stack_function)
 
 add = _get_binary_operator('add', np.add)
@@ -360,7 +360,7 @@ class _ewma(_Word):
                 return np.full(idx.shape[0],np.nan)
             out = ewma_vectorized_safe(data,alpha)
             return out[idx] * starting_nans
-        stack.append(Column(col.header,f'{col.trace},ewma,',ewma_col))
+        stack.append(Column(col.header,f'{col.trace} | ewma({window})',ewma_col))
 ewma = _ewma()
 
 # Combinators
@@ -516,7 +516,7 @@ class _rolling(_Word):
                 expanded_range.start = expanded_range.start + lookback
                 return pd.DataFrame(td[lookback:],
                             index=expanded_range.to_index()).reindex(row_range.to_index())
-        stack.append(Column(col.header,f'{col.trace},rolling({args["window"]})',rolling_col))
+        stack.append(Column(col.header,f'{col.trace} | rolling({args["window"]})',rolling_col))
 rolling = _rolling()
 
 class _expanding(_Word):
@@ -537,7 +537,7 @@ class _expanding(_Word):
             if row_range.stop is None:
                 row_range.stop = expanded_range.stop
             return values
-        stack.append(Column(col.header,f'{col.trace},expanding({args["start_date"]})',expanding_col))
+        stack.append(Column(col.header,f'{col.trace} | expanding({args["start_date"]})',expanding_col))
 expanding = _expanding()
 
 def _crossing_op(stack):
@@ -549,6 +549,14 @@ def _crossing_op(stack):
     stack.append(Column(cols[0].header, f'{headers},crossing',crossing_col))
 
 crossing = _NoArgWord('crossing', _crossing_op)
+
+def _rev_expanding_op(stack):
+    col = stack.pop()
+    def rev_expanding_col(row_range):
+        return col.rows(row_range)[::-1]
+    stack.append(Column(col.header, f'{col.header} | rev_expanding',rev_expanding_col))
+
+rev_expanding = _NoArgWord('rev_expanding', _rev_expanding_op)
 
 def _get_window_operator(name,  twod_operation, oned_operation):
     def _operation(stack):
@@ -562,10 +570,12 @@ def _get_window_operator(name,  twod_operation, oned_operation):
                                     twod_operation(values, axis=1))
                 else:
                     cum = oned_operation(values, axis=None)
+                    if values.strides[0] < 0:
+                        return cum[::-1]
                     if isinstance(values,ma.MaskedArray):
                         return ma.array(cum,mask=values.mask).compressed()
                     return cum 
-            stack.append(Column(col.header, f'{col.trace},{name}', window_operator_col))
+            stack.append(Column(col.header, f'{col.trace} | {name}', window_operator_col))
     return _NoArgWord(name, _operation)
 
 
@@ -599,7 +609,7 @@ class _fill(_Word):
             x = col.rows(row_range)
             x[np.isnan(x)] = value
             return x
-        stack.append(Column(col.header,f'{col.trace},fill',fill))
+        stack.append(Column(col.header,f'{col.trace} | fill',fill))
 fill = _fill()
 
 class _ffill(_Word):
@@ -619,7 +629,7 @@ class _ffill(_Word):
             idx = np.where(~np.isnan(x),np.arange(len(x)),0)
             np.maximum.accumulate(idx,out=idx)
             return x[idx][lookback:]
-        stack.append(Column(col.header,f'{col.trace},ffill',ffill))
+        stack.append(Column(col.header,f'{col.trace} | ffill',ffill))
 ffill = _ffill()
 
 class _join(_Word):
@@ -646,5 +656,5 @@ class _join(_Word):
             if row_range.start is None:
                 row_range.start = r_first.start
             return np.concatenate([v_first, v_second])
-        stack.append(Column('join',f'{col2.trace} {col2.trace} join({args["date"]})',join_col))
+        stack.append(Column('join',f'{col1.trace} | {col2.trace}  | join({args["date"]})',join_col))
 join = _join()
