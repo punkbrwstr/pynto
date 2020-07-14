@@ -543,7 +543,7 @@ expanding = _expanding()
 def _crossing_op(stack):
     cols = stack[:]
     stack.clear()
-    headers = ','.join([col.header for col in cols])
+    headers = ','.join([str(col.header) for col in cols])
     def crossing_col(row_range):
         return np.column_stack([col.rows(row_range) for col in cols])
     stack.append(Column(cols[0].header, f'{headers},crossing',crossing_col))
