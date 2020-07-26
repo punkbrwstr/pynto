@@ -62,6 +62,8 @@ class _Word:
             values = np.column_stack([col.rows(row_range) for col in stack])
             return pd.DataFrame(values,
                         columns=[col.header for col in stack], index=row_range.to_index())
+        else:
+            return [col.header for col in stack]
 
     def __invert__(self):
         return _quote(self)
@@ -111,6 +113,9 @@ class _Word:
         del(args['self'])
         this.args = args
         return this
+
+    def columns(self):
+        return self._evaluate([], None)
 
 class _NoArgWord(_Word):
     def __init__(self, name, stack_function):
@@ -420,8 +425,10 @@ heach = _NoArgWord('heach',_heach)
 
 class _cleave(_Word):
     def __init__(self): super().__init__('cleave')
-    def __call__(self, num_quotations, depth=None, copy=False): return super().__call__(locals())
+    def __call__(self, num_quotations=-1, depth=None, copy=False): return super().__call__(locals())
     def _operation(self, stack, args):
+        if args['num_quotations'] < 0:
+            args['num_quotations'] = len(stack)
         quotes = [quote.rows_function for quote in stack[-args['num_quotations']:]]
         del(stack[-args['num_quotations']:])
         depth = len(stack) if args['depth'] is None else args['depth']
