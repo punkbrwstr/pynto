@@ -359,12 +359,14 @@ class _ewma(_Word):
             alpha = 2 /(args['window'] + 1.0)
             data = col.rows(row_range)
             idx = np.cumsum(np.where(~np.isnan(data),1,0)) - 1
-            starting_nans = np.where(idx == -1,np.nan,1)
+            nans = np.where(~np.isnan(data),1,np.nan)
+       #     starting_nans = np.where(idx == -1,np.nan,1)
             data = data[~np.isnan(data)]
             if len(data) == 0:
                 return np.full(idx.shape[0],np.nan)
             out = ewma_vectorized_safe(data,alpha)
-            return out[idx] * starting_nans
+            #return out[idx] * starting_nans
+            return out[idx] * nans
         stack.append(Column(col.header,f'{col.trace},ewma,',ewma_col))
 ewma = _ewma()
 
