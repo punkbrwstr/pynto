@@ -355,7 +355,8 @@ class _ewma(_Word):
     def __call__(self, window, fill_nans=True): return super().__call__(locals())
     def _operation(self, stack, args):
         col = stack.pop()
-        def ewma_col(row_range, window=args['window']):
+        window = args['window']
+        def ewma_col(row_range, window=window):
             alpha = 2 /(args['window'] + 1.0)
             data = col.rows(row_range)
             idx = np.cumsum(np.where(~np.isnan(data),1,0)) - 1
