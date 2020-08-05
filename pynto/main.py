@@ -43,8 +43,8 @@ class _Word:
         return self._evaluate([], row_range)
 
     def _evaluate(self, stack, row_range=None):
+        assert not hasattr(self, 'quoted'), 'Cannot evaluate quotation.'
         current = self._head()[0]
-        #assert not hasattr(current, 'quoted'), 'Cannot evaluate quotation.'
         while True:
             if hasattr(current, 'quoted'):
                 stack.append(Column('quotation','quotation', current.quoted))
