@@ -4,6 +4,7 @@ import warnings
 import numpy as np
 import numpy.ma as ma
 import pandas as pd
+import traceback
 from pynto.ranges import Range, get_index
 from pynto.tools import *
 from collections import namedtuple
@@ -54,11 +55,14 @@ class _Word:
                 try:
                     current._operation(stack, current.args)
                 except Exception as e:
+                    traceback.print_exc()
                     raise SyntaxError(f'{e} in word {current.name}') from e
             if not hasattr(current, 'next'):
                 break
             current = current.next
         if not row_range is None:
+            if len(stack) == 0:
+                return None
             values = np.column_stack([col.rows(row_range) for col in stack])
             return pd.DataFrame(values,
                         columns=[col.header for col in stack], index=row_range.to_index())
@@ -286,6 +290,7 @@ dup = _NoArgWord('dup', lambda stack: stack.append(stack[-1]))
 roll = _NoArgWord('roll', lambda stack: stack.insert(0,stack.pop()))
 swap = _NoArgWord('swap', lambda stack: stack.insert(-1,stack.pop()))
 drop = _NoArgWord('drop', lambda stack: stack.pop())
+rev = _NoArgWord('rev', lambda stack: stack.reverse())
 clear = _NoArgWord('dup', lambda stack: stack.clear())
 hsort = _NoArgWord('hsort', lambda stack: stack.sort(key=lambda c: c.header))
 
@@ -324,22 +329,17 @@ pull = _pull()
 
 class _hpull(_Word):
     def __init__(self): super().__init__('hpull')
-    def __call__(self, *headers, clear=False, is_re=False):
+    def __call__(self, *headers, clear=False, exact_match=False):
         return super().__call__(locals())
     def _operation(self, stack, args):
-        is_re = args['is_re']
         filtered_stack = []
         for header in args['headers']:
             to_del = []
+            matcher = lambda c: header == c.header if args['exact_match'] else re.match(header,col.header) is not None
             for i,col in enumerate(stack):
-                if is_re:
-                    if not re.match(header,col.header) is None:
-                        filtered_stack.append(stack[i])
-                        to_del.append(i)
-                else:
-                    if header == col.header:
-                        filtered_stack.append(stack[i])
-                        to_del.append(i)
+                if matcher(col):
+                    filtered_stack.append(stack[i])
+                    to_del.append(i)
             to_del.sort(reverse=True)
             for i in to_del:
                 del(stack[i])
@@ -347,8 +347,8 @@ class _hpull(_Word):
             del(stack[:])
         stack += filtered_stack
 hpull = _hpull()
-def hfilter(*headers, is_re=False):
-    return _hpull()(*headers, clear=True, is_re=is_re)
+def hfilter(*headers, exact_match=False):
+    return _hpull()(*headers, clear=True, exact_match=exact_match)
 
 class _ewma(_Word):
     def __init__(self): super().__init__('ewma')

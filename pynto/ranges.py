@@ -91,6 +91,9 @@ class Range(object):
             expanded.start += by
         return expanded
 
+    def offset(self, by):   
+        return self.__class__(self.start + by, self.stop + by, self.step, self.range_type)
+
     def start_date(self):
         assert not isinstance(self.step, int), 'Ordinal range'
         return get_date(self.step,self.start) if not self.start is None else None
