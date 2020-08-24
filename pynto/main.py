@@ -1,5 +1,4 @@
 import re
-import copy
 import warnings
 import numpy as np
 import numpy.ma as ma
@@ -32,12 +31,26 @@ class _Word:
         self.name = name
 
     def __or__(self, other):
-        this = copy.deepcopy(self)
-        other = copy.deepcopy(other)
+        this = self._copy()
+        other = other._copy()
         other = other._head()[0]
         this.next = other
         other.prev = this
         return other._tail()
+    
+    def _copy(self):
+        cls = self.__class__
+        copied = cls.__new__(cls)
+        copied.__dict__.update(self.__dict__)
+        first = copied
+        while hasattr(copied, 'prev'):
+            cls = copied.prev.__class__
+            prev = cls.__new__(cls)
+            prev.__dict__.update(copied.prev.__dict__)
+            copied.prev = prev
+            prev.next = copied
+            copied = prev
+        return first
 
     def __getitem__(self, key):
         row_range = key if isinstance(key, Range) else Range.from_indexer(key)
@@ -56,7 +69,7 @@ class _Word:
                     current._operation(stack, current.args)
                 except Exception as e:
                     traceback.print_exc()
-                    raise SyntaxError(f'{e} in word {current.name}') from e
+                    raise SyntaxError(f'{e} in word {current.__repr__(True)}') from e
             if not hasattr(current, 'next'):
                 break
             current = current.next
@@ -72,7 +85,7 @@ class _Word:
     def __invert__(self):
         return _quote(self)
 
-    def __repr__(self):
+    def __repr__(self, no_recurse=False):
         s = ''
         current = self._head()[0]
         while True:
@@ -87,11 +100,11 @@ class _Word:
                         if k != 'self':
                             a.append(str(k) + '=' + str(v))
                     s += '(' + ', '.join(a) + ')'
-            if hasattr(current, 'next'):
+            if no_recurse or not hasattr(current, 'next'):
+                break
+            else:
                 s += ' | '
                 current = current.next
-            else:
-                break
         return s
 
     def __len__(self):
@@ -112,7 +125,7 @@ class _Word:
         return current
 
     def __call__(self, args):
-        this = copy.deepcopy(self)
+        this = self._copy()
         del(args['__class__'])
         del(args['self'])
         this.args = args
@@ -388,6 +401,23 @@ class _call(_Word):
         quoted._evaluate(this_stack)
         stack.extend(this_stack)
 call = _call()
+
+class _curry(_Word):
+    def __init__(self): super().__init__('call')
+    def __call__(self, depth=1, copy=False): return super().__call__(locals())
+    def _operation(self, stack, args):
+        assert stack[-1].header == 'quotation'
+        quoted = stack.pop()
+        depth = args['depth']
+        if depth != 0:
+            this_stack = stack[-depth:]
+            if not args['copy']:
+                del(stack[-depth:])
+        else:
+            this_stack = []
+        quoted.rows_function = _NoArgWord('curried', lambda stack: stack.extend(this_stack)) | quoted.rows_function
+        stack.append(quoted)
+curry = _curry()
 
 class _each(_Word):
     def __init__(self): super().__init__('each')
