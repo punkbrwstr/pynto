@@ -293,6 +293,7 @@ gt = _get_binary_operator('gt', np.greater)
 le = _get_binary_operator('le', np.less_equal)
 lt = _get_binary_operator('lt', np.less)
 neg = _get_unary_operator('neg', np.negative)
+inv = _get_unary_operator('inv', np.reciprocal)
 absv = _get_unary_operator('absv', np.abs)
 sqrt = _get_unary_operator('sqrt', np.sqrt)
 exp = _get_unary_operator('exp', np.exp)
@@ -390,7 +391,7 @@ class _call(_Word):
     def __init__(self): super().__init__('call')
     def __call__(self, depth=None, copy=False): return super().__call__(locals())
     def _operation(self, stack, args):
-        assert stack[-1].header == 'quotation'
+        assert stack[-1].header == 'quotation', 'call needs a quotation on top of stack'
         quoted = stack.pop().rows_function
         depth = len(stack) if args['depth'] is None else args['depth']
         if depth != 0:
@@ -407,7 +408,7 @@ class _curry(_Word):
     def __init__(self): super().__init__('call')
     def __call__(self, depth=1, copy=False): return super().__call__(locals())
     def _operation(self, stack, args):
-        assert stack[-1].header == 'quotation'
+        assert stack[-1].header == 'quotation', 'curry needs a quotation on top of stack'
         quoted = stack.pop()
         depth = args['depth']
         if depth != 0:
