@@ -641,6 +641,18 @@ def wlag(number):
 wzscore = ~wstd | ~wlast | ~wmean | cleave(3, depth=1) | sub | swap | div
 
 
+def _cumsum(stack):
+        col = stack.pop()
+        def cumsum_col(row_range):
+            v = col.rows(row_range)
+            nans = np.isnan(v)
+            cumsum = np.nancumsum(v)
+            v[nans] = -np.diff(np.concatenate([[0.],cumsum[nans]]))
+            return np.cumsum(v)
+        stack.append(Column(col.header, f'{col.trace} | cumsum', cumsum_col))
+cumsum = _NoArgWord('cumsum', _cumsum)
+
+
 # Data cleaning
 class _fill(_Word):
     def __init__(self): super().__init__('fill')
@@ -648,7 +660,7 @@ class _fill(_Word):
     def _operation(self, stack, args):
         col = stack.pop()
         def fill(row_range, value=args['value']):
-            x = col.rows(row_range)
+            x = col.rows(row_range).copy()
             x[np.isnan(x)] = value
             return x
         stack.append(Column(col.header,f'{col.trace} | fill',fill))

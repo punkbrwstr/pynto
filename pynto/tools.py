@@ -207,3 +207,75 @@ def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order='C
         out_view += offset[:, np.newaxis] * scaling_factors[np.newaxis, 1:]
 
     return out
+
+
+def corrcoeff_1d(A,B):
+    # Rowwise mean of input arrays & subtract from input arrays themeselves
+    A_mA = A - A.mean(-1,keepdims=1)
+    B_mB = B - B.mean(-1,keepdims=1)
+    
+    # Sum of squares
+    ssA = np.einsum('i,i->',A_mA, A_mA)
+    ssB = np.einsum('i,i->',B_mB, B_mB)
+    
+    # Finally get corr coeff
+    return np.einsum('i,i->',A_mA,B_mB)/np.sqrt(ssA*ssB)
+
+# https://stackoverflow.com/a/40085052/ @ Divakar
+def strided_app(a, L, S ):  # Window len = L, Stride len/stepsize = S
+    nrows = ((a.size-L)//S)+1
+    n = a.strides[0]
+    return np.lib.stride_tricks.as_strided(a, shape=(nrows,L), strides=(S*n,n))
+
+# https://stackoverflow.com/a/41703623/ @Divakar
+def corr2_coeff_rowwise(A,B):
+    # Rowwise mean of input arrays & subtract from input arrays themeselves
+    A_mA = A - A.mean(-1,keepdims=1)
+    B_mB = B - B.mean(-1,keepdims=1)
+
+    # Sum of squares across rows
+    ssA = np.einsum('ij,ij->i',A_mA, A_mA)
+    ssB = np.einsum('ij,ij->i',B_mB, B_mB)
+
+    # Finally get corr coeff
+    return np.einsum('ij,ij->i',A_mA,B_mB)/np.sqrt(ssA*ssB)
+def nancorrcoeff_1d(A,B):
+    # Get combined mask
+    comb_mask = ~(np.isnan(A) & ~np.isnan(B))
+    count = comb_mask.sum()
+
+    # Rowwise mean of input arrays & subtract from input arrays themeselves
+    A_mA = A - np.nansum(A * comb_mask,-1,keepdims=1)/count
+    B_mB = B - np.nansum(B * comb_mask,-1,keepdims=1)/count
+
+    # Replace NaNs with zeros, so that later summations could be computed    
+    A_mA[~comb_mask] = 0
+    B_mB[~comb_mask] = 0
+
+    ssA = np.inner(A_mA,A_mA)
+    ssB = np.inner(B_mB,B_mB)
+
+    # Finally get corr coeff
+    return np.inner(A_mA,B_mB)/np.sqrt(ssA*ssB)
+
+def nancorrcoeff_rowwise(A,B):
+    # Input : Two 2D arrays of same shapes (mxn). Output : One 1D array  (m,)
+    # Get combined mask
+    comb_mask = ~(np.isnan(A) & ~np.isnan(B))
+    count = comb_mask.sum(axis=-1,keepdims=1)
+
+    # Rowwise mean of input arrays & subtract from input arrays themeselves
+    A_mA = A - np.nansum(A * comb_mask,-1,keepdims=1)/count
+    B_mB = B - np.nansum(B * comb_mask,-1,keepdims=1)/count
+
+    # Replace NaNs with zeros, so that later summations could be computed    
+    A_mA[~comb_mask] = 0
+    B_mB[~comb_mask] = 0
+
+    # Sum of squares across rows
+    ssA = np.einsum('ij,ij->i',A_mA, A_mA)
+    ssB = np.einsum('ij,ij->i',B_mB, B_mB)
+
+    # Finally get corr coeff
+    return np.einsum('ij,ij->i',A_mA,B_mB)/np.sqrt(ssA*ssB)
+
