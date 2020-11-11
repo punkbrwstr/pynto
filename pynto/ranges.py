@@ -145,6 +145,16 @@ def round_w_fri(date):
     else:
         return date + datetime.timedelta(days=4 - weekday)
 
+def round_w_tue(date):
+    date = parse_date(date)
+    weekday = date.weekday()
+    if weekday == 1:
+        return date
+    elif weekday == 0:
+        return date + datetime.timedelta(days=1)
+    else:
+        return date + datetime.timedelta(days=8 - weekday)
+
 def round_bm(date):
     date = parse_date(date)
     next_month = date.replace(day=28) + datetime.timedelta(days=4) 
@@ -201,6 +211,13 @@ PERIODICITIES = {
     'W-FRI' : Periodicity(
             datetime.date(1970,1,2),
             round_w_fri,
+            lambda d1, d2: (d2 - d1).days // 7,
+            lambda d, i: d + datetime.timedelta(days=i * 7), 
+            1,
+            52),
+    'W-TUE' : Periodicity(
+            datetime.date(1969,12,30),
+            round_w_tue,
             lambda d1, d2: (d2 - d1).days // 7,
             lambda d, i: d + datetime.timedelta(days=i * 7), 
             1,
