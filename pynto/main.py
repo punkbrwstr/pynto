@@ -196,34 +196,44 @@ def _frame_to_columns(stack, frame):
     else:
         index_type = 'int'
     for header, col in frame.iteritems():
-        def frame_col(row_range, col=col, index_type=index_type):
-            assert not (index_type == 'int' and row_range.range_type == 'datetime'), 'Cannot evaluate int-indexed frame over datetime range'
-            if row_range.range_type == 'int':
-                if row_range.start is None:
-                    row_range.start = 0
-                elif row_range.start < 0:
-                    row_range.start += len(col.index)
-                if row_range.stop is None:
-                    row_range.stop = len(col.index)
-                elif row_range.stop < 0:
-                    row_range.stop += len(col.index)
-                values =  col.values[row_range.start:row_range.stop:row_range.step]
+        def frame_col(r, col=col, index_type=index_type):
+            assert not (index_type == 'int' and r.range_type == 'datetime'), 'Cannot evaluate int-indexed frame over datetime range'
+            if r.range_type == 'int':
+                if r.start is None:
+                    r.start = 0
+                elif r.start < 0:
+                    r.start += len(col.index)
+                if r.stop is None:
+                    r.stop = len(col.index)
+                elif r.stop < 0:
+                    r.stop += len(col.index)
+                values = col.values[r.start:r.stop:r.step]
             else:
-                if not row_range.start:
-                    row_range.start = get_index(col.index.freq.name, col.index[0])
-                if not row_range.stop:
-                    row_range.stop = 1 + get_index(col.index.freq.name, col.index[-1])
-                if not row_range.step:
-                    row_range.step = col.index.freq.name
-                if col.index.freq.name == row_range.step:
-                    start = get_index(row_range.step, col.index[0])
-                    values =  col.values[max(row_range.start - start,0):row_range.stop - start]
-                    if row_range.start - start < 0:
-                        values = np.concatenate([np.full(start - row_range.start, np.nan), values])
+                if col.index.freq is None:
+                    try:
+                        col.index.freq = pd.infer_freq(col.index)
+                    except:
+                        raise Exception('Unable to determine periodicity of pandas data.')
+                if not r.start:
+                    r.start = get_index(col.index.freq.name, col.index[0])
+                if not r.stop:
+                    r.stop = 1 + get_index(col.index.freq.name, col.index[-1])
+                if not r.step:
+                    r.step = col.index.freq.name
+                if col.index.freq.name != r.step:
+                    col =  col.resample(r.to_index()).asfreq()
+                start, end = get_index(r.step, col.index[0]), get_index(r.step, col.index[-1]) + 1
+                values = []
+                if r.start < start:
+                    values.append(np.full(min(start - r.start, len(r)), np.nan))
+                if r.start < end and r.stop >= start:
+                    values.append(col.values[max(r.start - start,0):min(r.stop - start, len(col))])
+                if len(values) > 0:
+                    values = np.concatenate(values)
                 else:
-                    values =  col.reindex(row_range.to_index(), method='ffill').values
-            if len(values) < len(row_range):
-                values = np.concatenate([values, np.full(len(row_range) - len(values), np.nan)])
+                    values = pd.Series()
+            if len(values) < len(r):
+                values = np.concatenate([values, np.full(len(r) - len(values), np.nan)])
             return values
         stack.append(Column(header,f'csv {header}',frame_col))
 
