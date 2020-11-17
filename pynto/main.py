@@ -1,6 +1,7 @@
 import re
 import copy
 import warnings
+import numbers
 import numpy as np
 import numpy.ma as ma
 import pandas as pd
@@ -32,6 +33,8 @@ class _Word:
         self.name = name
 
     def __or__(self, other):
+        if isinstance(other, numbers.Number):
+            other = _c()(other)
         this = self._copy()
         other = other._copy()
         other = other._head()[0]
@@ -171,6 +174,13 @@ class _c(_Word):
                 return np.full(len(row_range), value)
             stack.append(Column('constant', str(value), const_col))
 c = _c()
+
+def _timestamp(stack):
+    def timestamp_col(row_range):
+        assert row_range.range_type == 'datetime', "Cannot get timestamp for int step range"
+        return np.array(row_range.to_index().astype('int'))
+    stack.append(Column('timestamp','timestamp',timestamp_col))
+timestamp = _NoArgWord('timestamp', _timestamp)
 
 class _c_range(_Word):
 
