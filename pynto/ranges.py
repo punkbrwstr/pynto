@@ -113,8 +113,8 @@ class Range(object):
                 get_date(self.step,self.stop), freq=self.step)[:-1]
 
 def now():
-    d = datetime.datetime.now()
-    if d.weekday() < 5 and datetime.datetime.now().hour >= 17:
+    d = datetime.datetime.utcnow()
+    if d.weekday() < 5 and datetime.datetime.now().hour >= 22:
         return offset('B', d, 1)
     else:
         return d.date()
