@@ -12,7 +12,12 @@ from collections import namedtuple
 from dataclasses import dataclass
 from typing import Callable
 
+#import psutil
+from multiprocessing import Pool
+
 #Column = namedtuple('Column',['header', 'trace', 'rows'])
+def get_rows(col_and_range):
+    return col_and_range[0].rows(col_and_range[1])
 
 @dataclass
 class Column:
@@ -99,11 +104,7 @@ class _Word:
             else:
                 s += current.name
                 if hasattr(current, 'args'):
-                    a = []
-                    for k,v in current.args.items():
-                        if k != 'self':
-                            a.append(str(k) + '=' + str(v))
-                    s += '(' + ', '.join(a) + ')'
+                    s += '(' + ', '.join([f'{k}={str(v)[:20]}' for k,v in current.args.items() if k != self]) + ')'
             if no_recurse or not hasattr(current, 'next'):
                 break
             else:
@@ -318,7 +319,9 @@ absv = _get_unary_operator('absv', np.abs)
 sqrt = _get_unary_operator('sqrt', np.sqrt)
 exp = _get_unary_operator('exp', np.exp)
 log = _get_unary_operator('log', np.log)
-zeroToNa = _get_unary_operator('zeroToNa', lambda x: np.where(np.equal(x,0),np.nan,x))
+zero_to_na = _get_unary_operator('zero_to_na', lambda x: np.where(np.equal(x,0),np.nan,x))
+is_na = _get_unary_operator('is_na', lambda x: np.where(np.isnan(x), 1, 0))
+logical_not = _get_unary_operator('logical_not', lambda x: np.where(np.logical_not(x), 1, 0))
 
 # Stack manipulation
 dup = _NoArgWord('dup', lambda stack: stack.append(stack[-1]))
@@ -621,8 +624,10 @@ def _rev_expanding_op(stack):
 rev_expanding = _NoArgWord('rev_expanding', _rev_expanding_op)
 
 def _get_window_operator(name,  twod_operation, oned_operation):
-    def _operation(stack):
+    global _window_operator_operation
+    def _window_operator_operation(stack):
             col = stack.pop()
+            global window_operator_col
             def window_operator_col(row_range):
                 values = col.rows(row_range)
                 if len(values.shape) == 2:
@@ -638,7 +643,7 @@ def _get_window_operator(name,  twod_operation, oned_operation):
                         return ma.array(cum,mask=values.mask).compressed()
                     return cum 
             stack.append(Column(col.header, f'{col.trace} | {name}', window_operator_col))
-    return _NoArgWord(name, _operation)
+    return _NoArgWord(name, _window_operator_operation)
 
 
 wsum = _get_window_operator('wsum',np.nansum, make_expanding(np.add))
