@@ -1,10 +1,17 @@
 import calendar
 import datetime
 from collections import namedtuple
+from dataclasses import dataclass
 from dateutil.relativedelta import relativedelta
+from typing import Union
 import pandas as pd
 
-class Range(object):
+@dataclass
+class Range:
+    start : int 
+    stop : int
+    step : Union[str,int]
+    range_type : str
 
     @classmethod
     def from_indexer(cls, indexer):
@@ -54,14 +61,8 @@ class Range(object):
         range_type = 'int' if isinstance(step, int) else 'datetime'
         return cls(start, stop, step, range_type)
 
-    def __init__(self, start, stop, step, range_type):
-        self.start = start
-        self.stop = stop
-        self.step = step
-        self.range_type = range_type
 
     def __len__(self):
-        self._fill_blanks()
         return self.stop - self.start
 
                 
@@ -74,14 +75,6 @@ class Range(object):
             return r
         else:
             return f'[{str(self.start)}:{str(self.stop)}:{str(self.step)}]'
-
-    def _fill_blanks(self):
-        if self.range_type == 'int':
-            assert not self.stop is None, 'Range is missing stop'
-            if not self.start:
-                self.start = 0
-            if not self.step:
-                self.step = 1
 
     def expand(self, by):   
         expanded = self.__class__(self.start, self.stop, self.step, self.range_type)
@@ -105,7 +98,6 @@ class Range(object):
         return get_date(self.step,self.stop - (0 if exclusive else 1))
 
     def to_index(self):
-        self._fill_blanks()
         if self.range_type == 'int':
             return range(self.start, self.stop, self.step)
         else:

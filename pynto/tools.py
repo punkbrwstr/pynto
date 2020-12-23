@@ -13,11 +13,12 @@ def expanding_var(x, axis=None):
     count = np.add.accumulate(np.where(nan_mask, 0, x / x))
     return (cumsumOfSquares - cumsum * cumsum / count) / (count - 1)
 
-def make_expanding(ufunc):
-    def expanding(x, axis=None):
-        mask = np.isnan(x)
-        return np.where(mask, np.nan, ufunc.accumulate(np.where(mask,0,x)))
-    return expanding
+def expanding_std(x, axis=None):
+    nan_mask = np.isnan(x)
+    cumsum = np.add.accumulate(np.where(nan_mask, 0, x))
+    cumsumOfSquares = np.add.accumulate(np.where(nan_mask, 0, x * x))
+    count = np.add.accumulate(np.where(nan_mask, 0, x / x))
+    return np.sqrt((cumsumOfSquares - cumsum * cumsum / count) / (count - 1))
 
 def ewma_vectorized_safe(data, alpha, row_size=None, dtype=None, order='C', out=None):
     data = np.array(data, copy=False)
