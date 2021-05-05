@@ -534,7 +534,7 @@ call = _call()
 def _partial_stack_function(stack, args):
     stack.extend(args['stack'])
 class _partial(_Word):
-    def __init__(self): super().__init__('call')
+    def __init__(self): super().__init__('partial')
     def __call__(self, depth=1, copy=False): return super().__call__(locals())
     def _operation(self, stack, args):
         assert stack[-1].header == 'quotation', 'partial needs a quotation on top of stack'

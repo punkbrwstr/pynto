@@ -106,7 +106,7 @@ class Range:
 
 def now():
     d = datetime.datetime.utcnow()
-    if d.weekday() < 5 and d.hour >= 23:
+    if d.weekday() < 5 and d.hour >= 22:
         return offset('B', d, 1)
     else:
         return d.date()
