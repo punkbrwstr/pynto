@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def expanding_mean(x, axis=None):
     nan_mask = np.isnan(x)
     cumsum = np.add.accumulate(np.where(nan_mask, 0, x))
