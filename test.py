@@ -164,5 +164,112 @@ class TestDataCleanup(unittest.TestCase):
         self.assertEqual(result.iloc[3,-1], 5)
         self.assertEqual(result.iloc[4,-1], 6)
 
+class DbTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        try:
+            del(pt.db['test'])
+        except KeyError:
+            pass
+
+    @classmethod
+    def tearDownClass(cls):
+        pass
+
+class FrameTest(DbTest):
+    def setUp(self):
+        pt.db['test'] = pd.DataFrame(np.arange(12).reshape(3,4),columns=['a','b','c','d'],
+                            index=pd.date_range('1/1/2019',periods=3,freq='B'))
+
+    def tearDown(self):
+        del(pt.db['test'])
+        
+    def test_read(self):
+        f = pt.db['test']
+        self.assertEqual(f.shape[1], 4)
+        self.assertEqual(f.shape[0], 3)
+        self.assertEqual(f.sum().sum(), 66)
+
+    def test_append_row(self):
+        pt.db['test'] = pd.DataFrame(np.arange(4).reshape(1,4),columns=['a','b','c','d'],
+                            index=pd.date_range('1/4/2019',periods=1,freq='B'))
+        f = pt.db['test']
+        self.assertEqual(f.shape[1], 4)
+        self.assertEqual(f.shape[0], 4)
+        self.assertEqual(f.sum().sum(), 72)
+
+    def test_append_col(self):
+        pt.db['test'] = pd.DataFrame(np.arange(3).reshape(3,1),columns=['e'],
+                            index=pd.date_range('1/1/2019',periods=3,freq='B'))
+        f = pt.db['test']
+        self.assertEqual(f.shape[1], 5)
+        self.assertEqual(f.shape[0], 3)
+        self.assertEqual(f.sum().sum(), 69)
+
+class SeriesTest(DbTest):
+    def setUp(self):
+        pt.db['test'] = pd.Series(np.arange(3), index=pd.date_range('1/1/2019',periods=3,freq='B'))
+
+    def tearDown(self):
+        del(pt.db['test'])
+        
+    def test_read(self):
+        s = pt.db['test']
+        self.assertEqual(len(s), 3)
+        self.assertEqual(s.sum(), 3)
+
+    def test_read_before(self):
+        s = pt.db.read('test', '2018-12-31')
+        self.assertEqual(len(s), 4)
+        self.assertEqual(s.iloc[0], 0)
+
+    def test_read_after(self):
+        s = pt.db.read('test', stop='2019-01-05')
+        self.assertEqual(len(s), 4)
+        self.assertEqual(s.iloc[-1], 0)
+
+    def test_append(self):
+        pt.db['test'] = pd.Series(np.arange(3), index=pd.date_range('1/4/2019',periods=3,freq='B'))
+        s = pt.db['test']
+        self.assertEqual(len(s), 6)
+        self.assertEqual(s.sum(), 6)
+
+    def test_append_with_pad(self):
+        pt.db['test'] = pd.Series(np.arange(3), index=pd.date_range('1/5/2019',periods=3,freq='B'))
+        s = pt.db['test']
+        self.assertEqual(len(s), 7)
+        self.assertEqual(s.sum(), 6)
+
+    def test_replace(self):
+        pt.db['test'] = pd.Series(10, index=pd.date_range('1/2/2019',periods=1,freq='B'))
+        s = pt.db['test']
+        self.assertEqual(len(s), 3)
+        self.assertEqual(s.sum(), 12)
+
+    def test_prepend(self):
+        pt.db['test'] = pd.Series(np.arange(3), index=pd.date_range('12/31/2018',periods=3,freq='B'))
+        s = pt.db['test']
+        self.assertEqual(len(s), 3)
+        self.assertEqual(s.sum(), 3)
+
+class MultiIndexFrameTest(DbTest):
+
+    def tearDown(self):
+        del(pt.db['test'])
+
+    def test_square(self):
+        index = pd.MultiIndex.from_product([pd.date_range('1/1/2019',periods=5,freq='B'),['x','y','z']])
+        pt.db['test'] = pd.DataFrame(np.arange(45).reshape(15,3),columns=['a','b','c'], index=index)
+        f = pt.db['test']
+        f.loc['2019-01-07'].shape == (3,3)
+        f.loc['2019-01-07'].iloc[2,2] == 44
+        f.loc['2019-01-07','x']['a'] == 36
+
+    def test_rect(self):
+        index = pd.MultiIndex.from_product([pd.date_range('1/1/2019',periods=5,freq='B'),['x','y','z','aa','bb']])
+        pt.db['test'] = pd.DataFrame(np.arange(75).reshape(25,3),columns=['a','b','c'], index=index)
+        f = pt.db['test']
+        f.loc['2019-01-07'].shape == (5,3)
+
 if __name__ == '__main__':
     unittest.main()

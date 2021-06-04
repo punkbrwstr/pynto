@@ -52,7 +52,7 @@ class Metadata:
 
     @property
     def periodicity(self):
-        return getattr(periodicities, self.periodicity_code)
+        return periodicities.from_pandas(self.periodicity_code)
 
 class Db:
 
@@ -66,7 +66,7 @@ class Db:
         return redis.Redis(connection_pool=self._pool)
 
     def __setitem__(self, key: str, pandas: Union[pd.Series, pd.DataFrame]):
-        if pandas.index.freq is None:
+        if not isinstance(pandas.index, pd.MultiIndex) and pandas.index.freq is None:
             raise Exception('Missing index freq.')
         series_to_save = []
         if isinstance(pandas, pd.Series):
@@ -84,8 +84,8 @@ class Db:
                 index=pandas.index.levels[0]
                 pandas = pd.DataFrame(pandas.values.reshape(len(index), len(columns)),
                             index=index, columns=columns) 
-            periodicity = periodicities.from_pandas(frame.index.freq.name)
-            end = periodicity.get_index(frame.index[-1].date()) + 1
+            periodicity = periodicities.from_pandas(pandas.index.freq.name)
+            end = periodicity.get_index(pandas.index[-1].date()) + 1
             try:
                 md = self._read_metadata(key)
                 if md.periodicity != periodicity:
@@ -113,7 +113,7 @@ class Db:
                 self.connection.append(key, ('\t' + '\t'.join(new_columns)).encode()) 
         for key, series in series_to_save:
             periodicity = periodicities.from_pandas(series.index.freq.name)
-            start = periodicity.get_index(series.index[0])
+            start = periodicity.get_index(series.index[0].date())
             series_md = Metadata(series.dtype.str, series.index.freq.name,
                                     start, start + len(series.index)) 
             try:
@@ -125,7 +125,7 @@ class Db:
             data = series.values
             if saved_md is None or series_md.start < saved_md.start:
                 self._write(key, series_md, data.tobytes())
-                return
+                continue
             if series_md.start > saved_md.stop + 1:
                 pad = np.full(series_md.start - saved_md.stop - 1, TYPES[saved_md.dtype].pad_value)
                 data = np.hstack([pad, data])
@@ -138,10 +138,10 @@ class Db:
                 self._update_end(key, series_md.stop)
 
     def __delitem__(self, key: str):
-        md = _read_metadata(key)
+        md = self._read_metadata(key)
         if md.is_frame:
-            for series in self.read_frame_series_keys(key):
-                self.delete_series(series)
+            for series_key in self.read_frame_series_keys(key):
+                self.connection.delete(series_key)
         self.connection.delete(key)
 
     def __getitem__(self, key: str):
@@ -241,8 +241,8 @@ class Db:
             s = pd.Series(output, index=Ranges(
                             start_index,stop_index,md.periodicity).to_index(), name=key)
             s = getattr(s.resample(periodicity),resample_method)().reindex(Range(start, stop, periodicity).to_index())
-            return (periodicity.get_index(s.index[0]),
-                    periodicity.get_index(s.index[-1]),
+            return (periodicity.get_index(s.index[0].date()),
+                    periodicity.get_index(s.index[-1].date()),
                     periodicity, s.values)
         else:
             return (start_index, stop_index, md.periodicity, output)
@@ -283,7 +283,7 @@ class Db:
     def _write(self, key: str, metadata: Metadata, data: np.ndarray):
         packed_md = struct.pack(METADATA_FORMAT,
                                 '{0: <6}'.format(metadata.dtype).encode(),
-                                '{0: <6}'.format(metadata.periodicity).encode(),
+                                '{0: <6}'.format(metadata.periodicity.pandas_offset_code).encode(),
                                 metadata.start,
                                 metadata.stop) 
         self.connection.set(key, packed_md + data)
