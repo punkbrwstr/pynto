@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Dict, Any
 from .ranges import Range
 from .tools import *
+from .database import get_client
 from . import vocabulary
 from . import periodicities
 
@@ -797,12 +798,12 @@ class Join(Word):
                                 join_col, {'col1': col1, 'col2': col2, 'date': args['date']}))
 
 def saved_col(range_, args):
-    if range_.start is not None and range_.stop is not None and range_.step is not None:
+    if range_.start is not None and range_.stop is not None and range_.periodicity is not None:
         return get_client().read_series_data(args['key'], range_.start,
-                        range_.stop, range_.step)[3]
+                        range_.stop, range_.periodicity)[3]
     else:
         data = get_client().read_series_data(args['key'])
-        values = data[3][range_.start: range_.stop: range_.step]
+        values = data[3][range_.start: range_.stop: range_.periodicity]
         if range_.start is None:
             range_.start = data[0]
         elif range_.start < 0:
@@ -816,7 +817,7 @@ def saved_col(range_, args):
             range_.stop = data[1] + range_.stop
         else:
             range_.stop = data[0] + range_.stop
-        range_.step = data[2]
+        range_.periodicity_code = data[2]
         return values
 
 @dataclass

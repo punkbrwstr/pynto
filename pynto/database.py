@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 import redis
 import struct
@@ -6,13 +7,13 @@ import numpy as np
 import pandas as pd
 from dataclasses import dataclass
 from collections import namedtuple
-from typing import Union
+from typing import Union, Dict
 from redis.connection import UnixDomainSocketConnection
 from .dates import datelike
 from .ranges import Range
 from . import periodicities
 
-def get_client():
+def get_client() -> Db:
     global _CLIENT
     if not '_CLIENT' in globals():
         args = {}
@@ -30,7 +31,7 @@ def get_client():
 
 Type = namedtuple('Type', ['code', 'pad_value', 'length'])
 
-TYPES = {
+TYPES: Dict[str, Type]  = {
     '<f8': Type('<f8',np.nan,8),
     '|b1': Type('|b1',False,1),
     '<i8': Type('<i8',0,8)
@@ -150,9 +151,11 @@ class Db:
     def read(self, key: str,
                 start: Union[int,datelike] = None,
                 stop: Union[int,datelike] = None,
-                periodicity: periodicities.Periodicity = None,
+                periodicity: Union[str, periodicities.Periodicity] = None,
                 resample_method: str = 'last') -> Union[pd.Series, pd.DataFrame]:
         md = self._read_metadata(key)
+        if isinstance(periodicity, str):
+            periodicity = getattr(periodicities, periodicity)
         if not md.is_frame:
             data = self.read_series_data(key, start, stop, periodicity, md, resample_method)
             return pd.Series(data[3], index=Range(*data[:3]).to_index(), name=key)
@@ -268,8 +271,8 @@ class Db:
                             resample_method: str = 'last'):
         if md is None:
             md = self._read_metadata(key)
-        start = md.start if start is None else get_index(md.periodicity, start)
-        stop = md.stop if stop is None else get_index(md.periodicity, stop)
+        start = md.start if start is None else md.periodicity.get_index(start)
+        stop = md.stop if stop is None else md.periodicity.get_index(stop)
         periodicity = md.periodicity if periodicity is None else periodicity
         columns = self.read_frame_headers(key)
         data = np.column_stack([self.read_series_data(f'{key}:{c}', start, stop, periodicity,

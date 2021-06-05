@@ -2,7 +2,7 @@ import numpy as np
 from .main import *
 
 
-def define(name: str, word: Word) -> None:
+def _define(name: str, word) -> None:
     globals()[name] = word
 
 append = Constant()
