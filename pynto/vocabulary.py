@@ -72,6 +72,8 @@ log_change = get_window_operator('log_change', log_change_twod_op, log_change_on
 first = get_window_operator('first', first_twod_op, first_oned_op)
 last = get_window_operator('last',last_twod_op,last_oned_op)
 append_saved = Saved('append_saved')
+quote = Quotation()
+begin = Word('')
 
 
 zscore = quote(quote(std).quote(last).quote(mean).cleave(3, depth=1).sub.swap.div).call

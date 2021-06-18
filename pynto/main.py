@@ -85,6 +85,7 @@ class Word:
     args: dict = None
 
     def __getattr__(self, name):
+        print(f'getting {name} for {self.name} ({type(self)}')
         return self.__add__(getattr(vocabulary,name))
 
     def __add__(self, other: Word) -> Word:
@@ -123,19 +124,24 @@ class Word:
     def __len__(self):
         return self._head()[1]
 
-    def __call__(self, args) -> Word:
+    def __call__(self, args = {}) -> Word:
         this = self._copy()
-        del(args['__class__'])
-        del(args['self'])
+        if '__class__' in args:
+            del(args['__class__'])
+        if 'self' in args:
+            del(args['self'])
         this.args = args
         return this
+
+    def _operation(self, stack, args):
+        pass
 
     @property
     def columns(self):
         return self._evaluate([], None)
     
     def quote(self, quoted: Word):
-        self.next_ = Word('quotation', quoted=quoted)
+        self.next_ = Quotation(quoted=quoted)
         self.next_.prev = self
         return self.next_
     
@@ -157,6 +163,7 @@ class Word:
         assert not self.quoted, 'Cannot evaluate quotation.'
         current = self._head()[0]
         while True:
+            print(f'evaluating {current.name} quoted: {current.quoted}')
             if current.quoted:
                 stack.append(Column('quotation','quotation', current.quoted))
             else:
@@ -165,8 +172,9 @@ class Word:
                         current = current()
                     current._operation(stack, current.args)
                 except Exception as e:
+                    raise e
                     traceback.print_exc()
-                    error_msg = f' in word "{current}"'
+                    error_msg = f' in word "{current.name}"'
                     if current.prev is not None:
                         error_msg += ' preceded by "'
                         prev_expr = repr(current.prev)
@@ -209,10 +217,12 @@ class Word:
         return current
 
 @dataclass
-class quote(Word):
+class Quotation(Word):
+    name: str = 'quotation'
     
-    def _init__(self, quoted):
-        super().__init__('quote', quoted=quoted)
+    def __call__(self, quoted):
+        self.quoted=quoted
+        return super().__call__(locals())
 
 @dataclass
 class NullaryWord(Word):
@@ -425,6 +435,7 @@ class HeaderPull(Word):
     def _operation(self, stack, args):
         filtered_stack = []
         for header in args['headers']:
+            print(f'header {header}')
             to_del = []
             matcher = lambda c: header == c.header if args['exact_match'] else re.match(header,col.header) is not None
             for i,col in enumerate(stack):
@@ -442,7 +453,7 @@ class HeaderPull(Word):
 class HeaderFilter(HeaderPull):
     name: str = 'hfilter'
     def __call__(self, *headers, clear=True, exact_match=False):
-        return super().__call__(locals())
+        return super().__call__(*headers, clear=True, exact_match=False)
 
 def ewma_col(range_, args):
     alpha = 2 /(args['window'] + 1.0)
