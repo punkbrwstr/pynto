@@ -73,6 +73,7 @@ class Column:
                 self.copies -= 1
             return rows
         except Exception as e:
+            print('Error in {self.header}')
             raise e
             raise ValueError(f'{e} in rows for column "{self.header}" ({self.trace})') from e
             
@@ -85,7 +86,6 @@ class Word:
     args: dict = None
 
     def __getattr__(self, name):
-        print(f'getting {name} for {self.name} ({type(self)}')
         return self.__add__(getattr(vocabulary,name))
 
     def __add__(self, other: Word) -> Word:
@@ -163,7 +163,6 @@ class Word:
         assert not self.quoted, 'Cannot evaluate quotation.'
         current = self._head()[0]
         while True:
-            print(f'evaluating {current.name} quoted: {current.quoted}')
             if current.quoted:
                 stack.append(Column('quotation','quotation', current.quoted))
             else:
@@ -435,7 +434,6 @@ class HeaderPull(Word):
     def _operation(self, stack, args):
         filtered_stack = []
         for header in args['headers']:
-            print(f'header {header}')
             to_del = []
             matcher = lambda c: header == c.header if args['exact_match'] else re.match(header,col.header) is not None
             for i,col in enumerate(stack):
@@ -836,8 +834,8 @@ class Saved(Word):
     name: str = 'append_saved'
     def __call__(self, key): return super().__call__(locals())
     def _operation(self, stack, args):
-        md = read_metadata(args['key'])
-        if md.dtype == '<U':
+        md = get_client()._read_metadata(args['key'])
+        if not md.is_frame:
             stack.append(Column(args['key'], args['key'], saved_col, args))
         else:   
             for header in get_client().read_frame_headers(args['key']):

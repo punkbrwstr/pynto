@@ -139,7 +139,10 @@ class Db:
                 self._update_end(key, series_md.stop)
 
     def __delitem__(self, key: str):
-        md = self._read_metadata(key)
+        try:
+            md = self._read_metadata(key)
+        except KeyError:
+            return
         if md.is_frame:
             for series_key in self.read_frame_series_keys(key):
                 self.connection.delete(series_key)
@@ -241,9 +244,10 @@ class Db:
         else:
             output = np.full(stop_index - start_index,TYPES[md.dtype].pad_value)
         if needs_resample:
-            s = pd.Series(output, index=Ranges(
+            s = pd.Series(output, index=Range(
                             start_index,stop_index,md.periodicity).to_index(), name=key)
-            s = getattr(s.resample(periodicity),resample_method)().reindex(Range(start, stop, periodicity).to_index())
+            s = getattr(s.resample(periodicity.pandas_offset_code),
+                            resample_method)().reindex(Range(start, stop, periodicity).to_index())
             return (periodicity.get_index(s.index[0].date()),
                     periodicity.get_index(s.index[-1].date()),
                     periodicity, s.values)

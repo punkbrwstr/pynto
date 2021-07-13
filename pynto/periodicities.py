@@ -35,25 +35,15 @@ class Periodicity:
 
 B =  Periodicity('B', datetime.date(1970,1,1), 0, 260, 'B', round_b, count_b, add_b)
 W_F = Periodicity('W_F', datetime.date(1970,1,2), 1, 52, 'W-FRI',
-        round_w_fri,
-        lambda d1, d2: (d2 - d1).days // 7,
-        lambda d, i: d + datetime.timedelta(days=i * 7)) 
+        round_w_fri, count_w, offset_w) 
 W_T = Periodicity('W_T', datetime.date(1969,12,30), 1, 52, 'W-TUE',
-        round_w_tue,
-        lambda d1, d2: (d2 - d1).days // 7,
-        lambda d, i: d + datetime.timedelta(days=i * 7)) 
-M = Periodicity('W_M', datetime.date(1970,1,30), 2, 12, 'BM',
-        round_bm,
-        lambda d2, d1: (d1.year - d2.year) * 12 + d1.month - d2.month,
-        lambda d, i: add_bm(d,i))
+        round_w_tue, count_w, offset_w)
+M = Periodicity('M', datetime.date(1970,1,30), 2, 12, 'BM',
+        round_bm, count_m, add_bm)
 Q = Periodicity('Q', datetime.date(1970,3,31), 3, 4, 'BQ-DEC',
-        round_bq_dec,
-        lambda d2, d1: ((d1.year - d2.year) * 12 + d1.month - d2.month) // 3,
-        lambda d, i: add_bm(d, i * 3))
+        round_bq_dec, count_q, offset_q)
 Y = Periodicity('Y', datetime.date(1970,12,31), 3, 1, 'BA-DEC',
-        round_ba_dec,
-        lambda d2, d1: d1.year - d2.year,
-        lambda d, i: add_bm(d, i * 12))
+        round_ba_dec, count_y, offset_y)
 
 _pandas_map = {'B': B, 'W-TUE': W_T, 'W-FRI': W_F, 'BM': M, 'BQ-DEC': Q, 'BA-DEC': Y}
 from_pandas = _pandas_map.get

@@ -9,7 +9,7 @@ from . import periodicities
 class Range:
 
     def __init__(self, start: Union[datelike,int],
-                        stop: Union[datelike,int], 
+                        stop: Union[datelike,int] = None, 
                         periodicity: Union[periodicities.Periodicity, str] = None):
         if periodicity is None:
             periodicity = periodicities.B
@@ -20,7 +20,7 @@ class Range:
         elif not isinstance(start, int):
             start = periodicity.get_index(start)
         if stop is None:
-            stop = now()
+            stop = periodicity.get_date(periodicity.get_index(datetime.date.today()) + 1)
         if not isinstance(stop, int):
             stop = periodicity.get_index(stop)
         self.start = start
@@ -67,14 +67,17 @@ class Range:
             return self.periodicity.get_date(index + self.stop + 1)
 
     def __len__(self):
+        assert self.stop >= self.start, f'Negative range length {self.start}-{self.stop}'
         return self.stop - self.start
 
                 
     def __repr__(self):
+        if len(self) == 0:
+            return '[]'
         return f'[{self[0].strftime("%Y-%m-%d")}:{self[-1].strftime("%Y-%m-%d")}:{str(self.periodicity)}]'
 
     def expand(self, by):   
-        expanded = self.__class__(self.start, self.stop, self.step)
+        expanded = self.__class__(self.start, self.stop, self.periodicity)
         if by > 0:
             expanded.stop += by
         elif by < 0:
@@ -82,7 +85,7 @@ class Range:
         return expanded
 
     def offset(self, by):   
-        return self.__class__(self.start + by, self.stop + by, self.step)
+        return self.__class__(self.start + by, self.stop + by, self.periodicity)
 
     def to_index(self):
         return pd.date_range(self[0], self[-2], freq=self.periodicity.pandas_offset_code)
