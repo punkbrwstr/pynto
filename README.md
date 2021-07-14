@@ -32,7 +32,7 @@ Create expressions by chaining built-in words together using a fluent interface,
 The word `c` that adds a constant-value column to the stack.  Like many pynto words, `c` takes a _parameter_ in parentheses to specify the constant value `c(10.0)`. pynto can handle any NumPy data type, but all rows in a column have to have the same type.
 
 ```
->>> expr = pt.c(10.0) + square    # apply square expression to a columns of 10s
+>>> expr = pt.c(10.0) + square    # compose square expression with a columns of 10s
 ```
 To evaluate your expression, specify a date range using the `[`_start_`:`_stop (exclusive)_`:`_periodicity_`]` syntax.  (Instances of `pt.Range` in the local namespace also work.)
 ```
