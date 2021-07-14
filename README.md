@@ -3,18 +3,19 @@
 pynto is a Python package that lets you manipulate tabular data with the expressiveness and code reusability of [concatenative](https://en.wikipedia.org/wiki/Concatenative_programming_language) programming.  With pynto you define an _expression_ that formally specifies how to calculate the data in your table.  Expressions are made by stringing together a sequence of functions called _words_.  It works like a pipeline: the output from one word becomes the input for the following word.  The table of data is treated like a stack of independent columns.  The rightmost column in the table is the top of the stack.  Words can add, remove or modify columns, but they are row-agnostic--expressions can be evaluated over any range of rows.  
 ## What does it look like?
 ```
->>> from pynto import * 
->>> stocks = csv('stocks.csv')                   # add columns to the stack
->>> ma_diff = dup | rolling(20) | wmean | sub    # define an operation
->>> stocks_ma = stocks | ~ma_diff | each         # operate on columns using quotation/combinator pattern
->>> stocks_ma['2019-01-01':]                     # evaluate your expression over certain rows
+>>> import pynto as pt 
+>>> ma_dev = pt.append_saved('stock_prices') \  # define an expression that appends columns from the build-in database
+>>>     .quote(pt.dup.rolling(20).mean.sub) \   # append a quoted expression to the stack
+>>>     .each                                   # use the each combinator to apply the quotation to the previous columns
+>>> df = ma_dev['2021-06-01':]                  # evaluate your expression over a date range to get a DataFrame
+>>> pt.db['stocks_ma_dev'] = df                 # save the results back to the database   
 ```
 
 ## Why pynto?
- - Expressive: Foolproof syntax; Ideal for modular, reusable code 
+ - Expressive: Pythonic syntax; Combinatory logic for modular, reusable code 
  - Performant: Column-wise multiprocessing; caching of duplicate operations
- - Interoperable: Seemlessly integration with data analysis workflows
- - Batteries included:  Datetime-based row ranges; Moving window statistics
+ - Batteries included:  Built-in Redis-based time series database
+ - Interoperable: Seemlessly integration with Pandas
 
 ## Get pynto
 ```
