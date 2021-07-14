@@ -89,5 +89,3 @@ class Range:
 
     def to_index(self):
         return pd.date_range(self[0], self[-2], freq=self.periodicity.pandas_offset_code)
-
-

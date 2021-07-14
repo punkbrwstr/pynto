@@ -12,7 +12,7 @@ pynto is a Python package that lets you manipulate tabular data with the express
 
 ## Why pynto?
  - Expressive: Foolproof syntax; Ideal for modular, reusable code 
- - Performant: Efficient NumPy internals with lazy evaluation
+ - Performant: Column-wise multiprocessing; caching of duplicate operations
  - Interoperable: Seemlessly integration with data analysis workflows
  - Batteries included:  Datetime-based row ranges; Moving window statistics
 
