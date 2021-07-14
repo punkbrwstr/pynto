@@ -5,11 +5,11 @@ from .main import *
 def _define(name: str, word) -> None:
     globals()[name] = word
 
-append = Constant()
+c = Constant()
 timestamp = NullaryWord('timestamp', timestamp_stack_function)
-append_range = ConstantRange()
-append_pandas = Pandas()
-append_csv = CSV()
+c_range = ConstantRange()
+pandas = Pandas()
+csv = CSV()
 add = get_binary_operator('add', np.add)
 sub = get_binary_operator('sub', np.subtract)
 mul = get_binary_operator('mul', np.multiply)
@@ -71,7 +71,7 @@ pct_change = get_window_operator('pct_change', pct_change_twod_op, pct_change_on
 log_change = get_window_operator('log_change', log_change_twod_op, log_change_oned_op)
 first = get_window_operator('first', first_twod_op, first_oned_op)
 last = get_window_operator('last',last_twod_op,last_oned_op)
-append_saved = Saved('append_saved')
+saved = Saved('saved')
 quote = Quotation()
 begin = Word('')
 

@@ -269,7 +269,7 @@ def timestamp_stack_function(stack, args):
 
 @dataclass
 class ConstantRange(Word):
-    name: str = 'append_range'
+    name: str = 'c_range'
 
     def __call__(self, value):
         return super().__call__(locals())
@@ -311,7 +311,7 @@ def frame_to_columns(stack, frame):
 
 @dataclass
 class Pandas(Word):
-    name: str = 'append_pandas'
+    name: str = 'pandas'
 
     def __call__(self, frame_or_series):
         return super().__call__(locals())
@@ -324,7 +324,7 @@ class Pandas(Word):
 
 @dataclass
 class CSV(Word):
-    name: str = 'append_csv'
+    name: str = 'csv'
 
     def __call__(self, csv_file, index_col=0, header='infer'):
         return super().__call__(locals())
@@ -831,7 +831,7 @@ def saved_col(range_, args):
 
 @dataclass
 class Saved(Word):
-    name: str = 'append_saved'
+    name: str = 'saved'
     def __call__(self, key): return super().__call__(locals())
     def _operation(self, stack, args):
         md = get_client()._read_metadata(args['key'])

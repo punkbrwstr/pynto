@@ -117,7 +117,7 @@ sub||a b -- c|a - b
 mul||a b -- c|a * b
 div||a b -- c|a / b
 mod||a b -- c|a % b
-exp||a b -- c|a ** b
+pow||a b -- c|a ** b
 eq||a b -- c|a == b
 ne||a b -- c|a != b
 ge||a b -- c|a >= b
@@ -125,7 +125,7 @@ gt||a b -- c|a > b
 le||a b -- c|a <= b
 lt||a b -- c|a < b
 neg||a -- c|a * -1
-absv||a -- c|abs(a)
+abs||a -- c|abs(a)
 sqrt||a -- c|a ** 0.5
 zeroToNa|| a -- c|Replaces zeros with np.nan
 
