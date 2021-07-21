@@ -518,7 +518,7 @@ class Partial(Word):
                     col.copies += 1
         else:
             this_stack = []
-        quoted.rows_function = NullaryWord('partial', partial_stack_function, {'stack': this_stack}).quoted.rows_function
+        quoted.rows_function = NullaryWord('partial', partial_stack_function, {'stack': this_stack}) + quoted.rows_function
         stack.append(quoted)
 
 @dataclass
