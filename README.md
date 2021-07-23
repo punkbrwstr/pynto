@@ -87,6 +87,7 @@ Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
 :---|:---|:---|:---
 call|depth=None, copy=False| a q -- c| Apply quotation to stack, up to _depth_ if specified.  Optionally leaves stack in place with _copy_.
 each|start=0, stop=None, every=1, copy=False| a b q -- c d| Apply quotation stack elements from _start_ to _end_ in groups of _every_.  Optionally leaves stack in place with _copy_.
+repeat|times| a b q -- c d| Apply quotation to the stack _times_ times.
 cleave|num_quotations, depth=None, copy=False| a q q -- c d| Apply _num_quotations_ quotations to copies of stack elements up to _depth_.  Optionally leaves stack in place with _copy_.
 
 ### Words to manipulate columns

@@ -541,6 +541,15 @@ class Each(Word):
             this_stack = list(t)
             quote._evaluate(this_stack)
             stack += this_stack
+@dataclass
+class Repeat(Word):
+    name: str = 'repeat'
+    def __call__(self, times): return super().__call__(locals())
+    def _operation(self, stack, args):
+        assert stack[-1].header == 'quotation'
+        quote = stack.pop().rows_function
+        for _ in range(args['times']):
+            quote._evaluate(stack)
 
 def heach_stack_function(stack, args):
     assert stack[-1].header == 'quotation'
