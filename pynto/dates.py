@@ -107,7 +107,7 @@ def count_m(d1: datetime.date, d2: datetime.date) -> int:
         return (d2.year - d1.year) * 12 + d2.month - d1.month
 
 def count_q(d1: datetime.date, d2: datetime.date) -> int:
-        return ((d2.year - d1.year) * 12 + d2.month - d1.month) // 3,
+        return ((d2.year - d1.year) * 12 + d2.month - d1.month) // 3
 
 def offset_q(d: datelike,i: int ) -> datetime.date:
         return add_bm(d, i * 3)
