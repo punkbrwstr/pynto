@@ -127,10 +127,10 @@ class Db:
             if saved_md is None or series_md.start < saved_md.start:
                 self._write(key, series_md, data.tobytes())
                 continue
-            if series_md.start > saved_md.stop + 1:
-                pad = np.full(series_md.start - saved_md.stop - 1, TYPES[saved_md.dtype].pad_value)
+            if series_md.start > saved_md.stop:
+                pad = np.full(series_md.start - saved_md.stop, TYPES[saved_md.dtype].pad_value)
                 data = np.hstack([pad, data])
-                start = saved_md.stop + 1
+                start = saved_md.stop 
             else:
                 start = series_md.start
             start_offset = (start - saved_md.start) * np.dtype(saved_md.dtype).itemsize
