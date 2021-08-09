@@ -74,6 +74,7 @@ first = get_window_operator('first', first_twod_op, first_oned_op)
 last = get_window_operator('last',last_twod_op,last_oned_op)
 saved = Saved('saved')
 quote = Quotation()
+q = Quotation()
 begin = Word('')
 
 
