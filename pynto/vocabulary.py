@@ -76,6 +76,6 @@ saved = Saved('saved')
 quote = Quotation()
 q = Quotation()
 begin = Word('')
-
+peek = Peek()
 
 zscore = quote(quote(std).quote(last).quote(mean).cleave(3, depth=1).sub.swap.div).call

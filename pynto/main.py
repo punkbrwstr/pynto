@@ -77,7 +77,7 @@ class Column:
             raise e
             raise ValueError(f'{e} in rows for column "{self.header}" ({self.trace})') from e
             
-@dataclass
+@dataclass(repr=False)
 class Word:
     name: str
     next_: Word = None
@@ -109,11 +109,11 @@ class Word:
                 s += '(' + ', '.join([f'{k}={str(v)[:2000]}' for k,v in self.args.items() if k != self]) + ')'
         return s
 
-    def __repr__(self, no_recurse=False):
+    def __repr__(self):
         s = ''
         current = self
         while True:
-            s = str(current) + s
+            s = current.__str__() + s
             if current.prev is None:
                 break
             else:
@@ -171,9 +171,8 @@ class Word:
                         current = current()
                     current._operation(stack, current.args)
                 except Exception as e:
-                    raise e
                     traceback.print_exc()
-                    error_msg = f' in word "{current.name}"'
+                    error_msg = f' in word "{current.__str__()}"'
                     if current.prev is not None:
                         error_msg += ' preceded by "'
                         prev_expr = repr(current.prev)
@@ -215,7 +214,7 @@ class Word:
             current = current.next_
         return current
 
-@dataclass
+@dataclass(repr=False)
 class Quotation(Word):
     name: str = 'quotation'
     
@@ -223,7 +222,7 @@ class Quotation(Word):
         self.quoted=quoted
         return super().__call__(locals())
 
-@dataclass
+@dataclass(repr=False)
 class NullaryWord(Word):
     def __init__(self,
             name,
@@ -243,13 +242,22 @@ class NullaryWord(Word):
     def __repr__(self):
         return super().__repr__()
 
-def dummy_stack_function(stack, args):
-    pass
+@dataclass(repr=False)
+class Peek(Word):
+    name: str = 'peek'
+
+    def __call__(self, point=''):
+        return super().__call__(locals())
+
+    def _operation(self, stack, args):
+        print(f'Peek {args["point"]}')
+        for col in stack:
+            print(f'    {col.header}')
 
 def const_col(range_, args):
     return np.full(len(range_), args['value'])
 
-@dataclass
+@dataclass(repr=False)
 class Constant(Word):
     name: str = 'append'
 
@@ -267,7 +275,7 @@ def timestamp_stack_function(stack, args):
     stack.append(Column('timestamp','timestamp', timestamp_col))
 
 
-@dataclass
+@dataclass(repr=False)
 class ConstantRange(Word):
     name: str = 'c_range'
 
@@ -309,7 +317,7 @@ def frame_to_columns(stack, frame):
     for header, col in frame.iteritems():
         stack.append(Column(header,f'csv {header}', frame_col, {'col': col}))
 
-@dataclass
+@dataclass(repr=False)
 class Pandas(Word):
     name: str = 'pandas'
 
@@ -322,7 +330,7 @@ class Pandas(Word):
             frame = frame.toframe()
         frame_to_columns(stack, frame)
 
-@dataclass
+@dataclass(repr=False)
 class CSV(Word):
     name: str = 'csv'
 
@@ -393,13 +401,14 @@ def clear_stack_function(stack, args):
 def hsort_stack_function(stack, args):
     stack.sort(key=lambda c: c.header)
 
-@dataclass
+@dataclass(repr=False)
 class Interleave(Word):
     name: str = 'interleave'
 
     def __call__(self, count=None, split_into=2): return super().__call__(locals())
 
     def _operation(self, stack, args):
+        if len(stack) == 0: return
         count = args['count'] if args['count'] else len(stack) // args['split_into']
         last = 0
         lists = []
@@ -409,7 +418,8 @@ class Interleave(Word):
                 last = i
         del(stack[:last])
         stack += [val for tup in zip(*lists) for val in tup]
-@dataclass
+
+@dataclass(repr=False)
 class Pull(Word):
     name: str = 'pull'
 
@@ -425,7 +435,7 @@ class Pull(Word):
             del(stack[end:start])
         stack += pulled
 
-@dataclass
+@dataclass(repr=False)
 class HeaderPull(Word):
     name: str = 'hpull'
 
@@ -447,7 +457,7 @@ class HeaderPull(Word):
             del(stack[:])
         stack += filtered_stack
 
-@dataclass
+@dataclass(repr=False)
 class HeaderFilter(HeaderPull):
     name: str = 'hfilter'
     def __call__(self, *headers, clear=True, exact_match=False):
@@ -466,7 +476,7 @@ def ewma_col(range_, args):
     #return out[idx] * starting_nans
     return out[idx] * nans
 
-@dataclass
+@dataclass(repr=False)
 class EWMA(Word):
     name: str = 'ewma'
     def __call__(self, window, fill_nans=True): return super().__call__(locals())
@@ -477,7 +487,7 @@ class EWMA(Word):
                 ewma_col, {'window': window, 'col': col}))
 
 # Combinators
-@dataclass
+@dataclass(repr=False)
 class Call(Word):
     name: str = 'call'
     def __call__(self, depth=None, copy=False): return super().__call__(locals())
@@ -501,7 +511,7 @@ class Call(Word):
 def partial_stack_function(stack, args):
     stack.extend(args['stack'])
 
-@dataclass
+@dataclass(repr=False)
 class Partial(Word):
     name: str = 'partial'
     def __call__(self, depth=1, copy=False): return super().__call__(locals())
@@ -521,7 +531,7 @@ class Partial(Word):
         quoted.rows_function = NullaryWord('partial', partial_stack_function, {'stack': this_stack}) + quoted.rows_function
         stack.append(quoted)
 
-@dataclass
+@dataclass(repr=False)
 class Each(Word):
     name: str = 'each'
     def __call__(self, start=0, end=None, every=1, copy=False): return super().__call__(locals())
@@ -541,7 +551,7 @@ class Each(Word):
             this_stack = list(t)
             quote._evaluate(this_stack)
             stack += this_stack
-@dataclass
+@dataclass(repr=False)
 class Repeat(Word):
     name: str = 'repeat'
     def __call__(self, times): return super().__call__(locals())
@@ -569,7 +579,7 @@ def heach_stack_function(stack, args):
     del(stack[:])
     stack += new_stack
 
-@dataclass
+@dataclass(repr=False)
 class Cleave(Word):
     name: str = 'cleave'
     def __call__(self, num_quotations=-1, depth=None, copy=False): return super().__call__(locals())
@@ -592,7 +602,7 @@ class Cleave(Word):
 
 
 # Header
-@dataclass
+@dataclass(repr=False)
 class HeaderSet(Word):
     name: str = 'hset'
     def __call__(self, *headers): return super().__call__(locals())
@@ -605,7 +615,7 @@ class HeaderSet(Word):
             stack[i] = Column(headers[i - start], stack[i].trace,
                                 stack[i].rows_function, stack[i].args)
 
-@dataclass
+@dataclass(repr=False)
 class HeaderFormat(Word):
     name: str = 'hformat'
     def __call__(self, format_string): return super().__call__(locals())
@@ -614,7 +624,7 @@ class HeaderFormat(Word):
         stack.append(Column(args['format_string'].format(col.header),
                             col.trace, col.rows_function, col.args))
 
-@dataclass
+@dataclass(repr=False)
 class HeaderApply(Word):
     name: str = 'happly'
     def __call__(self, header_function): return super().__call__(locals())
@@ -666,7 +676,7 @@ def rolling_col(range_,args):
         expanded_range.start = expanded_range.start + lookback
         return pd.DataFrame(td[lookback:],
                     index=expanded_range.to_index()).reindex(range_.to_index())
-@dataclass
+@dataclass(repr=False)
 class Rolling(Word):
     name: str = 'rolling'
     def __call__(self, window=2, exclude_nans=True, periodicity=None, lookback_multiplier=2): return super().__call__(locals())
@@ -692,7 +702,7 @@ def expanding_col(range_,args):
         range_.stop = expanded_range.stop
     return values
 
-@dataclass
+@dataclass(repr=False)
 class Expanding(Word):
     name: str = 'expanding'
     def __call__(self, start_date): return super().__call__(locals())
@@ -754,7 +764,7 @@ def fill_col(range_, args):
     x[np.isnan(x)] = args['value']
     return x
 
-@dataclass
+@dataclass(repr=False)
 class Fill(Word):
     name: str = 'fill'
     def __call__(self, value): return super().__call__(locals())
@@ -776,11 +786,12 @@ def ffill_col(range_, args):
     np.maximum.accumulate(idx,out=idx)
     return x[idx][lookback:]
 
-@dataclass
+@dataclass(repr=False)
 class FFill(Word):
     name: str = 'ffill'
     def __call__(self, lookback=0): return super().__call__(locals())
     def _operation(self, stack, args):
+        if len(stack) == 0: return
         col = stack.pop()
         stack.append(Column(col.header,f'{col.trace}.ffill',
                         ffill_col, {'col': col, 'lookback': args['lookback']}))
@@ -805,7 +816,7 @@ def join_col(range_, args):
         range_.start = r_first.start
     return np.concatenate([v_first, v_second])
 
-@dataclass
+@dataclass(repr=False)
 class Join(Word):
     name: str = 'join'
     def __call__(self, date): return super().__call__(locals())
@@ -838,7 +849,7 @@ def saved_col(range_, args):
         range_.periodicity_code = data[2]
         return values
 
-@dataclass
+@dataclass(repr=False)
 class Saved(Word):
     name: str = 'saved'
     def __call__(self, key): return super().__call__(locals())

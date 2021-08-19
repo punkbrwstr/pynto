@@ -178,12 +178,12 @@ class Db:
                 columns = c
             return pd.DataFrame(array, columns=columns, index=index)
 
-    def read_frame_diagonal(self, key, start=None, end=None, periodicity=None, resample_method='last'):
+    def read_frame_diagonal(self, key, start=None, stop=None, periodicity=None, resample_method='last'):
         md = self._read_metadata(key)
-        start = md.start if start is None else get_index(md.periodicity, start)
-        end = md.stop if end is None else get_index(md.periodicity, end)
+        start = md.start if start is None else md.periodicity.get_index(start)
+        stop = md.stop if stop is None else md.periodicity.get_index(stop)
         periodicity = md.periodicity if periodicity is None else periodicity
-        index = Range(start, end, periodicity).to_index()
+        index = Range(start, stop, periodicity).to_index()
         c = np.array(self.read_frame_headers(key))
         if not (c[0].startswith('$') and c[0].count('$') == 2):
             raise ValueError(f'Frame {key} is not two-dimensional')
@@ -191,8 +191,8 @@ class Db:
         for a,b in np.char.split(np.char.lstrip(c,'$'),'$'):
             if a == b:
                 columns.append(a)
-        array = np.column_stack([self.read_series_data(f'{key}:${c}${c}', start, end, periodicity,
-                    resample_method)[3] for c in columns])
+        array = np.column_stack([self.read_series_data(f'{key}:${c}${c}',
+            start, stop, periodicity, resample_method=resample_method)[3] for c in columns])
         return pd.DataFrame(array, columns=columns, index=index)
 
     def read_range(self, key: str) -> Range:
