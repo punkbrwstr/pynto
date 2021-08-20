@@ -98,7 +98,7 @@ def count_b(d1: datetime.date, d2: datetime.date) -> int:
     return days - daysSinceMonday1 + daysSinceMonday2
 
 def count_w(d1: datetime.date, d2: datetime.date) -> int:
-        return (d2 - d1).days // 7,
+        return (d2 - d1).days // 7
 
 def offset_w(d: datelike,i: int ) -> datetime.date:
         return d + datetime.timedelta(days=i * 7) 
