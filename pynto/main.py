@@ -141,9 +141,10 @@ class Word:
         return self._evaluate([], None)
     
     def quote(self, quoted: Word):
-        self.next_ = Quotation(quoted=quoted)
-        self.next_.prev = self
-        return self.next_
+        this = self._copy()
+        this.next_ = Quotation(quoted=quoted)
+        this.next_.prev = this
+        return this.next_
     
     def _copy(self) -> Word:
         cls = self.__class__
@@ -410,6 +411,7 @@ class Interleave(Word):
     def _operation(self, stack, args):
         if len(stack) == 0: return
         count = args['count'] if args['count'] else len(stack) // args['split_into']
+        print('got here', flush=True)
         last = 0
         lists = []
         for i in range(len(stack)+1):
@@ -541,7 +543,7 @@ class Each(Word):
         end = 0 if args['end'] is None else -args['end']
         start = len(stack) if args['start'] == 0 else -args['start']
         selected = stack[end:start]
-        assert len(selected) % args['every'] == 0, 'Stack not evenly divisible by every'
+        assert len(selected) % args['every'] == 0, f'Stack length {len(selected)} not evenly divisible by every {args["every"]}'
         if not args['copy']:
             del(stack[end:start])
         else:
@@ -920,6 +922,4 @@ def last_twod_op(x, axis):
 def last_oned_op(x, axis):
     return  x
 
-def lag(number):
-    return rolling(number+1).first
 
