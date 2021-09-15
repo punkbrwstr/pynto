@@ -62,9 +62,9 @@ class Range:
                 raise IndexError
             return self.periodicity.get_date(index + self.start)
         else:
-            if abs(index) > self.stop - self.start + 1:
+            if abs(index) > self.stop - self.start:
                 raise IndexError
-            return self.periodicity.get_date(index + self.stop + 1)
+            return self.periodicity.get_date(index + self.stop)
 
     def __len__(self):
         assert self.stop >= self.start, f'Negative range length {self.start}-{self.stop}'
@@ -88,4 +88,4 @@ class Range:
         return self.__class__(self.start + by, self.stop + by, self.periodicity)
 
     def to_index(self):
-        return pd.date_range(self[0], self[-2], freq=self.periodicity.pandas_offset_code)
+        return pd.date_range(self[0], self[-1], freq=self.periodicity.pandas_offset_code)

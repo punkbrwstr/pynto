@@ -77,5 +77,6 @@ quote = Quotation()
 q = Quotation()
 begin = Word('')
 peek = Peek()
+ifexists = IfExists()
 
 zscore = quote(quote(std).quote(last).quote(mean).cleave(3, depth=1).sub.swap.div).call

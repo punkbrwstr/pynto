@@ -510,6 +510,16 @@ class Call(Word):
         quoted._evaluate(this_stack)
         stack.extend(this_stack)
 
+@dataclass(repr=False)
+class IfExists(Word):
+    name: str = 'ifexists'
+    def __call__(self,  copy=False): return super().__call__(locals())
+    def _operation(self, stack, args):
+        assert stack[-1].header == 'quotation', 'call needs a quotation on top of stack'
+        quoted = stack.pop().rows_function
+        if stack:
+            quoted._evaluate(stack)
+
 def partial_stack_function(stack, args):
     stack.extend(args['stack'])
 
