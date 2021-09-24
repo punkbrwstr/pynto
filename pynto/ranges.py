@@ -48,7 +48,7 @@ class Range:
                             periodicity: Union[str,periodicities.Periodicity]):
         if isinstance(periodicity, str):
             periodicity = getattr(periodicities, periodicity)
-        return cls(range_[0], range_[-1], periodicity)
+        return cls(range_[0], periodicity.offset(range_[-1], 1), periodicity)
 
     def __iter__(self):
         i = 0
