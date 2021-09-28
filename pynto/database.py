@@ -82,7 +82,7 @@ class Db:
                 rows = np.char.add('$',rows.values.astype('U'))
                 columns = np.char.add('$',pandas.columns.values.astype('U'))
                 columns = np.char.add(np.repeat(rows,len(columns)), np.tile(columns,len(rows)))
-                index=pandas.index.levels[0]
+                index=pandas.index.remove_unused_levels().levels[0]
                 pandas = pd.DataFrame(pandas.values.reshape(len(index), len(columns)),
                             index=index, columns=columns) 
             periodicity = periodicities.from_pandas(pandas.index.freq.name)

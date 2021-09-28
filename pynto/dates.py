@@ -4,7 +4,7 @@ import pandas as pd
 from typing import Union
 
 
-datelike: type = Union[int,str,datetime.date,datetime.datetime,pd.Timestamp]
+datelike = Union[int,str,datetime.date,datetime.datetime,pd.Timestamp]
 
 def now() -> datetime.date:
     d = datetime.datetime.utcnow()
