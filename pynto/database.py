@@ -13,6 +13,8 @@ from .dates import datelike
 from .ranges import Range
 from . import periodicities
 
+PREFIX = '/pynto/'
+
 def get_client() -> Db:
     global _CLIENT
     if not '_CLIENT' in globals():
@@ -111,7 +113,7 @@ class Db:
             if first_save:
                 self._write(key, md, '\t'.join(new_columns).encode()) 
             elif len(new_columns) > 0:
-                self.connection.append(key, ('\t' + '\t'.join(new_columns)).encode()) 
+                self.connection.append(PREFIX + key, ('\t' + '\t'.join(new_columns)).encode()) 
         for key, series in series_to_save:
             periodicity = periodicities.from_pandas(series.index.freq.name)
             start = periodicity.get_index(series.index[0].date())
@@ -145,8 +147,8 @@ class Db:
             return
         if md.is_frame:
             for series_key in self.read_frame_series_keys(key):
-                self.connection.delete(series_key)
-        self.connection.delete(key)
+                self.connection.delete(PREFIX + series_key)
+        self.connection.delete(PREFIX + key)
 
     def __getitem__(self, key: str):
         return self.read(key)
@@ -261,7 +263,7 @@ class Db:
         return [f'{key}:{c}' for c in self.read_frame_headers(key)]
 
     def _read_metadata(self, key: str) -> Metadata:
-        data = self.connection.getrange(key,0,METADATA_SIZE-1)
+        data = self.connection.getrange(PREFIX + key,0,METADATA_SIZE-1)
         if len(data) == 0:
             raise KeyError(f'No metadata for key {key}')
         s = struct.unpack(METADATA_FORMAT, data)
@@ -285,7 +287,7 @@ class Db:
 
 
     def _update_end(self, key: str, stop: int):
-        self.connection.setrange(key, METADATA_SIZE - struct.calcsize('<l'), struct.pack('<l',int(stop)))
+        self.connection.setrange(PREFIX + key, METADATA_SIZE - struct.calcsize('<l'), struct.pack('<l',int(stop)))
 
     def _write(self, key: str, metadata: Metadata, data: np.ndarray):
         packed_md = struct.pack(METADATA_FORMAT,
@@ -293,14 +295,14 @@ class Db:
                                 '{0: <6}'.format(metadata.periodicity.pandas_offset_code).encode(),
                                 metadata.start,
                                 metadata.stop) 
-        self.connection.set(key, packed_md + data)
+        self.connection.set(PREFIX + key, packed_md + data)
 
     def _get_data_range(self, key: str, start: int, stop: int):
         stop = -1 if stop == -1 else METADATA_SIZE + stop - 1
-        return self.connection.getrange(key, str(METADATA_SIZE + start), str(stop))
+        return self.connection.getrange(PREFIX + key, str(METADATA_SIZE + start), str(stop))
         
     def _set_data_range(self, key: str, start: int, data: np.ndarray):
-        self.connection.setrange(key, str(METADATA_SIZE + start), data)
+        self.connection.setrange(PREFIX + key, str(METADATA_SIZE + start), data)
 
     def _check_dups(self, index: pd.Index, type_='column'):
         unq, unq_cnt = np.unique(index, return_counts=True)

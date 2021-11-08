@@ -8,6 +8,7 @@ import numpy as np
 import numpy.ma as ma
 import pandas as pd
 import traceback
+import psutil
 from multiprocessing import Lock, Manager
 from multiprocessing.managers import DictProxy, AcquirerProxy
 from concurrent.futures import ProcessPoolExecutor as Pool
@@ -29,62 +30,61 @@ def disable_multiprocessing(disable: bool = True):
     global _MULTIPROCESSING
     _MULTIPROCESSING = not disable
 
-
-@dataclass
+@dataclass(repr=False)
 class Column:
     header : str
-    trace: str
-    rows_function: Callable[[Range,dict], np.ndarray]
-    args: dict = field(default_factory=dict)
-    copies: int = 0
-    cache: Optional[DictProxy]= None
-    lock: Optional[AcquirerProxy]= None
+    word_name: str
+    function: Callable[[Range,Dict[str, Any],List[Column]], np.ndarray]
+    args: Dict[str, Any] = field(default_factory=dict)
+    stack: List[Column] = field(default_factory=list)
 
-    def __post_init__(self):
-        manager = Manager()
-        self.cache = manager.dict()
-        self.lock = manager.Lock()
-
-    def rows(self, range_: Range) -> np.ndarray:
+    def __getitem__(self, range_: Range) -> np.ndarray:
         try:
-            key = str(range_)
-            with self.lock:
-                if not key in self.cache:
-                    self.cache[key] = self.rows_function(range_, self.args)
-            return self.cache[key]
+            return self.function(range_, self.args, self.stack)
         except Exception as e:
-            print(f'Error in {self.header}')
-            raise e
-            raise ValueError(f'{e} in rows for column "{self.header}" ({self.trace})') from e
+            print(f'Error in column "{self.header}"')
+            #raise e
+            raise ValueError(f'Error: {e} for column "{self.header}" ({repr(self)})') from e
 
-class Stack(List[Column]):
-    
-    def append(self, column: Column) -> None:
-        column.copies += 1
-        super().append(column)
+    def __repr__(self):
+        repr_ = 'pt'
+        if len(self.stack) > 0:
+            for column in self.stack:
+                repr_ += '.q('
+                repr_ += repr(column)
+                repr_ += ')'
+            repr_ += f'.cleave({len(self.stack)})'
+        repr_ += f'.{self.word_name}'
+        if len(self.args) == 1:
+            repr_ += '(' + ', '.join([f'{repr(v)}' for k,v in self.args.items()]) + ')'
+        if len(self.args) > 1:
+            repr_ += '(' + ', '.join([f'{k}={repr(v)}' for k,v in self.args.items()]) + ')'
+        return repr_
 
-    def insert(self, index: int, column: Column) -> None:
-        column.copies += 1
-        super().insert(index, column)
+def quotation_col(range_, args, _):
+    return np.full(len(range_), np.nan)
 
-    def clear(self) -> None:
-        for column in self:
-            column.copies -= 1
-        super().clear()
+@dataclass(repr=False)
+class QuotationColumn(Column):
+    header: str = 'quotation'
+    word_name: str = 'q'
+    function: Callable[[Range,Dict[str, Any],List[Column]], np.ndarray] = \
+                quotation_col
+    quoted: Optional[Word] = None
 
-    def pop(self) -> Column:
-        column = super().pop()
-        column.copies -= 1
-        return column
-
-    def __delitem__(self, key: int) -> None:
-        self[key].copies -= 1
-        super().__delitem__(key)
+    def __repr__(self):
+        return f'pt.q({self.quoted})'
 
 
+def get_col(col_and_range):
+    return col_and_range[0][col_and_range[1]]
 
-def get_rows(col_and_range):
-    return col_and_range[0].rows(col_and_range[1])
+def get_rows(stack: List[Column], range_: range) -> np.ndarray:
+    if _MULTIPROCESSING:
+        with Pool(psutil.cpu_count(logical=False)) as pool:
+            return np.column_stack(list(pool.map(get_col, [(col, range_) for col in stack])))
+    else:
+        return np.column_stack([col[range_] for col in stack])
             
 @dataclass(repr=False)
 class Word:
@@ -93,58 +93,51 @@ class Word:
     prev: Word = None
     quoted: Word = None
     args: dict = None
-    stack: Optional[List[Column]] = None
-
-    def __getattr__(self, name):
-        return self.__add__(getattr(vocabulary,name))
+    _stack: Optional[List[Column]] = None
 
     def __add__(self, other: Word) -> Word:
         this = self.copy_expression()
         other = other.copy_expression()
-        other.stack = None
+        other._stack = None
         other = other._head()[0]
         this.next_ = other
         other.prev = this
         return other._tail()
 
+    def __getattr__(self, name):
+        return self.__add__(getattr(vocabulary,name))
+
     def __getitem__(self, key: Any) -> pd.DataFrame:
         range_ = key if isinstance(key, Range) else Range.from_indexer(key)
-        if self.stack is None:
+        if self._stack is None:
             self.evaluate()
-        if len(self.stack) == 0:
+        if len(self._stack) == 0:
             return None
-        if _MULTIPROCESSING:
-            with Pool() as pool:
-                values = np.column_stack(list(pool.map(get_rows, [(col, range_) for col in self.stack])))
-        else:
-            values = np.column_stack([col.rows(range_) for col in self.stack])
-        return pd.DataFrame(values, columns=[col.header for col in self.stack], index=range_.to_index())
+        values = get_rows(self._stack, range_)
+        return pd.DataFrame(values, columns=[col.header for col in self._stack], index=range_.to_index())
 
     @property
     def columns(self):
-        if self.stack is None:
+        if self._stack is None:
             self.evaluate()
-        return [col.header for col in self.stack]
+        return [col.header for col in self._stack]
 
-    def __str__(self):
-        if self.quoted:
-            return f'quote({self.quoted.__repr__()})'
-        else:
-            s = self.name
-            if self.args:
-                s += '(' + ', '.join([f'{k}={str(v)[:2000]}' for k,v in self.args.items() if k != self]) + ')'
-        return s
+    @property
+    def stack(self):
+        if self._stack is None:
+            self.evaluate()
+        return self._stack
 
     def evaluate(self, stack: Optional[List[Column]] = None) -> None:
-        assert not self.quoted, 'Cannot evaluate quotation.'
+        #assert not self.quoted, 'Cannot evaluate quotation.'
         start = self._head()[0]
         current = start
         if stack is None or len(stack) == 0:
             if stack is None:
                 stack = []
             while True:
-                if current.stack is not None:
-                    stack.extend(copy.copy(current.stack))
+                if current._stack is not None:
+                    stack.extend(copy.copy(current._stack))
                     start = current.next_
                 if current.next_ is None:
                     break
@@ -154,32 +147,35 @@ class Word:
             keep = False
         current = start
         while current is not None:
-            if current.quoted:
-                stack.append(Column('quotation','quotation', current.quoted))
-            else:
-                try:
-                    if not current.args:
-                        current = current()
-                    current.operate(stack)
-                except Exception as e:
-                    traceback.print_exc()
-                    error_msg = f' in word "{current.__str__()}"'
-                    if current.prev is not None:
-                        error_msg += ' preceded by "'
-                        prev_expr = repr(current.prev)
-                        if len(prev_expr) > 150:
-                            error_msg += '...'
-                        error_msg += prev_expr[-150:] + '"'
-                    import sys
-                    raise type(e)((str(e) + error_msg).replace("'",'"')).with_traceback(sys.exc_info()[2])
+            try:
+                if not current.args:
+                    current = current()
+                current.operate(stack)
+            except Exception as e:
+                traceback.print_exc()
+                error_msg = f' in word "{current.__str__()}"'
+                if current.prev is not None:
+                    error_msg += ' preceded by "'
+                    prev_expr = repr(current.prev)
+                    if len(prev_expr) > 150:
+                        error_msg += '...'
+                    error_msg += prev_expr[-150:] + '"'
+                import sys
+                raise type(e)((str(e) + error_msg).replace("'",'"')).with_traceback(sys.exc_info()[2])
 
-                    raise SyntaxError(repr(e) + error_msg) from e
-            #if current.next_ is None:
-                #break
+                raise SyntaxError(repr(e) + error_msg) from e
             current = current.next_
         if keep:
-            self.stack = copy.copy(stack)
+            self._stack = copy.copy(stack)
 
+    def __str__(self):
+        if self.quoted:
+            return f'quote({self.quoted.__repr__()})'
+        else:
+            s = self.name
+            if self.args:
+                s += '(' + ', '.join([f'{k}={str(v)[:2000]}' for k,v in self.args.items() if k != self]) + ')'
+        return s
 
     def __repr__(self):
         s = ''
@@ -207,12 +203,6 @@ class Word:
 
     def operate(self, stack):
         pass
-
-    def quote(self, quoted: Word):
-        this = self.copy_expression()
-        this.next_ = Quotation(quoted=quoted)
-        this.next_.prev = this
-        return this.next_
     
     def __copy__(self) -> Word:
         cls = self.__class__
@@ -252,6 +242,9 @@ class Quotation(Word):
         self.quoted=quoted
         return super().__call__(locals())
 
+    def operate(self, stack):
+        stack.append(QuotationColumn(quoted=self.quoted))
+
 @dataclass(repr=False)
 class NullaryWord(Word):
     def __init__(self,
@@ -270,63 +263,65 @@ class NullaryWord(Word):
         self.stack_function(stack, self.stack_function_args)
 
 @dataclass(repr=False)
+class BaseWord(Word):
+    name: str
+    operate: Callable[[List[Column]],None]
+
+def peek_col(range_, args, stack, output, lock):
+    values = stack[0][range_]
+    with lock:
+        output[args['col']] = pd.Series(values, index=range_.to_index(), name=args['header']) \
+            
+    return values
+
+PEEK = {}
+
+def get_peek(name):
+    return pd.concat(PEEK[name], axis=1)
+
+@dataclass(repr=False)
 class Peek(Word):
     name: str = 'peek'
 
-    def __call__(self, point=''):
+    def __call__(self, name):
         return super().__call__(locals())
 
     def operate(self, stack):
-        print(f'Peek {self.args["point"]}')
-        for col in stack:
-            print(f'    {col.header}')
+        global PEEK
+        manager = Manager()
+        output = manager.list()
+        lock = manager.Lock()
+        PEEK[self.args['name']] = output
+        old_stack = stack.copy()
+        stack.clear()
+        col_func = partial(peek_col, output=output, lock=lock)
+        for i, col in enumerate(reversed(old_stack)):
+            output.append(None)
+            col_args = self.args.copy()
+            col_args['col'] = i
+            col_args['header'] = col.header
+            stack.insert(0, Column(col.header, self.name, col_func, col_args, [col]))
 
-def const_col(range_, _, value):
-    return np.full(len(range_), value)
+def const_col(range_, args, _):
+    return np.full(len(range_), args['values'])
 
 @dataclass(repr=False)
 class Constant(Word):
-    name: str = 'append'
+    name: str = 'c'
 
     def __call__(self, *values):
         return super().__call__(locals())
 
     def operate(self, stack):
         for value in self.args['values']:
-            stack.append(Column('constant', str(value), partial(const_col, value=value)))
-            #stack.append(Column('constant', str(value), lambda range_, _: np.full(len(range_), value)))
+            stack.append(Column('c', 'c', const_col, {'values': value}))
 
-'''
-@dataclass(repr=False)
-class Constant(Word):
-    name: str = 'c'
-    operate = lambda _, stack, values: stack.extend([Column('c', str(value), partial(const_col, value=value)) for value in values])
-
-    def __call__(self, *values):
-        copy = self.copy_expression()
-        copy.operate = partial(copy.operate, values=values)
-        return copy
-
-
-
-
-@dataclass(repr=False)
-class ConstantRange(Word):
-    name: str = 'c_range'
-    operate = lambda _, stack, value: stack.extend([Column('c', str(value), partial(const_col, value=value)) for value in range(value)])
-
-    def __call__(self, value):
-        copy = self.copy_expression()
-        copy.operate = partial(copy.operate, value=value)
-        return copy
-'''
-
-
-def timestamp_col(range_, args):
-    return np.array(range_.to_index().astype('int'))
+def timestamp_col(range_, args, _):
+    return np.array(range_.to_index().view('int'))
 
 def timestamp_stack_function(stack, args):
     stack.append(Column('timestamp','timestamp', timestamp_col))
+
 @dataclass(repr=False)
 class ConstantRange(Word):
     name: str = 'c_range'
@@ -336,10 +331,10 @@ class ConstantRange(Word):
 
     def operate(self, stack):
         for value in range(self.args['value']):
-            stack.append(Column('constant', str(value), partial(const_col, value=value)))
+            stack.append(Column('c', 'c', const_col, {'values': value}))
 
-def frame_col(range_, args):
-    col = args['col']
+def frame_col(range_, args, stack):
+    col = stack[0]
     if col.index.freq is None:
         try:
             col.index.freq = pd.infer_freq(col.index)
@@ -363,24 +358,19 @@ def frame_col(range_, args):
         values = np.concatenate([values, np.full(len(range_) - len(values), np.nan)])
     return values
 
-def frame_to_columns(stack, frame):
-    if frame.index.freq is None:
-        frame.index.freq = pd.infer_freq(frame.index)
-    for header, col in frame.iteritems():
-        stack.append(Column(header,f'csv {header}', frame_col, {'col': col}))
-
 @dataclass(repr=False)
 class Pandas(Word):
     name: str = 'pandas'
-
-    def __call__(self, frame_or_series):
-        return super().__call__(locals())
+    def __call__(self, frame_or_series): return super().__call__(locals())
 
     def operate(self, stack):
         frame = self.args['frame_or_series']
         if isinstance(frame, pd.core.series.Series):
             frame = frame.toframe()
-        frame_to_columns(stack, frame)
+        if frame.index.freq is None:
+            frame.index.freq = pd.infer_freq(frame.index)
+        for header, col in frame.iteritems():
+            stack.append(Column(header, self.name, frame_col, self.args, [col]))
 
 @dataclass(repr=False)
 class CSV(Word):
@@ -392,48 +382,36 @@ class CSV(Word):
     def operate(self, stack):
         frame = pd.read_csv(self.args['csv_file'], index_col=self.args['index_col'],
                                     header=self.args['header'], parse_dates=True)
-        _frame_to_columns(stack, frame)
+        if frame.index.freq is None:
+            frame.index.freq = pd.infer_freq(frame.index)
+        for header, col in frame.iteritems():
+            stack.append(Column(header, self.name, frame_col, self.args, [col]))
 
-def binary_operator_col(range_, args):
+def unary_operator_col(range_, args, stack, op):
+    return op(stack[0][range_])
+
+def binary_operator_col(range_, args, stack, op):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
-        values1 = args['col1'].rows(range_)
-        values2 = args['col2'].rows(range_)
-        return np.where(np.logical_or(np.isnan(values1), np.isnan(values2)), np.nan,
-                    args['op'](values1,values2))
+        lhs = stack[0][range_]
+        rhs = stack[1][range_]
+        return np.where(np.logical_or(np.isnan(lhs), np.isnan(rhs)), np.nan, op(lhs,rhs))
 
-def binary_operator_stack_function(stack, args):
+def unary_operator_stack_function(stack, name, op):
+    col = stack.pop()
+    stack.append(Column(col.header, name, partial(unary_operator_col, op=op), {}, [col]))
+
+def binary_operator_stack_function(stack, name, op):
+    assert len(stack) > 1, 'Binary function requires to columns'
     col2 = stack.pop()
     col1 = stack.pop()
-    stack.append(Column(col1.header,f'{col1.trace}.{col2.trace}.{args["name"]}',
-                    binary_operator_col,
-                    {'col1': col1, 'col2': col2, 'op': args['op']}))
-
-def get_binary_operator(name, op):
-    return NullaryWord(name, binary_operator_stack_function, {'op': op})
-
-def unary_operator_col(range_, args):
-    return args['op'](args['col'].rows(range_))
-
-def unary_operator_stack_function(stack, args):
-    col = stack.pop()
-    stack.append(Column(col.header,f'{col.trace}.{args["name"]}',unary_operator_col,
-                            {'op': args['op'], 'col': col}))
+    stack.append(Column(col1.header, name, partial(binary_operator_col, op=op), {},  [col1, col2]))
 
 def get_unary_operator(name, op):
-    return NullaryWord(name, unary_operator_stack_function, {'op': op})
+    return BaseWord(name, operate=partial(unary_operator_stack_function, name=name, op=op))
 
-def unary_operator_col2(range_, args, op, col):
-    return op(col.rows(range_))
-
-def unary_operator_stack_function2(stack, args, op):
-    col = stack.pop()
-    func = functools.partial(unary_operator_col2, op=op, col=col)
-    stack.append(Column(col.header,f'{col.trace}.{args["name"]}',func, {}))
-import functools
-def get_unary_operator2(name, op):
-    func = functools.partial(unary_operator_stack_function2, op=op)
-    return NullaryWord(name, func,  {})
+def get_binary_operator(name, op):
+    return BaseWord(name, operate=partial(binary_operator_stack_function, name=name, op=op))
 
 def zero_to_na_op(x):
     return np.where(np.equal(x,0),np.nan,x)
@@ -444,25 +422,25 @@ def logical_not_op(x):
     return np.where(np.logical_not(x), 1, 0)
 
 # Stack manipulation
-def dup_stack_function(stack, args):
+def dup_stack_function(stack):
     stack.append(stack[-1])
 
-def roll_stack_function(stack, args):
+def roll_stack_function(stack):
     stack.insert(0,stack.pop())
 
-def swap_stack_function(stack, args):
+def swap_stack_function(stack):
     stack.insert(-1,stack.pop())
 
-def drop_stack_function(stack, args):
+def drop_stack_function(stack):
     stack.pop()
 
-def rev_stack_function(stack, args):
+def rev_stack_function(stack):
     stack.reverse()
 
-def clear_stack_function(stack, args):
+def clear_stack_function(stack):
     stack.clear()
 
-def hsort_stack_function(stack, args):
+def hsort_stack_function(stack):
     stack.sort(key=lambda c: c.header)
 
 @dataclass(repr=False)
@@ -527,9 +505,9 @@ class HeaderFilter(HeaderPull):
     def __call__(self, *headers, clear=True, exact_match=False):
         return super().__call__(*headers, clear=True, exact_match=False)
 
-def ewma_col(range_, args):
+def ewma_col(range_, args, stack):
     alpha = 2 /(args['window'] + 1.0)
-    data = args['col'].rows(range_)
+    data = stack[0][range_]
     idx = np.cumsum(np.where(~np.isnan(data),1,0)) - 1
     nans = np.where(~np.isnan(data),1,np.nan)
 #     starting_nans = np.where(idx == -1,np.nan,1)
@@ -546,9 +524,7 @@ class EWMA(Word):
     def __call__(self, window, fill_nans=True): return super().__call__(locals())
     def operate(self, stack):
         col = stack.pop()
-        window = self.args['window']
-        stack.append(Column(col.header,f'{col.trace}.ewma({window})',
-                ewma_col, {'window': window, 'col': col}))
+        stack.append(Column(col.header,'ewma', ewma_col, self.args, [col]))
 
 # Combinators
 @dataclass(repr=False)
@@ -557,7 +533,7 @@ class Call(Word):
     def __call__(self, depth=None, copy=False): return super().__call__(locals())
     def operate(self, stack):
         assert stack[-1].header == 'quotation', 'call needs a quotation on top of stack'
-        quoted = stack.pop().rows_function
+        quoted = stack.pop().quoted
         if 'depth' not in self.args or self.args['depth'] is None:
             depth = len(stack) 
         else:
@@ -567,9 +543,6 @@ class Call(Word):
             this_stack = stack[-depth:]
             if 'copy' not in self.args or not self.args['copy']:
                 del(stack[-depth:])
-            else:
-                for c in stack[-depth:]:
-                    c.copies += 1
         else:
             this_stack = []
         quoted.evaluate(this_stack)
@@ -581,12 +554,12 @@ class IfExists(Word):
     def __call__(self,  copy=False): return super().__call__(locals())
     def operate(self, stack):
         assert stack[-1].header == 'quotation', 'call needs a quotation on top of stack'
-        quoted = stack.pop().rows_function
+        quoted = stack.pop().quoted
         if stack:
             quoted.evaluate(stack)
 
-def partial_stack_function(stack, args):
-    stack.extend(args['stack'])
+def partial_stack_function(stack, partial_stack):
+    stack.extend(partial_stack)
 
 @dataclass(repr=False)
 class Partial(Word):
@@ -600,12 +573,10 @@ class Partial(Word):
             this_stack = stack[-depth:]
             if not self.args['copy']:
                 del(stack[-depth:])
-            else:
-                for col in this_stack:
-                    col.copies += 1
         else:
             this_stack = []
-        quoted.rows_function = NullaryWord('partial', partial_stack_function, {'stack': this_stack}) + quoted.rows_function
+        stack_function = partial(partial_stack_function, partial_stack=this_stack)
+        quoted.quoted = BaseWord('partial', operate=stack_function) + quoted.quoted
         stack.append(quoted)
 
 @dataclass(repr=False)
@@ -614,16 +585,13 @@ class Each(Word):
     def __call__(self, start=0, end=None, every=1, copy=False): return super().__call__(locals())
     def operate(self, stack):
         assert stack[-1].header == 'quotation'
-        quote = stack.pop().rows_function
+        quote = stack.pop().quoted
         end = 0 if self.args['end'] is None else -self.args['end']
         start = len(stack) if self.args['start'] == 0 else -self.args['start']
         selected = stack[end:start]
         assert len(selected) % self.args['every'] == 0, f'Stack length {len(selected)} not evenly divisible by every {self.args["every"]}'
         if not self.args['copy']:
             del(stack[end:start])
-        else:
-            for col in selected:
-                col.copies += 1
         for t in zip(*[iter(selected)]*self.args['every']):
             this_stack = list(t)
             quote.evaluate(this_stack)
@@ -634,13 +602,13 @@ class Repeat(Word):
     def __call__(self, times): return super().__call__(locals())
     def operate(self, stack):
         assert stack[-1].header == 'quotation'
-        quote = stack.pop().rows_function
+        quote = stack.pop().quoted
         for _ in range(self.args['times']):
             quote.evaluate(stack)
 
 def heach_stack_function(stack, args):
     assert stack[-1].header == 'quotation'
-    quote = stack.pop().rows_function
+    quote = stack.pop().quoted
     new_stack = []
     for header in set([c.header for c in stack]):
         to_del, filtered_stack = [], []
@@ -663,15 +631,12 @@ class Cleave(Word):
     def operate(self, stack):
         if self.args['num_quotations'] < 0:
             self.args['num_quotations'] = len(stack)
-        quotes = [quote.rows_function for quote in stack[-self.args['num_quotations']:]]
+        quotes = [quote.quoted for quote in stack[-self.args['num_quotations']:]]
         del(stack[-self.args['num_quotations']:])
         depth = len(stack) if self.args['depth'] is None else self.args['depth']
         copied_stack = stack[-depth:] if depth != 0 else []
         if not self.args['copy'] and depth != 0:
             del(stack[-depth:])
-        else:
-            for col in copied_stack:
-                col.copies += 1
         for quote in quotes:
             this_stack = copied_stack[:]
             quote.evaluate(this_stack)
@@ -679,6 +644,9 @@ class Cleave(Word):
 
 
 # Header
+def header_col(range_, args, stack):
+    return stack[0][range_]
+
 @dataclass(repr=False)
 class HeaderSet(Word):
     name: str = 'hset'
@@ -689,8 +657,8 @@ class HeaderSet(Word):
             headers = headers[0].split(',')
         start = len(stack) - len(headers)
         for i in range(start,len(stack)):
-            stack[i] = Column(headers[i - start], stack[i].trace,
-                                stack[i].rows_function, stack[i].args)
+            header = headers[i - start]
+            stack[i] = Column(header, self.name, header_col, {'headers': header}, [stack[i]])
 
 @dataclass(repr=False)
 class HeaderFormat(Word):
@@ -698,8 +666,8 @@ class HeaderFormat(Word):
     def __call__(self, format_string): return super().__call__(locals())
     def operate(self, stack):
         col = stack.pop()
-        stack.append(Column(self.args['format_string'].format(col.header),
-                            col.trace, col.rows_function, col.args))
+        header = self.args['format_string'].format(col.header)
+        stack.append(Column(header, self.name, header_col, self.args, [col]))
 
 @dataclass(repr=False)
 class HeaderApply(Word):
@@ -707,12 +675,12 @@ class HeaderApply(Word):
     def __call__(self, header_function): return super().__call__(locals())
     def operate(self, stack):
         col = stack.pop()
-        stack.append(Column(self.args['header_function'](col.header), col.trace,
-                            col.rows_function, col.args))
+        header = self.args['header_function'](col.header)
+        stack.append(Column(header, self.name, header_col, {}, [col]))
 
 # Windows
-def rolling_col(range_,args):
-    col = args['col']
+def rolling_col(range_, args, stack):
+    col = stack[0]
     window = args['window']
     periodicity = args['periodicity']
     exclude_nans = args['exclude_nans']
@@ -728,7 +696,7 @@ def rolling_col(range_,args):
         expanded_range = Range(range_.start_date(),
                                 range_.end_date(), periodicity)
     expanded_range.start = expanded_range.start - lookback
-    expanded = col.rows(expanded_range)
+    expanded = col[expanded_range]
     if range_.stop is None:
         range_.stop = expanded_range.stop
     #length = len(expanded_range)
@@ -759,21 +727,19 @@ class Rolling(Word):
     def __call__(self, window=2, exclude_nans=True, periodicity=None, lookback_multiplier=2): return super().__call__(locals())
     def operate(self, stack):
         col = stack.pop()
-        col_args = self.args.copy()
-        col_args.update({'col': col})
-        stack.append(Column(col.header,f'{col.trace}.rolling({self.args["window"]})', rolling_col, col_args))
+        stack.append(Column(col.header, self.name, rolling_col, self.args, [col]))
 
-def expanding_col(range_,args):
+def expanding_col(range_, args, stack):
     start_date=args['start_date']
-    col = args['col']
+    col = stack[0]
     index = range_.periodicity.get_index(start_date)
     if range_.start is None:
         range_.start = index
-        return col.rows(range_)
+        return col[range_]
     expanded_range = copy.copy(range_)
     offset = expanded_range.start - index
     expanded_range.start = index
-    values = col.rows(expanded_range).view(ma.MaskedArray)
+    values = col[expanded_range].view(ma.MaskedArray)
     values[:offset] = ma.masked
     if range_.stop is None:
         range_.stop = expanded_range.stop
@@ -785,32 +751,25 @@ class Expanding(Word):
     def __call__(self, start_date): return super().__call__(locals())
     def operate(self, stack):
         col = stack.pop()
-        stack.append(Column(col.header,f'{col.trace}.expanding({self.args["start_date"]})',
-            expanding_col, {'start_date': self.args['start_date'], 'col': col}))
+        stack.append(Column(col.header, self.name, expanding_col, self.args, [col]))
 
-def crossing_col(range_, args):
-    if _MULTIPROCESSING:
-        with Pool() as pool:
-            return np.column_stack(list(pool.map(get_rows, [(col, range_) for col in args['cols']])))
-    else:
-        return np.column_stack([col.rows(range_) for col in args['cols']])
+def crossing_col(range_, args, stack):
+    return get_rows(stack, range_)
 
-def crossing_op(stack, _):
+def crossing_op(stack):
     cols = stack[:]
     stack.clear()
-    #headers = ','.join([str(col.header) for col in cols])
-    stack.append(Column(cols[0].header, f'crossing',crossing_col, {'cols':  cols}))
+    stack.append(Column(cols[0].header, 'crossing', crossing_col, {}, cols))
 
-def rev_expanding_col(range_, args):
-    return args['col'].rows(range_)[::-1]
+def rev_expanding_col(range_, args, stack):
+    return stack[0][range_][::-1]
 
-def rev_expanding_op(stack, _):
+def rev_expanding_op(stack):
     col = stack.pop()
-    stack.append(Column(col.header, f'{col.header}.rev_expanding',
-                        rev_expanding_col, {'col': col}))
+    stack.append(Column(col.header, 'rev_expanding', rev_expanding_col, {}, [col]))
 
-def cumsum_col(range_, args):
-    v = args['col'].rows(range_)
+def cumsum_col(range_, args, stack):
+    v = stack[0][range_]
     nans = np.isnan(v)
     cumsum = np.nancumsum(v)
     v[nans] = -np.diff(np.concatenate([[0.],cumsum[nans]]))
@@ -818,11 +777,11 @@ def cumsum_col(range_, args):
 
 def cumsum_stack_function(stack):
     col = stack.pop()
-    stack.append(Column(col.header, f'{col.trace}.cumsum', cumsum_col, {'col': col}))
+    stack.append(Column(col.header, 'cumsum', cumsum_col, {}, [col]))
 
 # Data cleaning
-def fill_col(range_, args):
-    x = args['col'].rows(range_).copy()
+def fill_col(range_, args, stack):
+    x = stack[0][range_].copy()
     x[np.isnan(x)] = args['value']
     return x
 
@@ -832,18 +791,13 @@ class Fill(Word):
     def __call__(self, value): return super().__call__(locals())
     def operate(self, stack):
         col = stack.pop()
-        stack.append(Column(col.header,f'{col.trace}.fill(arg["value"])',
-                        fill_col, {'col': col, 'value': self.args['value']}))
+        stack.append(Column(col.header, self.name, fill_col, self.args, [col]))
 
-def ffill_col(range_, args):
+def ffill_col(range_, args, stack):
     lookback = abs(args['lookback']) 
-    if range_.start is None and lookback != 0:
-        args['col'].rows(range_)
     expanded_range = copy.copy(range_)
     expanded_range.start -= lookback
-    x = args['col'].rows(expanded_range)
-    if range_.stop is None:
-        range_.stop = expanded_range.stop
+    x = stack[0][expanded_range]
     idx = np.where(~np.isnan(x),np.arange(len(x)),0)
     np.maximum.accumulate(idx,out=idx)
     return x[idx][lookback:]
@@ -855,23 +809,22 @@ class FFill(Word):
     def operate(self, stack):
         if len(stack) == 0: return
         col = stack.pop()
-        stack.append(Column(col.header,f'{col.trace}.ffill',
-                        ffill_col, {'col': col, 'lookback': self.args['lookback']}))
+        stack.append(Column(col.header, self.name, ffill_col, self.args, [col]))
 
-def join_col(range_, args):
+def join_col(range_, args, stack):
     date = args['date']
     if not isinstance(date, int):
         date = range_.periodicity.get_index(date)
     if range_.stop is not None and range_.stop < date:
-        return args['col1'].rows(range_)
+        return stack[0][range_]
     if range_.start and range_.start >= date:
-        return args['col2'].rows(range_)
+        return stack[1][range_]
     r_first = copy.copy(range_)
     r_first.stop = date
     r_second = copy.copy(range_)
     r_second.start = date
-    v_first = args['col1'].rows(r_first)
-    v_second = args['col2'].rows(r_second)
+    v_first = stack[0][r_first]
+    v_second = stack[1][r_second]
     if range_.stop is None:
         range_.stop = r_second.stop
     if range_.start is None:
@@ -885,10 +838,9 @@ class Join(Word):
     def operate(self, stack):
         col2 = stack.pop()
         col1 = stack.pop()
-        stack.append(Column('join',f'{col1.trace}.{col2.trace}.join({self.args["date"]})',
-                                join_col, {'col1': col1, 'col2': col2, 'date': self.args['date']}))
+        stack.append(Column(col1.header, self.name, join_col, self.args, [col1, col2]))
 
-def saved_col(range_, args):
+def saved_col(range_, args, _):
     if range_.start is not None and range_.stop is not None and range_.periodicity is not None:
         return get_client().read_series_data(args['key'], range_.start,
                         range_.stop, range_.periodicity)[3]
@@ -918,63 +870,37 @@ class Saved(Word):
     def operate(self, stack):
         md = get_client()._read_metadata(self.args['key'])
         if not md.is_frame:
-            stack.append(Column(self.args['key'], self.args['key'], saved_col, self.args))
+            stack.append(Column(self.args['key'], self.name, saved_col, self.args, []))
         else:   
             for header in get_client().read_frame_headers(self.args['key']):
                 col_args = self.args.copy()
                 col_args.update({'key': f'{self.args["key"]}:{header}'})
-                stack.append(Column(header, f'{self.args["key"]}:{header}', saved_col, col_args))
+                stack.append(Column(header, self.name, saved_col, col_args, []))
 
-def window_operator_col(range_, args):
-    values = args['col'].rows(range_)
+def window_operator_col(range_, args, stack, matrix_op, vector_op):
+    values = stack[0][range_]
     if len(values.shape) == 2:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
             return np.where(np.all(np.isnan(values),axis=1), np.nan,
-                        args['twodoperate'](values, axis=1))
+                        matrix_op(values, axis=1))
     else:
-        cum = args['onedoperate'](values, axis=None)
+        cum = vector_op(values, axis=None)
         if values.strides[0] < 0:
             return cum[::-1]
         if isinstance(values,ma.MaskedArray):
             return ma.array(cum,mask=values.mask).compressed()
         return cum 
 
-
-def window_operator_stack_function(stack, args):
-    name = args['name']
+def window_operator_stack_function(stack, name, matrix_op, vector_op):
     col = stack.pop()
-    col_args = args.copy()
-    col_args['col'] = col
-    stack.append(Column(col.header, f'{col.trace}.{name}', window_operator_col, col_args))
+    op = partial(window_operator_col, matrix_op=matrix_op, vector_op=vector_op) 
+    stack.append(Column(col.header, name, op, {}, [col]))
 
-def get_window_operator(name,  twodoperate, onedoperate):
-    return NullaryWord(name,window_operator_stack_function,
-                        {'twodoperate': twodoperate, 'onedoperate': onedoperate})
-
-def window_operator_col2(range_, args, twodoperate, col, onedoperate):
-    values = col.rows(range_)
-    if len(values.shape) == 2:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-            return np.where(np.all(np.isnan(values),axis=1), np.nan,
-                        twodoperate(values, axis=1))
-    else:
-        cum = onedoperate(values, axis=None)
-        if values.strides[0] < 0:
-            return cum[::-1]
-        if isinstance(values,ma.MaskedArray):
-            return ma.array(cum,mask=values.mask).compressed()
-        return cum 
-
-def window_operator_stack_function2(stack, args, name, twodoperate, onedoperate):
-    col = stack.pop()
-    func = functools.partial(window_operator_col2, col=col, twodoperate=twodoperate, onedoperate=onedoperate)
-    stack.append(Column(col.header, f'{col.trace}.{name}', func, {}))
-
-def get_window_operator2(name,  twodoperate, onedoperate):
-    func = functools.partial(window_operator_stack_function2, name=name, twodoperate=twodoperate, onedoperate=onedoperate)
-    return NullaryWord(name, func, {})
+def get_window_operator(name, matrix_op, vector_op):
+    stack_function = partial(window_operator_stack_function, name=name, 
+                                matrix_op=matrix_op, vector_op=vector_op) 
+    return BaseWord(name, operate=stack_function)
 
 def sum_oned_op(x, axis):
     mask = np.isnan(x)
@@ -1022,56 +948,54 @@ def last_twod_op(x, axis):
 def last_oned_op(x, axis):
     return  x
 
-
-#_multicol_lock = _MANAGER.Lock()
-
 def _multicol_rows_function(range_: pt.Range,
                             args: Dict[str, Any],
-                            column: int,
+                            stack: List[Column],
                             cache: MultiColCache,
-                            table_function: Callable[[pt.Range],  np.ndarray],
-                            lock
-                                ) -> Callable[[pt.Range, Dict[str, Any]], np.ndarray]:
+                            table_function: Callable[[pt.Range, Dict[str, Any], List[Column]], np.ndarray],
+                            lock: AcquirerProxy) -> np.ndarray:
         key = str(range_)
         with lock:
             if key not in cache:
                 print(f'Computing {key}')
-                table = table_function(range_)
+                table = table_function(range_, args, stack)
                 cache[key] = MultiColValues(table.shape[1], table)
             values = cache[key]
             values.count -= 1
-            return values.table[:,column]
+            return values.table[:, args['column']]
 
 @dataclass
 class MultiColValues:
     count: int
     table: np.ndarray
 
-MultiColCache = Dict[str,MultiColValues]
+MultiColCache = DictProxy
+
+from multiprocessing.managers import DictProxy, AcquirerProxy
 
 @dataclass(repr=False)
 class MultiColCachedWord(Word):
     name = None
-    table_function: Callable[[Dict[str, Any], pt.Range], np.ndarray] = None
-    table_columns: Callable[[Dict[str, Any]], int] = None
-    table_headers: Callable[[Dict[str, Any], int], str] = None
+    table_function: Callable[[pt.Range, Dict[str, Any], List[Column]], np.ndarray] = None
+    table_columns: Callable[[Dict[str, Any], List[Column]], int] = None
+    table_headers: Callable[[Dict[str, Any], List[Column], int], str] = None
 
     def operate(self, stack):
         manager = Manager()
         cache = manager.dict()
         lock = manager.Lock()
-        args = self.args.copy()
-        args['inputs'] = stack.copy()
+        inputs = stack.copy()
         stack.clear()
-        table_function = partial(self.table_function, args) 
-        for i in range(self.table_columns(args)):
-            header = self.table_headers(args, i)
-            row_function = partial(_multicol_rows_function, column=i,
-                    cache=cache, table_function=table_function, lock=lock)
-            stack.append(Column(header, self.name, row_function))
+        row_function = partial(_multicol_rows_function, 
+                cache=cache, table_function=self.table_function, lock=lock)
+        for i in range(self.table_columns(self.args, inputs)):
+            col_args = self.args.copy()
+            col_args['column'] = i
+            header = self.table_headers(col_args, inputs, i)
+            stack.append(Column(header, self.name, row_function, col_args, inputs))
 
-def _rank_table_function(args: Dict[str, Any], range_: pt.Range) -> np.ndarray:
-    table = np.column_stack([c.rows(range_) for c in args['inputs']])
+def _rank_table_function(range_: pt.Range, args: Dict[str, Any], stack: List[Column]) -> np.ndarray:
+    table = np.column_stack([c[range_] for c in stack])
     table = table.argsort()
     return table.argsort()
 
@@ -1080,8 +1004,8 @@ class Rank(MultiColCachedWord):
     def __post_init__(self):
         self.name = 'rank'
         self.table_function = _rank_table_function
-        self.table_columns = lambda args: len(args['inputs'])
-        self.table_headers = lambda args, i: args['inputs'][i].header
+        self.table_columns = lambda args, stack: len(stack)
+        self.table_headers = lambda args, stack, i: stack[i].header
 
     def __call__(self):
         return super().__call__()
