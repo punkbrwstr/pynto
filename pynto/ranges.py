@@ -74,7 +74,8 @@ class Range:
     def __repr__(self):
         if len(self) == 0:
             return '[]'
-        return f'[{self[0].strftime("%Y-%m-%d")}:{self[-1].strftime("%Y-%m-%d")}:{str(self.periodicity)}]'
+        end_exclusive = self.periodicity.get_date(self.stop)
+        return f'[{self[0].strftime("%Y-%m-%d")}:{end_exclusive.strftime("%Y-%m-%d")}:{str(self.periodicity)}]'
 
     def expand(self, by):   
         expanded = self.__class__(self.start, self.stop, self.periodicity)

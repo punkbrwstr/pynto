@@ -606,7 +606,7 @@ class Repeat(Word):
         for _ in range(self.args['times']):
             quote.evaluate(stack)
 
-def heach_stack_function(stack, args):
+def heach_stack_function(stack):
     assert stack[-1].header == 'quotation'
     quote = stack.pop().quoted
     new_stack = []
