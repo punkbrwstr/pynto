@@ -20,7 +20,7 @@ class Range:
         elif not isinstance(start, int):
             start = periodicity.get_index(start)
         if stop is None:
-            stop = periodicity.get_date(periodicity.get_index(datetime.date.today()) + 1)
+            stop = periodicities.now(periodicity) 
         if not isinstance(stop, int):
             stop = periodicity.get_index(stop)
         self.start = start
@@ -30,6 +30,9 @@ class Range:
     @classmethod
     def from_indexer(cls, indexer: Union[slice,int,datelike]):
         if isinstance(indexer, slice):
+            print(indexer.start)
+            print(indexer.stop)
+            print(indexer.step)
             return cls(indexer.start, indexer.stop, indexer.step)
         else:
             if not isinstance(indexer, int):
@@ -74,7 +77,8 @@ class Range:
     def __repr__(self):
         if len(self) == 0:
             return '[]'
-        return f'[{self[0].strftime("%Y-%m-%d")}:{self[-1].strftime("%Y-%m-%d")}:{str(self.periodicity)}]'
+        end_exclusive = self.periodicity.get_date(self.stop)
+        return f'[{self[0].strftime("%Y-%m-%d")}:{end_exclusive.strftime("%Y-%m-%d")}:{str(self.periodicity)}]'
 
     def expand(self, by):   
         expanded = self.__class__(self.start, self.stop, self.periodicity)
@@ -89,3 +93,7 @@ class Range:
 
     def to_index(self):
         return pd.date_range(self[0], self[-1], freq=self.periodicity.pandas_offset_code)
+
+    def day_counts(self):
+        return [(self.periodicity.get_date(i) - self.periodicity.get_date(i-1)).days \
+                    for i in range(self.start, self.stop)]

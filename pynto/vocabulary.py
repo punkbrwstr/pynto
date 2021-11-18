@@ -6,7 +6,8 @@ def _define(name: str, word) -> None:
     globals()[name] = word
 
 c = Constant()
-timestamp = BaseWord('timestamp', operate=timestamp_stack_function)
+timestamp = BaseWord('timestamp', operate=lambda stack: stack.append(Column('timestamp','timestamp', timestamp_col)))
+day_count = BaseWord('day_count', operate=lambda stack: stack.append(Column('days','day_count', daycount_col)))
 c_range = ConstantRange()
 pandas = Pandas()
 csv = CSV()

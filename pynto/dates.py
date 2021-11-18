@@ -6,13 +6,6 @@ from typing import Union
 
 datelike = Union[int,str,datetime.date,datetime.datetime,pd.Timestamp]
 
-def now() -> datetime.date:
-    d = datetime.datetime.utcnow()
-    if d.weekday() < 5 and d.hour >= 22:
-        return d + pd.tseries.offsets.BDay()
-    else:
-        return d.date()
-
 def parse_date(date: datelike) -> datetime.date:
     if isinstance(date, pd._libs.tslibs.timestamps.Timestamp):
         return date.date()

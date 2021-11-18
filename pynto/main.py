@@ -246,23 +246,6 @@ class Quotation(Word):
         stack.append(QuotationColumn(quoted=self.quoted))
 
 @dataclass(repr=False)
-class NullaryWord(Word):
-    def __init__(self,
-            name,
-            stack_function: Callable[[List[Column],Dict[str,Any]],None],
-            stack_function_args: Dict[str, Any] = {}):
-        self.stack_function = stack_function
-        self.stack_function_args = stack_function_args
-        self.stack_function_args['name'] = name
-        super().__init__(name)
-
-    def __call__(self):
-        return self
-
-    def operate(self, stack):
-        self.stack_function(stack, self.stack_function_args)
-
-@dataclass(repr=False)
 class BaseWord(Word):
     name: str
     operate: Callable[[List[Column]],None]
@@ -319,8 +302,8 @@ class Constant(Word):
 def timestamp_col(range_, args, _):
     return np.array(range_.to_index().view('int'))
 
-def timestamp_stack_function(stack, args):
-    stack.append(Column('timestamp','timestamp', timestamp_col))
+def daycount_col(range_, args, _):
+    return np.array(range_.day_counts())
 
 @dataclass(repr=False)
 class ConstantRange(Word):
@@ -606,7 +589,7 @@ class Repeat(Word):
         for _ in range(self.args['times']):
             quote.evaluate(stack)
 
-def heach_stack_function(stack, args):
+def heach_stack_function(stack):
     assert stack[-1].header == 'quotation'
     quote = stack.pop().quoted
     new_stack = []
