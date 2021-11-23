@@ -30,9 +30,6 @@ class Range:
     @classmethod
     def from_indexer(cls, indexer: Union[slice,int,datelike]):
         if isinstance(indexer, slice):
-            print(indexer.start)
-            print(indexer.stop)
-            print(indexer.step)
             return cls(indexer.start, indexer.stop, indexer.step)
         else:
             if not isinstance(indexer, int):
