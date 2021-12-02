@@ -52,7 +52,6 @@ from_pandas = _pandas_map.get
 def now(periodicity: Periodicity = B) -> datetime.date:
     dt = datetime.datetime.utcnow()
     d = dt.date()
-    d = B.offset(d, -1)
-    if dt.weekday() < 5 and dt.hour >= 23:
-        return B.offset(d, 1)
-    return periodicity.get_date(periodicity.get_index(d) + 1)
+    if periodicity != B or dt.weekday() < 5 and dt.hour >= 23:
+        d =  periodicity.get_date(periodicity.get_index(d) + 1)
+    return d
