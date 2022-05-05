@@ -14,7 +14,7 @@ def parse_date(date: datelike) -> datetime.date:
     elif isinstance(date, datetime.datetime):
         return date.date()
     elif isinstance(date, str):
-        return datetime.datetime.strptime(date, "%Y-%m-%d").date()
+        return datetime.datetime.strptime(date[:10], "%Y-%m-%d").date()
     else:
         raise TypeError(f'{type(date)} is not datelike')
 

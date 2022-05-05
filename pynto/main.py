@@ -676,8 +676,7 @@ def rolling_col(range_, args, stack):
         expanded_range = copy.copy(range_)
     else:
         resample = True
-        expanded_range = Range(range_.start_date(),
-                                range_.end_date(), periodicity)
+        expanded_range = Range.change_periodicity(range_, periodicity)
     expanded_range.start = expanded_range.start - lookback
     expanded = col[expanded_range]
     if range_.stop is None:
@@ -703,7 +702,7 @@ def rolling_col(range_, args, stack):
     else:
         expanded_range.start = expanded_range.start + lookback
         return pd.DataFrame(td[lookback:],
-                    index=expanded_range.to_index()).reindex(range_.to_index())
+                    index=expanded_range.to_index()).reindex(range_.to_index()).values
 @dataclass(repr=False)
 class Rolling(Word):
     name: str = 'rolling'
