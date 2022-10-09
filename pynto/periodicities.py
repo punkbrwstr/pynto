@@ -31,6 +31,9 @@ class Periodicity:
     def __repr__(self):
         return self.code
 
+    def __hash__(self):
+        return hash(self.code)
+
 
 
 B =  Periodicity('B', datetime.date(1970,1,1), 0, 260, 'B', round_b, count_b, add_b)

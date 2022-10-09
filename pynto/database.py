@@ -7,13 +7,15 @@ import numpy as np
 import pandas as pd
 from dataclasses import dataclass
 from collections import namedtuple
-from typing import Union, Dict
+from typing import Union, Dict, NamedTuple, Iterable
 from redis.connection import UnixDomainSocketConnection
 from .dates import datelike
 from .ranges import Range
-from . import periodicities
+from . import periodicities as p
 
-PREFIX = '/pynto/'
+PREFIX = '/ptd/'
+INDEX_PREFIX = '/pti/'
+INDEX_DELIMITER = '/'
 
 def get_client() -> Db:
     global _CLIENT
@@ -31,31 +33,57 @@ def get_client() -> Db:
         _CLIENT = Db(**args)
     return _CLIENT
 
-Type = namedtuple('Type', ['code', 'pad_value', 'length'])
 
-TYPES: Dict[str, Type]  = {
-    '<f8': Type('<f8',np.nan,8),
-    '|b1': Type('|b1',False,1),
-    '<i8': Type('<i8',0,8)
-}
+class DataType(NamedTuple):
+    dtype: str
+    pad_value: Any
+    length: int
 
-METADATA_FORMAT = '<6s6sll'
+_DATATYPES = [
+        DataType(None,None,0),
+        DataType('<f8',np.nan,8), 
+        DataType('<i8',0,8),
+        DataType('|b1',False,1)
+]
+_ORDINAL_FOR_DTYPE = {k.dtype: i for i,k in enumerate(_DATATYPES)}
+
+_PERIODICITY_FOR_ORDINAL = [p.B, p.W_T, p.W_F, p.M, p.Q, p.Y]
+_ORDINAL_FOR_FREQ = {'B': 0, 'W-TUE': 1, 'W-FRI': 2, 'BM': 3, 'BQ-DEC': 4, 'BA-DEC': 5}
+
+METADATA_FORMAT = '<BBll'
 METADATA_SIZE = struct.calcsize(METADATA_FORMAT)
 
-@dataclass
-class Metadata:
-    dtype: str
-    periodicity_code: str
+class Metadata(NamedTuple):
+    datatype_ordinal: int
+    periodicity_ordinal: int
     start: int
     stop: int
 
+    def pack(self):
+        return struct.pack(METADATA_FORMAT, *self)
+
     @property
-    def is_frame(self):
-        return self.dtype.startswith('<U')
+    def datatype(self):
+        return _DATATYPES[self.datatype_ordinal]
 
     @property
     def periodicity(self):
-        return periodicities.from_pandas(self.periodicity_code)
+        return _PERIODICITY_FOR_ORDINAL[self.periodicity_ordinal]
+
+    @property
+    def is_frame(self):
+        return self.datatype_ordinal == 0
+
+    @classmethod
+    def unpack(cls, bytes_):
+        return cls._make(struct.unpack(METADATA_FORMAT, bytes_))
+
+    @classmethod
+    def make(cls, dtype_str: str, freq_str: str, start: int, stop: int):
+        return cls(_ORDINAL_FOR_DTYPE[dtype_str],
+                    _ORDINAL_FOR_FREQ[freq_str],
+                    start, stop)
+                    
 
 class Db:
 
@@ -87,68 +115,53 @@ class Db:
                 index=pandas.index.remove_unused_levels().levels[0]
                 pandas = pd.DataFrame(pandas.values.reshape(len(index), len(columns)),
                             index=index, columns=columns) 
-            periodicity = periodicities.from_pandas(pandas.index.freq.name)
-            end = periodicity.get_index(pandas.index[-1].date()) + 1
-            try:
-                md = self._read_metadata(key)
-                if md.periodicity != periodicity:
-                    raise Exception('Incompatible periodicity.')
-                columns = set(self._get_data_range(key, 0, -1).decode().split('\t'))
-                if end > md.stop:
-                    self._update_end(key, end)
-                first_save = False
-            except KeyError:
-                start = periodicity.get_index(pandas.index[0].date())
-                md = Metadata('<U', pandas.index.freq.name, start, end)
-                columns = set()
-                first_save = True
-            new_columns = []
             for column,series in pandas.iteritems():
                 series_code = f'{key}:{column}'
-                if not column in columns:
-                    columns.add(column)
-                    new_columns.append(column)
                 series = series[series.first_valid_index():series.last_valid_index()]
                 series_to_save.append((series_code, series))
-            if first_save:
-                self._write(key, md, '\t'.join(new_columns).encode()) 
-            elif len(new_columns) > 0:
-                self.connection.append(PREFIX + key, ('\t' + '\t'.join(new_columns)).encode()) 
-        for key, series in series_to_save:
-            periodicity = periodicities.from_pandas(series.index.freq.name)
+            frame_md = self._read_metadata(key)
+            if frame_md:
+                if frame_md.periodicity != p.from_pandas(pandas.index.freq.name):
+                    raise Exception('Incompatible periodicity.')
+                existing_columns = set(self.read_frame_headers(key))
+                new_columns = set(pandas.columns).difference(existing_columns)
+                if len(new_columns) > 0:
+                    self.connection.append(PREFIX + key, ('\t' + '\t'.join(new_columns)).encode()) 
+            else:
+                md = Metadata.make(None, pandas.index.freq.name, 0, 0)
+                self._write(key, md, '\t'.join(pandas.columns).encode()) 
+        metadatas = self._read_metadatas([s[0] for s in series_to_save])
+        for saved_md, (k, series) in zip(metadatas, series_to_save):
+            periodicity = p.from_pandas(series.index.freq.name)
             start = periodicity.get_index(series.index[0].date())
-            series_md = Metadata(series.dtype.str, series.index.freq.name,
+            series_md = Metadata.make(series.dtype.str, series.index.freq.name,
                                     start, start + len(series.index)) 
-            try:
-                saved_md = self._read_metadata(key)
-                if saved_md.periodicity != periodicity:
+            if saved_md and saved_md.periodicity != periodicity:
                     raise Exception(f'Incompatible periodicity.')   
-            except:
-                saved_md = None
             data = series.values
             if saved_md is None or series_md.start < saved_md.start:
-                self._write(key, series_md, data.tobytes())
+                self._write(k, series_md, data.tobytes())
                 continue
             if series_md.start > saved_md.stop:
-                pad = np.full(series_md.start - saved_md.stop, TYPES[saved_md.dtype].pad_value)
+                pad = np.full(series_md.start - saved_md.stop, saved_md.datatype.pad_value)
                 data = np.hstack([pad, data])
                 start = saved_md.stop 
             else:
                 start = series_md.start
-            start_offset = (start - saved_md.start) * np.dtype(saved_md.dtype).itemsize
-            self._set_data_range(key, start_offset, data.tobytes())
+            start_offset = (start - saved_md.start) * saved_md.datatype.length
+            self._set_data_range(k, saved_md.datatype.length, start_offset, data.tobytes())
             if series_md.stop > saved_md.stop:
-                self._update_end(key, series_md.stop)
+                self._update_end(k, series_md.stop)
+        self.add_to_index(key)
 
     def __delitem__(self, key: str):
-        try:
-            md = self._read_metadata(key)
-        except KeyError:
-            return
-        if md.is_frame:
-            for series_key in self.read_frame_series_keys(key):
-                self.connection.delete(PREFIX + series_key)
-        self.connection.delete(PREFIX + key)
+        md = self._read_metadata(key)
+        if md:
+            if md.is_frame:
+                for series_key in self.read_frame_series_keys(key):
+                    self.connection.delete(PREFIX + series_key)
+            self.connection.delete(PREFIX + key)
+        self.remove_from_index(key)
 
     def __getitem__(self, key: str):
         return self.read(key)
@@ -156,11 +169,13 @@ class Db:
     def read(self, key: str,
                 start: Union[int,datelike] = None,
                 stop: Union[int,datelike] = None,
-                periodicity: Union[str, periodicities.Periodicity] = None,
+                periodicity: Union[str, p.Periodicity] = None,
                 resample_method: str = 'last') -> Union[pd.Series, pd.DataFrame]:
         md = self._read_metadata(key)
+        if not md:
+            raise KeyError(f'PyntoDB key {key} not found')
         if isinstance(periodicity, str):
-            periodicity = getattr(periodicities, periodicity)
+            periodicity = getattr(p, periodicity)
         if not md.is_frame:
             data = self.read_series_data(key, start, stop, periodicity, md, resample_method)
             return pd.Series(data[3], index=Range(*data[:3]).to_index(), name=key)
@@ -182,6 +197,8 @@ class Db:
 
     def read_frame_diagonal(self, key, start=None, stop=None, periodicity=None, resample_method='last'):
         md = self._read_metadata(key)
+        if not md:
+            raise KeyError(f'PyntoDB key {key} not found')
         start = md.start if start is None else md.periodicity.get_index(start)
         stop = md.stop if stop is None else md.periodicity.get_index(stop)
         periodicity = md.periodicity if periodicity is None else periodicity
@@ -204,11 +221,13 @@ class Db:
     def read_series_data(self, key: str,
                             start: Union[int,datelike] = None,
                             stop: Union[int,datelike] = None,
-                            periodicity: periodicities.Periodicity = None,
+                            periodicity: p.Periodicity = None,
                             md: Metadata = None,
                             resample_method: str = 'last'):
         if md is None:
             md = self._read_metadata(key)
+            if not md:
+                raise KeyError(f'PyntoDB key {key} not found')
         needs_resample = periodicity is not None and periodicity != md.periodicity
         if needs_resample:
             if not start is None:
@@ -222,34 +241,33 @@ class Db:
             else:
                 stop_index = md.stop
         else:
-            if start is None:
-                start_index = md.start
-            else:
+            if start:
                 start_index = md.periodicity.get_index(start)
-            if stop is None:
-                stop_index = md.stop
             else:
+                start_index = md.start
+            if stop:
                 stop_index = md.periodicity.get_index(stop)
-        periodicity = periodicity if periodicity else md.periodicity
+            else:
+                stop_index = md.stop
         if start_index < md.stop and stop_index >= md.start:
-            itemsize = np.dtype(md.dtype).itemsize 
             selected_start = max(0, start_index - md.start)
             selected_end = min(stop_index, md.stop + 2) - md.start
-            buff = self._get_data_range(key, selected_start * itemsize, selected_end * itemsize)
-            data = np.frombuffer(buff, md.dtype)
+            buff = self._get_data_range(key, md.datatype.length, selected_start * md.datatype.length,
+                                        selected_end * md.datatype.length)
+            data = np.frombuffer(buff, md.datatype.dtype)
             if len(data) != stop_index - start_index:
                 output_start = max(0, md.start - start_index)
-                output = np.full(stop_index - start_index,TYPES[md.dtype].pad_value)
+                output = np.full(stop_index - start_index,md.datatype.pad_value)
                 output[output_start:output_start+len(data)] = data
             else:
                 output = data
         else:
-            output = np.full(stop_index - start_index,TYPES[md.dtype].pad_value)
+            output = np.full(stop_index - start_index, md.datatype.pad_value)
         if needs_resample:
             s = pd.Series(output, index=Range(
                             start_index,stop_index,md.periodicity).to_index(), name=key)
-            s = getattr(s.resample(periodicity.pandas_offset_code),
-                            resample_method)().reindex(Range(start, stop, periodicity).to_index())
+            s = getattr(s.resample(periodicity.pandas_offset_code), resample_method)() \
+                            .reindex(Range(start, stop, periodicity).to_index())
             return (periodicity.get_index(s.index[0].date()),
                     periodicity.get_index(s.index[-1].date()),
                     periodicity, s.values)
@@ -257,52 +275,67 @@ class Db:
             return (start_index, stop_index, md.periodicity, output)
         
     def read_frame_headers(self, key):
-        return self._get_data_range(key, 0, -1).decode().split('\t')
+        return self._get_data_range(key, 0, 0, -1).decode().split('\t')
 
     def read_frame_series_keys(self, key):
         return [f'{key}:{c}' for c in self.read_frame_headers(key)]
 
     def _read_metadata(self, key: str) -> Metadata:
-        data = self.connection.getrange(PREFIX + key,0,METADATA_SIZE-1)
+        data = self.connection.getrange(PREFIX + key, 0, METADATA_SIZE-1)
         if len(data) == 0:
-            raise KeyError(f'No metadata for key {key}')
-        s = struct.unpack(METADATA_FORMAT, data)
-        return Metadata(s[0].decode().strip(), s[1].decode().strip(), s[2], s[3])
+            return None
+        return Metadata.unpack(data)
+
+    def _read_metadatas(self, keys: Iterable[str]) -> list[Metadata]:
+        p = self.connection.pipeline()
+        for key in keys:
+            p.getrange(PREFIX + key, 0, METADATA_SIZE-1)
+        mds = []
+        for data in p.execute():
+            if len(data) == 0:
+                mds.append(None)
+            else:
+                mds.append(Metadata.unpack(data))
+        return mds
 
     def _read_frame_data(self, key: str,
                             start: Union[int,datelike] = None,
                             stop: Union[int,datelike] = None,
-                            periodicity: periodicities.Periodicity = None,
+                            periodicity: p.Periodicity = None,
                             md: Metadata = None,
                             resample_method: str = 'last'):
         if md is None:
             md = self._read_metadata(key)
-        start = md.start if start is None else md.periodicity.get_index(start)
-        stop = md.stop if stop is None else md.periodicity.get_index(stop)
         periodicity = md.periodicity if periodicity is None else periodicity
         columns = self.read_frame_headers(key)
-        data = np.column_stack([self.read_series_data(f'{key}:{c}', start, stop, periodicity,
-                    None, resample_method)[3] for c in columns])
-        return (start, stop, periodicity, columns, data)
+        keys = [f'{key}:{c}' for c in columns]
+        mds = self._read_metadatas(keys)
+        if start is None:
+            start = min([md.start for md in mds])
+        if stop is None:
+            stop = max([md.stop for md in mds])
+        data = []
+        for md, key in zip(mds,keys):
+            data.append(self.read_series_data(key, start, stop, periodicity, md, resample_method)[3])
+        return (start, stop, periodicity, columns, np.column_stack(data))
 
 
     def _update_end(self, key: str, stop: int):
         self.connection.setrange(PREFIX + key, METADATA_SIZE - struct.calcsize('<l'), struct.pack('<l',int(stop)))
 
     def _write(self, key: str, metadata: Metadata, data: np.ndarray):
-        packed_md = struct.pack(METADATA_FORMAT,
-                                '{0: <6}'.format(metadata.dtype).encode(),
-                                '{0: <6}'.format(metadata.periodicity.pandas_offset_code).encode(),
-                                metadata.start,
-                                metadata.stop) 
-        self.connection.set(PREFIX + key, packed_md + data)
+        self.connection.set(PREFIX + key, metadata.pack() +
+                            bytes(metadata.datatype.length) + data)
 
-    def _get_data_range(self, key: str, start: int, stop: int):
-        stop = -1 if stop == -1 else METADATA_SIZE + stop - 1
-        return self.connection.getrange(PREFIX + key, str(METADATA_SIZE + start), str(stop))
+    def _get_data_range(self, key: str, data_length: int, start: int, stop: int):
+        skip = METADATA_SIZE + data_length
+        if stop != -1:
+            stop += skip - 1
+        return self.connection.getrange(PREFIX + key, str(skip + start), str(stop))
         
-    def _set_data_range(self, key: str, start: int, data: np.ndarray):
-        self.connection.setrange(PREFIX + key, str(METADATA_SIZE + start), data)
+    def _set_data_range(self, key: str, data_length: int, start: int, data: np.ndarray):
+        skip = METADATA_SIZE + data_length
+        self.connection.setrange(PREFIX + key, str(skip + start), data)
 
     def _check_dups(self, index: pd.Index, type_='column'):
         unq, unq_cnt = np.unique(index, return_counts=True)
@@ -310,4 +343,34 @@ class Db:
             dups = unq[unq_cnt > 1].tolist()
             raise ValueError(f'Duplicate {type_} name{"s: " + str(dups)  if len(dups) > 1 else ": " + str(dups[0])}')
 
+    def add_to_index(self, key: str):
+        for key,value in self._get_index_parts(key):
+            self.connection.zadd(key, {value: 0.0})
+
+    def remove_from_index(self, key: str):
+        for key,value in self._get_index_parts(key):
+            self.connection.zrem(key, value)
+            if self.connection.zcard(key) == 0:
+               self.connection.delete(key)
+
+    def _get_index_parts(self, key: str):
+        parts = key.split(INDEX_DELIMITER)
+        indicies = []
+        for i in range(len(parts)):
+            #self.connection.zadd(f'{INDEX_PREFIX}{"/".join(parts[0:i])}',{parts[i]:0})
+            indicies.append((f'{INDEX_PREFIX}{"/".join(parts[0:i])}', parts[i]))
+        return indicies
+
+
+    def reindex_frames(self):
+        #for key in self.connection.scan_iter(f'{INDEX_PREFIX}*'):
+        #    self.connection.delete(key)
+        for key in self.connection.scan_iter(f'{PREFIX}*'):
+            key = key.decode()[len(PREFIX):]
+            if self._read_metadata(key).is_frame:
+                self.add_to_index(key)
+
+
+
+    
 

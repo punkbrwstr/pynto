@@ -69,13 +69,18 @@ class Range:
     def __len__(self):
         assert self.stop >= self.start, f'Negative range length {self.start}-{self.stop}'
         return self.stop - self.start
-
                 
     def __repr__(self):
         if len(self) == 0:
             return '[]'
         end_exclusive = self.periodicity.get_date(self.stop)
         return f'[{self[0].strftime("%Y-%m-%d")}:{end_exclusive.strftime("%Y-%m-%d")}:{str(self.periodicity)}]'
+
+    def __hash__(self):
+        return hash((self.start,self.stop,self.periodicity))
+
+    def __eq__(self, other):
+        return self.start == other.start and self.stop == other.stop and self.periodicity == other.periodicity
 
     def expand(self, by):   
         expanded = self.__class__(self.start, self.stop, self.periodicity)
