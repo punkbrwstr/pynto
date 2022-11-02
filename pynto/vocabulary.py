@@ -1,5 +1,6 @@
 import numpy as np
 from .main import *
+from .database import Saved
 
 
 def _define(name: str, word) -> None:
@@ -73,7 +74,6 @@ pct_change = get_window_operator('pct_change', pct_change_twod_op, pct_change_on
 log_change = get_window_operator('log_change', log_change_twod_op, log_change_oned_op)
 first = get_window_operator('first', first_twod_op, first_oned_op)
 last = get_window_operator('last',last_twod_op,last_oned_op)
-saved = Saved('saved')
 quote = Quotation()
 q = Quotation()
 begin = Word('')

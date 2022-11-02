@@ -4,7 +4,7 @@ pynto is a Python package that lets you manipulate tabular data with the express
 ## What does it look like?
 ```
 >>> import pynto as pt 
->>> ma_dev = pt.saved('stock_prices') \         # define an expression that appends columns from the build-in database
+>>> ma_dev = pt.db('stock_prices') \         # define an expression that appends columns from the build-in database
 >>>     .quote(pt.dup.rolling(20).mean.sub) \   # append a quoted expression to the stack
 >>>     .each                                   # use the each combinator to apply the quotation to the previous columns
 >>> df = ma_dev['2021-06-01':]                  # evaluate your expression over a date range to get a DataFrame
@@ -63,7 +63,7 @@ pynto has built-in time series database functionality that lets you save pandas 
 
 ```
 >>> pt.db['my_df'] = expr['2021-06-01':'2021-06-03']
->>> pt.saved('my_df')['2021-06-01':'2021-06-02']
+>>> pt.db('my_df')['2021-06-01':'2021-06-02']
               constant  constant
 2021-06-01      81.0     100.0
 >>> pt.db.read('my_df')

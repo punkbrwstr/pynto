@@ -11,11 +11,12 @@ from typing import Union, Dict, NamedTuple, Iterable
 from redis.connection import UnixDomainSocketConnection
 from .dates import datelike
 from .ranges import Range
+from .main import Word, Column
 from . import periodicities as p
 
-PREFIX = '/ptd/'
-INDEX_PREFIX = '/pti/'
-INDEX_DELIMITER = '/'
+PREFIX = '/ptd'
+INDEX_PREFIX = '/pti'
+DELIMITER = '/'
 
 def get_client() -> Db:
     global _CLIENT
@@ -95,6 +96,9 @@ class Db:
     @property
     def connection(self):
         return redis.Redis(connection_pool=self._pool)
+    
+    def __call__(self, key):
+        return Saved()(key)
 
     def __setitem__(self, key: str, pandas: Union[pd.Series, pd.DataFrame]):
         if not isinstance(pandas.index, pd.MultiIndex) and pandas.index.freq is None:
@@ -126,7 +130,8 @@ class Db:
                 existing_columns = set(self.read_frame_headers(key))
                 new_columns = set(pandas.columns).difference(existing_columns)
                 if len(new_columns) > 0:
-                    self.connection.append(PREFIX + key, ('\t' + '\t'.join(new_columns)).encode()) 
+                    self.connection.append(f'{PREFIX}{DELIMITER}{key}',
+                            ('\t' + '\t'.join(new_columns)).encode()) 
             else:
                 md = Metadata.make(None, pandas.index.freq.name, 0, 0)
                 self._write(key, md, '\t'.join(pandas.columns).encode()) 
@@ -159,8 +164,8 @@ class Db:
         if md:
             if md.is_frame:
                 for series_key in self.read_frame_series_keys(key):
-                    self.connection.delete(PREFIX + series_key)
-            self.connection.delete(PREFIX + key)
+                    self.connection.delete(f'{PREFIX}{DELIMITER}{series_key}')
+            self.connection.delete(f'{PREFIX}{DELIMITER}{key}')
         self.remove_from_index(key)
 
     def __getitem__(self, key: str):
@@ -216,6 +221,10 @@ class Db:
 
     def read_range(self, key: str) -> Range:
         md = self._read_metadata(key)
+        if not md:
+            return None
+        elif md.is_frame:
+            return Range(*self._read_frame_range(key, md=md)[:3])
         return Range(md.start, md.stop, md.periodicity)
 
     def read_series_data(self, key: str,
@@ -281,7 +290,7 @@ class Db:
         return [f'{key}:{c}' for c in self.read_frame_headers(key)]
 
     def _read_metadata(self, key: str) -> Metadata:
-        data = self.connection.getrange(PREFIX + key, 0, METADATA_SIZE-1)
+        data = self.connection.getrange(f'{PREFIX}{DELIMITER}{key}', 0, METADATA_SIZE-1)
         if len(data) == 0:
             return None
         return Metadata.unpack(data)
@@ -289,7 +298,7 @@ class Db:
     def _read_metadatas(self, keys: Iterable[str]) -> list[Metadata]:
         p = self.connection.pipeline()
         for key in keys:
-            p.getrange(PREFIX + key, 0, METADATA_SIZE-1)
+            p.getrange(f'{PREFIX}{DELIMITER}{key}', 0, METADATA_SIZE-1)
         mds = []
         for data in p.execute():
             if len(data) == 0:
@@ -297,6 +306,24 @@ class Db:
             else:
                 mds.append(Metadata.unpack(data))
         return mds
+    
+    def _read_frame_range(self, key:str,
+                            start: Union[int,datelike] = None,
+                            stop: Union[int,datelike] = None,
+                            periodicity: p.Periodicity = None,
+                            md: Metadata = None):
+        if md is None:
+            md = self._read_metadata(key)
+        columns = self.read_frame_headers(key)
+        keys = [f'{key}:{c}' for c in columns]
+        mds = self._read_metadatas(keys)
+        if periodicity is None:
+            periodicity = md.periodicity
+        if start is None:
+            start = min([md.start for md in mds])
+        if stop is None:
+            stop = max([md.stop for md in mds])
+        return (start, stop, periodicity, keys, mds, columns)
 
     def _read_frame_data(self, key: str,
                             start: Union[int,datelike] = None,
@@ -304,16 +331,8 @@ class Db:
                             periodicity: p.Periodicity = None,
                             md: Metadata = None,
                             resample_method: str = 'last'):
-        if md is None:
-            md = self._read_metadata(key)
-        periodicity = md.periodicity if periodicity is None else periodicity
-        columns = self.read_frame_headers(key)
-        keys = [f'{key}:{c}' for c in columns]
-        mds = self._read_metadatas(keys)
-        if start is None:
-            start = min([md.start for md in mds])
-        if stop is None:
-            stop = max([md.stop for md in mds])
+        start, stop, periodicity, keys, mds, columns = self._read_frame_range(key,
+                                                            start, stop, periodicity, md)
         data = []
         for md, key in zip(mds,keys):
             data.append(self.read_series_data(key, start, stop, periodicity, md, resample_method)[3])
@@ -321,21 +340,21 @@ class Db:
 
 
     def _update_end(self, key: str, stop: int):
-        self.connection.setrange(PREFIX + key, METADATA_SIZE - struct.calcsize('<l'), struct.pack('<l',int(stop)))
+        self.connection.setrange(f'{PREFIX}{DELIMITER}{key}', METADATA_SIZE - struct.calcsize('<l'), struct.pack('<l',int(stop)))
 
     def _write(self, key: str, metadata: Metadata, data: np.ndarray):
-        self.connection.set(PREFIX + key, metadata.pack() +
+        self.connection.set(f'{PREFIX}{DELIMITER}{key}', metadata.pack() +
                             bytes(metadata.datatype.length) + data)
 
     def _get_data_range(self, key: str, data_length: int, start: int, stop: int):
         skip = METADATA_SIZE + data_length
         if stop != -1:
             stop += skip - 1
-        return self.connection.getrange(PREFIX + key, str(skip + start), str(stop))
+        return self.connection.getrange(f'{PREFIX}{DELIMITER}{key}', str(skip + start), str(stop))
         
     def _set_data_range(self, key: str, data_length: int, start: int, data: np.ndarray):
         skip = METADATA_SIZE + data_length
-        self.connection.setrange(PREFIX + key, str(skip + start), data)
+        self.connection.setrange(f'{PREFIX}{DELIMITER}{key}', str(skip + start), data)
 
     def _check_dups(self, index: pd.Index, type_='column'):
         unq, unq_cnt = np.unique(index, return_counts=True)
@@ -354,23 +373,57 @@ class Db:
                self.connection.delete(key)
 
     def _get_index_parts(self, key: str):
-        parts = key.split(INDEX_DELIMITER)
+        parts = key.split(DELIMITER)
         indicies = []
         for i in range(len(parts)):
             #self.connection.zadd(f'{INDEX_PREFIX}{"/".join(parts[0:i])}',{parts[i]:0})
-            indicies.append((f'{INDEX_PREFIX}{"/".join(parts[0:i])}', parts[i]))
+            indicies.append((f'{"/".join([INDEX_PREFIX] + parts[0:i])}', parts[i]))
         return indicies
 
 
-    def reindex_frames(self):
-        #for key in self.connection.scan_iter(f'{INDEX_PREFIX}*'):
-        #    self.connection.delete(key)
-        for key in self.connection.scan_iter(f'{PREFIX}*'):
-            key = key.decode()[len(PREFIX):]
-            if self._read_metadata(key).is_frame:
-                self.add_to_index(key)
+    def reindex(self):
+        for key in self.connection.keys(f'{INDEX_PREFIX}*'):
+            self.connection.delete(key)
+        for key in self.connection.keys(f'{PREFIX}{DELIMITER}*'):
+            self.add_to_index(key.decode()[len(PREFIX + DELIMITER):])
 
 
+def saved_col(range_, args, _):
+    if range_.start is not None and range_.stop is not None and range_.periodicity is not None:
+        return get_client().read_series_data(args['key'], range_.start,
+                        range_.stop, range_.periodicity)[3]
+    else:
+        data = get_client().read_series_data(args['key'])
+        values = data[3][range_.start: range_.stop: range_.periodicity]
+        if range_.start is None:
+            range_.start = data[0]
+        elif range_.start < 0:
+            range_.start = data[1] + range_.start
+        else:
+            range_.start = data[0] + range_.start
+
+        if range_.stop is None:
+            range_.stop = data[1]
+        elif range_.stop < 0:
+            range_.stop = data[1] + range_.stop
+        else:
+            range_.stop = data[0] + range_.stop
+        range_.periodicity_code = data[2]
+        return values
+
+@dataclass(repr=False)
+class Saved(Word):
+    name: str = 'saved'
+    def __call__(self, key): return super().__call__(locals())
+    def operate(self, stack):
+        md = get_client()._read_metadata(self.args['key'])
+        if not md.is_frame:
+            stack.append(Column(self.args['key'], self.name, saved_col, self.args, []))
+        else:   
+            for header in get_client().read_frame_headers(self.args['key']):
+                col_args = self.args.copy()
+                col_args.update({'key': f'{self.args["key"]}:{header}'})
+                stack.append(Column(header, self.name, saved_col, col_args, []))
 
     
 

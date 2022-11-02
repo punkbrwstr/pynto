@@ -18,7 +18,6 @@ from functools import partial
 from typing import Callable, List, Dict, Any
 from .ranges import Range
 from .tools import *
-from .database import get_client
 from . import vocabulary
 from . import periodicities
 
@@ -80,7 +79,7 @@ def get_col(col_and_range):
     return col_and_range[0][col_and_range[1]]
 
 def get_rows(stack: List[Column], range_: range) -> np.ndarray:
-    if _MULTIPROCESSING:
+    if _MULTIPROCESSING and len(stack) > 50:
         with Pool(psutil.cpu_count(logical=False)) as pool:
             return np.column_stack(list(pool.map(get_col, [(col, range_) for col in stack])))
     else:
@@ -822,42 +821,6 @@ class Join(Word):
         col1 = stack.pop()
         stack.append(Column(col1.header, self.name, join_col, self.args, [col1, col2]))
 
-def saved_col(range_, args, _):
-    if range_.start is not None and range_.stop is not None and range_.periodicity is not None:
-        return get_client().read_series_data(args['key'], range_.start,
-                        range_.stop, range_.periodicity)[3]
-    else:
-        data = get_client().read_series_data(args['key'])
-        values = data[3][range_.start: range_.stop: range_.periodicity]
-        if range_.start is None:
-            range_.start = data[0]
-        elif range_.start < 0:
-            range_.start = data[1] + range_.start
-        else:
-            range_.start = data[0] + range_.start
-
-        if range_.stop is None:
-            range_.stop = data[1]
-        elif range_.stop < 0:
-            range_.stop = data[1] + range_.stop
-        else:
-            range_.stop = data[0] + range_.stop
-        range_.periodicity_code = data[2]
-        return values
-
-@dataclass(repr=False)
-class Saved(Word):
-    name: str = 'saved'
-    def __call__(self, key): return super().__call__(locals())
-    def operate(self, stack):
-        md = get_client()._read_metadata(self.args['key'])
-        if not md.is_frame:
-            stack.append(Column(self.args['key'], self.name, saved_col, self.args, []))
-        else:   
-            for header in get_client().read_frame_headers(self.args['key']):
-                col_args = self.args.copy()
-                col_args.update({'key': f'{self.args["key"]}:{header}'})
-                stack.append(Column(header, self.name, saved_col, col_args, []))
 
 def window_operator_col(range_, args, stack, matrix_op, vector_op):
     values = stack[0][range_]
