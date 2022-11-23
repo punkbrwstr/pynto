@@ -119,7 +119,7 @@ class Db:
                 index=pandas.index.remove_unused_levels().levels[0]
                 pandas = pd.DataFrame(pandas.values.reshape(len(index), len(columns)),
                             index=index, columns=columns) 
-            for column,series in pandas.iteritems():
+            for column,series in pandas.items():
                 series_code = f'{key}:{column}'
                 series = series[series.first_valid_index():series.last_valid_index()]
                 series_to_save.append((series_code, series))
@@ -417,6 +417,8 @@ class Saved(Word):
     def __call__(self, key): return super().__call__(locals())
     def operate(self, stack):
         md = get_client()._read_metadata(self.args['key'])
+        if md is None:
+            raise Exception(f'Pynto Db key not found:  {self.args["key"]}')
         if not md.is_frame:
             stack.append(Column(self.args['key'], self.name, saved_col, self.args, []))
         else:   
