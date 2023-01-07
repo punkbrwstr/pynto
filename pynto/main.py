@@ -233,6 +233,10 @@ class Word:
             current = current.next_
         return current
 
+    @property
+    def local(self) -> Word:
+        return Quotation()(self).call(0)
+
 @dataclass(repr=False)
 class Quotation(Word):
     name: str = 'quotation'
@@ -533,12 +537,18 @@ class Call(Word):
 @dataclass(repr=False)
 class IfExists(Word):
     name: str = 'ifexists'
-    def __call__(self,  copy=False): return super().__call__(locals())
+    def __call__(self, count=1, else_=False, copy=False): return super().__call__(locals())
     def operate(self, stack):
-        assert stack[-1].header == 'quotation', 'call needs a quotation on top of stack'
+        assert len(stack) == 0 or stack[-1].header == 'quotation', 'ifexists needs a quotation on top of stack'
         quoted = stack.pop().quoted
-        if stack:
+        if self.args['else_']:
+            assert len(stack) == 0 or stack[-1].header == 'quotation', 'ifexists needs two quotations if else_ is True'
+            quoted_else = stack.pop().quoted
+        if len(stack) >= self.args['count']:
             quoted.evaluate(stack)
+        elif self.args['else_']:
+            quoted_else.evaluate(stack)
+
 
 def partial_stack_function(stack, partial_stack):
     stack.extend(partial_stack)
