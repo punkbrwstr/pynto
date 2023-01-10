@@ -173,7 +173,16 @@ class Word:
         else:
             s = self.name
             if self.args:
-                s += '(' + ', '.join([f'{k}={str(v)[:2000]}' for k,v in self.args.items() if k != self]) + ')'
+                str_args = []
+                for k,v in self.args.items():
+                    if k != self:
+                        if isinstance(v, str):
+                            str_args.append(f"{k}='{v[:2000]}'")
+                            if len(v) > 2000:
+                                str_args[-1] += '...'
+                        else:
+                            str_args.append(f"{k}={str(v)}")
+                s += '(' + ', '.join(str_args) + ')'
         return s
 
     def __repr__(self):
@@ -896,6 +905,18 @@ def first_twod_op(x, axis):
 
 def first_oned_op(x, axis):
     return np.full(x.shape,x[0])
+
+def firstvalid_oned_op(x, axis):
+    valid = np.argwhere(~np.isnan(x))
+    if len(valid) == 0:
+        return np.full(x.shape, np.nan)
+    where = np.min(valid)
+    value = x[where]
+    return np.concatenate([np.full(where,np.nan),np.full(len(x)-where,value)])
+
+def firstvalid_twod_op(x, axis):
+    return np.array([firstvalid_oned_op(row, axis) for row in x])
+
 
 def last_twod_op(x, axis):
     return  x[:,-1]
