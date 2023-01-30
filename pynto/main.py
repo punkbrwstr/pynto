@@ -8,11 +8,6 @@ import numpy as np
 import numpy.ma as ma
 import pandas as pd
 import traceback
-import psutil
-from multiprocessing import Lock, Manager
-from multiprocessing.managers import DictProxy, AcquirerProxy
-from concurrent.futures import ProcessPoolExecutor as Pool
-from collections import namedtuple
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Callable, List, Dict, Any
@@ -22,12 +17,10 @@ from . import vocabulary
 from . import periodicities
 
 
-_MULTIPROCESSING = True
-_CACHING = True
+_CACHE: dict[tuple[uuid.UUID,pd.Range],np.array] = {}
 
-def disable_multiprocessing(disable: bool = True):
-    global _MULTIPROCESSING
-    _MULTIPROCESSING = not disable
+class ColumnError(Exception):
+    pass
 
 @dataclass(repr=False)
 class Column:
@@ -35,15 +28,23 @@ class Column:
     word_name: str
     function: Callable[[Range,Dict[str, Any],List[Column]], np.ndarray]
     args: Dict[str, Any] = field(default_factory=dict)
-    stack: List[Column] = field(default_factory=list)
+    stack: list[Column] = field(default_factory=list)
+    id_: uuid.UUID = field(default_factory=uuid.uuid4)
+    no_cache: bool = False
 
     def __getitem__(self, range_: Range) -> np.ndarray:
         try:
-            return self.function(range_, self.args, self.stack)
+            if self.no_cache:
+                return self.function(range_, self.args, self.stack)
+            if not (self.id_, range_) in _CACHE:
+                _CACHE[(self.id_, range_)] = self.function(range_, self.args, self.stack)
+            return _CACHE[(self.id_, range_)]
         except Exception as e:
-            print(f'Error in column "{self.header}"')
-            #raise e
-            raise ValueError(f'Error: {e} for column "{self.header}" ({repr(self)})') from e
+            if not isinstance(e, ColumnError):
+                raise ColumnError(f'{type(e).__name__}: {e} getting {range_} for' \
+                        + f'column "{self.header}" ({repr(self)})') from e
+            else:
+                raise e
 
     def __repr__(self):
         repr_ = 'pt'
@@ -74,17 +75,6 @@ class QuotationColumn(Column):
     def __repr__(self):
         return f'pt.q({self.quoted})'
 
-
-def get_col(col_and_range):
-    return col_and_range[0][col_and_range[1]]
-
-def get_rows(stack: List[Column], range_: range) -> np.ndarray:
-    if _MULTIPROCESSING and len(stack) > 50:
-        with Pool(psutil.cpu_count(logical=False)) as pool:
-            return np.column_stack(list(pool.map(get_col, [(col, range_) for col in stack])))
-    else:
-        return np.column_stack([col[range_] for col in stack])
-            
 @dataclass(repr=False)
 class Word:
     name: str
@@ -112,7 +102,8 @@ class Word:
             self.evaluate()
         if len(self._stack) == 0:
             return None
-        values = get_rows(self._stack, range_)
+        values = np.column_stack([col[range_] for col in self._stack])
+        _CACHE.clear()
         return pd.DataFrame(values, columns=[col.header for col in self._stack], index=range_.to_index())
 
     @property
@@ -262,10 +253,9 @@ class BaseWord(Word):
     name: str
     operate: Callable[[List[Column]],None]
 
-def peek_col(range_, args, stack, output, lock):
+def peek_col(range_, args, stack, output):
     values = stack[0][range_]
-    with lock:
-        output[args['col']] = pd.Series(values, index=range_.to_index(), name=args['header']) \
+    output[args['col']] = pd.Series(values, index=range_.to_index(), name=args['header']) \
             
     return values
 
@@ -283,13 +273,11 @@ class Peek(Word):
 
     def operate(self, stack):
         global PEEK
-        manager = Manager()
-        output = manager.list()
-        lock = manager.Lock()
+        output = []
         PEEK[self.args['name']] = output
         old_stack = stack.copy()
         stack.clear()
-        col_func = partial(peek_col, output=output, lock=lock)
+        col_func = partial(peek_col, output=output)
         for i, col in enumerate(reversed(old_stack)):
             output.append(None)
             col_args = self.args.copy()
@@ -309,7 +297,7 @@ class Constant(Word):
 
     def operate(self, stack):
         for value in self.args['values']:
-            stack.append(Column('c', 'c', const_col, {'values': value}))
+            stack.append(Column('c', 'c', const_col, {'values': value}, no_cache=True))
 
 def timestamp_col(range_, args, _):
     return np.array(range_.to_index().view('int'))
@@ -326,7 +314,7 @@ class ConstantRange(Word):
 
     def operate(self, stack):
         for value in range(self.args['value']):
-            stack.append(Column('c', 'c', const_col, {'values': value}))
+            stack.append(Column('c', 'c', const_col, {'values': value}, no_cache=True))
 
 def frame_col(range_, args, stack):
     col = stack[0]
@@ -365,7 +353,7 @@ class Pandas(Word):
         if frame.index.freq is None:
             frame.index.freq = pd.infer_freq(frame.index)
         for header, col in frame.iteritems():
-            stack.append(Column(header, self.name, frame_col, self.args, [col]))
+            stack.append(Column(header, self.name, frame_col, self.args, [col], no_cache=True))
 
 @dataclass(repr=False)
 class CSV(Word):
@@ -380,7 +368,7 @@ class CSV(Word):
         if frame.index.freq is None:
             frame.index.freq = pd.infer_freq(frame.index)
         for header, col in frame.iteritems():
-            stack.append(Column(header, self.name, frame_col, self.args, [col]))
+            stack.append(Column(header, self.name, frame_col, self.args, [col], no_cache=True))
 
 def unary_operator_col(range_, args, stack, op):
     return op(stack[0][range_])
@@ -394,13 +382,15 @@ def binary_operator_col(range_, args, stack, op):
 
 def unary_operator_stack_function(stack, name, op):
     col = stack.pop()
-    stack.append(Column(col.header, name, partial(unary_operator_col, op=op), {}, [col]))
+    stack.append(Column(col.header, name, partial(unary_operator_col, op=op),
+                    {}, [col], no_cache=True))
 
 def binary_operator_stack_function(stack, name, op):
     assert len(stack) > 1, 'Binary function requires to columns'
     col2 = stack.pop()
     col1 = stack.pop()
-    stack.append(Column(col1.header, name, partial(binary_operator_col, op=op), {},  [col1, col2]))
+    stack.append(Column(col1.header, name, partial(binary_operator_col, op=op),
+                    {},  [col1, col2], no_cache=True))
 
 def get_unary_operator(name, op):
     return BaseWord(name, operate=partial(unary_operator_stack_function, name=name, op=op))
@@ -415,6 +405,15 @@ def is_na_op(x):
 
 def logical_not_op(x):
     return np.where(np.logical_not(x), 1, 0)
+
+def logical_and_op(x,y):
+    return np.where(np.logical_and(x,y), 1, 0)
+
+def logical_or_op(x,y):
+    return np.where(np.logical_or(x,y), 1, 0)
+
+def logical_xor_op(x,y):
+    return np.where(np.logical_xor(x,y), 1, 0)
 
 # Stack manipulation
 def dup_stack_function(stack):
@@ -659,7 +658,8 @@ class HeaderSet(Word):
         start = len(stack) - len(headers)
         for i in range(start,len(stack)):
             header = headers[i - start]
-            stack[i] = Column(header, self.name, header_col, {'headers': header}, [stack[i]])
+            stack[i] = Column(header, self.name, header_col,
+                                {'headers': header}, [stack[i]], no_cache=True)
 
 @dataclass(repr=False)
 class HeaderFormat(Word):
@@ -668,7 +668,7 @@ class HeaderFormat(Word):
     def operate(self, stack):
         col = stack.pop()
         header = self.args['format_string'].format(col.header)
-        stack.append(Column(header, self.name, header_col, self.args, [col]))
+        stack.append(Column(header, self.name, header_col, self.args, [col], no_cache=True))
 
 @dataclass(repr=False)
 class HeaderApply(Word):
@@ -677,7 +677,7 @@ class HeaderApply(Word):
     def operate(self, stack):
         col = stack.pop()
         header = self.args['header_function'](col.header)
-        stack.append(Column(header, self.name, header_col, {}, [col]))
+        stack.append(Column(header, self.name, header_col, {}, [col], no_cache=True))
 
 # Windows
 def rolling_col(range_, args, stack):
@@ -754,7 +754,7 @@ class Expanding(Word):
         stack.append(Column(col.header, self.name, expanding_col, self.args, [col]))
 
 def crossing_col(range_, args, stack):
-    return get_rows(stack, range_)
+    return np.column_stack([col[range_] for col in stack])
 
 def crossing_op(stack):
     cols = stack[:]
@@ -791,7 +791,7 @@ class Fill(Word):
     def __call__(self, value): return super().__call__(locals())
     def operate(self, stack):
         col = stack.pop()
-        stack.append(Column(col.header, self.name, fill_col, self.args, [col]))
+        stack.append(Column(col.header, self.name, fill_col, self.args, [col], no_cache=True))
 
 def ffill_col(range_, args, stack):
     lookback = abs(args['lookback']) 
@@ -838,7 +838,7 @@ class Join(Word):
     def operate(self, stack):
         col2 = stack.pop()
         col1 = stack.pop()
-        stack.append(Column(col1.header, self.name, join_col, self.args, [col1, col2]))
+        stack.append(Column(col1.header, self.name, join_col, self.args, [col1, col2], no_cache=True))
 
 
 def window_operator_col(range_, args, stack, matrix_op, vector_op):
@@ -865,6 +865,12 @@ def get_window_operator(name, matrix_op, vector_op):
     stack_function = partial(window_operator_stack_function, name=name, 
                                 matrix_op=matrix_op, vector_op=vector_op) 
     return BaseWord(name, operate=stack_function)
+
+def count_twod_op(x, axis):
+    return np.sum(~np.isnan(x),axis=1)
+
+def count_oned_op(x, axis):
+    return np.cumsum(~np.isnan(x))
 
 def sum_oned_op(x, axis):
     mask = np.isnan(x)
@@ -927,27 +933,13 @@ def last_oned_op(x, axis):
 def _multicol_rows_function(range_: pt.Range,
                             args: Dict[str, Any],
                             stack: List[Column],
-                            cache: MultiColCache,
+                            table_id: uuid.UUID,
                             table_function: Callable[[pt.Range, Dict[str, Any], List[Column]], np.ndarray],
-                            lock: AcquirerProxy) -> np.ndarray:
-        key = str(range_)
-        with lock:
-            if key not in cache:
-                print(f'Computing {key}')
-                table = table_function(range_, args, stack)
-                cache[key] = MultiColValues(table.shape[1], table)
-            values = cache[key]
-            values.count -= 1
-            return values.table[:, args['column']]
-
-@dataclass
-class MultiColValues:
-    count: int
-    table: np.ndarray
-
-MultiColCache = DictProxy
-
-from multiprocessing.managers import DictProxy, AcquirerProxy
+                            ):#lock: AcquirerProxy) -> np.ndarray:
+        if (table_id, range_) not in _CACHE:
+            #print(f'computing table: {table_id}')
+            _CACHE[(table_id, range_)] = table_function(range_, args, stack)
+        return _CACHE[(table_id, range_)][:, args['column']]
 
 @dataclass(repr=False)
 class MultiColCachedWord(Word):
@@ -957,34 +949,32 @@ class MultiColCachedWord(Word):
     table_headers: Callable[[Dict[str, Any], List[Column], int], str] = None
 
     def operate(self, stack):
-        manager = Manager()
-        cache = manager.dict()
-        lock = manager.Lock()
         inputs = stack.copy()
         stack.clear()
         row_function = partial(_multicol_rows_function, 
-                cache=cache, table_function=self.table_function, lock=lock)
+                table_id=uuid.uuid4(), table_function=self.table_function)
         for i in range(self.table_columns(self.args, inputs)):
             col_args = self.args.copy()
             col_args['column'] = i
             header = self.table_headers(col_args, inputs, i)
-            stack.append(Column(header, self.name, row_function, col_args, inputs))
+            stack.append(Column(header, self.name, row_function, col_args, inputs, no_cache=True))
 
 def _rank_table_function(range_: pt.Range, args: Dict[str, Any], stack: List[Column]) -> np.ndarray:
-    table = np.column_stack([c[range_] for c in stack])
-    table = table.argsort()
-    return table.argsort()
+    return pd.DataFrame(np.column_stack([c[range_] for c in stack])).rank(axis=1).values
+
+def _rank_table_columns(args, stack):
+    return len(stack)
+
+def _rank_table_headers(args, stack, i):
+    return stack[i].header
 
 @dataclass(repr=False)
 class Rank(MultiColCachedWord):
     def __post_init__(self):
         self.name = 'rank'
         self.table_function = _rank_table_function
-        self.table_columns = lambda args, stack: len(stack)
-        self.table_headers = lambda args, stack, i: stack[i].header
+        self.table_columns = _rank_table_columns
+        self.table_headers = _rank_table_headers
 
     def __call__(self):
         return super().__call__()
-
-
-
