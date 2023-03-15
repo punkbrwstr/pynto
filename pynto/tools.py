@@ -28,7 +28,7 @@ def ewma_vectorized_safe(data, alpha, row_size=None, dtype=None, order='C', out=
         if data.dtype == np.float32:
             dtype = np.float32
         else:
-            dtype = np.float
+            dtype = np.float64
     else:
         dtype = np.dtype(dtype)
 
