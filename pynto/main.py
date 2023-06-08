@@ -386,7 +386,7 @@ def unary_operator_stack_function(stack, name, op):
                     {}, [col], no_cache=True))
 
 def binary_operator_stack_function(stack, name, op):
-    assert len(stack) > 1, 'Binary function requires to columns'
+    assert len(stack) > 1, 'Binary function requires two columns'
     col2 = stack.pop()
     col1 = stack.pop()
     stack.append(Column(col1.header, name, partial(binary_operator_col, op=op),
@@ -398,8 +398,33 @@ def get_unary_operator(name, op):
 def get_binary_operator(name, op):
     return BaseWord(name, operate=partial(binary_operator_stack_function, name=name, op=op))
 
+@dataclass(repr=False)
+class BinaryOperator(Word):
+    name: str
+    operation: Union[np.ufunc,Callable[[np.ndarray,np.ndarray],np.ndarray]] = None
+
+    def __call__(self, operand: float = None):
+        return super().__call__(locals())
+
+    def operate(self, stack):
+        if self.args['operand'] is not None:
+            col2 = Column('c', 'c', const_col,
+                        {'values': self.args['operand']}, no_cache=True)
+        else:
+            col2 = stack.pop()
+        col1 = stack.pop()
+        stack.append(Column(col1.header, self.name,
+                    partial(binary_operator_col, op=self.operation),
+                    {},  [col1, col2], no_cache=True))
+
+def zero_first_op(x):
+    x = x.copy()
+    x[0] = 0.0
+    return x
+
 def zero_to_na_op(x):
     return np.where(np.equal(x,0),np.nan,x)
+
 def is_na_op(x):
     return np.where(np.isnan(x), 1, 0)
 

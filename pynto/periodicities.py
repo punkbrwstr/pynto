@@ -51,6 +51,8 @@ Y = Periodicity('Y', datetime.date(1970,12,31), 3, 1, 'BA-DEC',
 _pandas_map = {'B': B, 'W-TUE': W_T, 'W-FRI': W_F, 'BM': M, 'BQ-DEC': Q, 'BA-DEC': Y}
 from_pandas = _pandas_map.get
 
+values = lambda: set([B,W_F,W_T,M,Q,Y])
+
 
 def now(periodicity: Periodicity = B) -> datetime.date:
     dt = datetime.datetime.utcnow()
