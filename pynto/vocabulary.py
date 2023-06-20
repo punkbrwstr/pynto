@@ -2,9 +2,30 @@ import numpy as np
 from .main import *
 from .database import Saved
 
+__all__ = [
+'abs', 'add', 'annotations', 'begin', 'c', 'c_range',
+'call', 'change', 'clear', 'cleave', 'copy', 'count',
+'crossing', 'csv', 'cumsum', 'day_count', 'db', 'div',
+'drop', 'dup', 'each', 'eq', 'ewma', 'exp', 'expanding',
+'expanding_mean', 'expanding_std', 'expanding_var',
+'ffill', 'fill', 'first', 'firstvalid', 'ge', 'gt',
+'happly', 'heach', 'hfilter', 'hformat', 'hpull',
+'hset', 'hsort', 'ifexists',
+'interleave', 'inv', 'is_na', 'join', 'last', 'le',
+'log', 'log_change', 'logical_and', 'logical_not',
+'logical_or', 'logical_xor', 'lt', 'ma',
+'max', 'mean', 'min', 'mod', 'mul', 'ne',
+'neg', 'partial',
+'pct_change', 'peek', 'pow', 'prod', 'pull',
+'q', 'quote', 'rank', 'repeat', 'rev',
+'rev_expanding', 'roll', 'rolling',
+'sqrt', 'std',
+'sub', 'sum', 'swap', 'timestamp', 'var',
+'zero_first', 'zero_to_na', 'zscore']
 
 def _define(name: str, word) -> None:
     globals()[name] = word
+    __all__.append(name)
 
 c = Constant()
 timestamp = BaseWord('timestamp', operate=lambda stack: stack.append(Column('timestamp','timestamp', timestamp_col)))

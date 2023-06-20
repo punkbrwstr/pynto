@@ -82,6 +82,7 @@ class Word:
     prev: Word = None
     quoted: Word = None
     args: dict = None
+    open_quote: bool = False
     _stack: Optional[List[Column]] = None
 
     def __add__(self, other: Word) -> Word:
@@ -91,10 +92,39 @@ class Word:
         other = other._head()[0]
         this.next_ = other
         other.prev = this
+        other.open_quote = this.open_quote
         return other._tail()
 
+    @property
+    def __(self):
+        if not self.open_quote:
+            self.open_quote = True
+            return self.copy_expression()
+        else:
+            current = self
+            current.open_quote = False
+            while current.prev is not None and current.prev.open_quote:
+                current = current.prev
+                current.open_quote = False
+            quote = Quotation()(current.next_._tail())
+            current.next_.prev = None
+            quote.prev = current
+            current.next_ = quote
+        return quote
+
+
     def __getattr__(self, name):
-        return self.__add__(getattr(vocabulary,name))
+        if re.match('f\d[_\d]*',name) is not None:
+            word = Constant()(float(name[1:].replace('_','.')))
+        elif re.match('f_\d[_\d]*',name) is not None:
+            word = Constant()(-float(name[2:].replace('_','.')))
+        elif re.match('i\d+',name) is not None:
+            word = Constant()(int(name[1:].replace('_','.')))
+        elif re.match('i_\d+',name) is not None:
+            word = Constant()(-int(name[2:].replace('_','.')))
+        else:
+            word = getattr(vocabulary,name)
+        return self.__add__(word)
 
     def __getitem__(self, key: Any) -> pd.DataFrame:
         range_ = key if isinstance(key, Range) else Range.from_indexer(key)
@@ -119,7 +149,7 @@ class Word:
         return self._stack
 
     def evaluate(self, stack: Optional[List[Column]] = None) -> None:
-        #assert not self.quoted, 'Cannot evaluate quotation.'
+        assert not self.open_quote, 'Unclosed quotation'
         start = self._head()[0]
         current = start
         if stack is None or len(stack) == 0:
@@ -652,12 +682,14 @@ def heach_stack_function(stack):
 @dataclass(repr=False)
 class Cleave(Word):
     name: str = 'cleave'
-    def __call__(self, num_quotations=-1, depth=None, copy=False): return super().__call__(locals())
+    def __call__(self, num_quotations=0, depth=None, copy=False): return super().__call__(locals())
     def operate(self, stack):
-        if self.args['num_quotations'] < 0:
-            self.args['num_quotations'] = len(stack)
-        quotes = [quote.quoted for quote in stack[-self.args['num_quotations']:]]
-        del(stack[-self.args['num_quotations']:])
+        count = self.args['num_quotations']
+        if self.args['num_quotations'] == 0:
+            while hasattr(stack[-count-1],'quoted') and stack[-count-1].quoted is not None:
+                count +=1
+        quotes = [quote.quoted for quote in stack[-count:]]
+        del(stack[-count:])
         depth = len(stack) if self.args['depth'] is None else self.args['depth']
         copied_stack = stack[-depth:] if depth != 0 else []
         if not self.args['copy'] and depth != 0:
