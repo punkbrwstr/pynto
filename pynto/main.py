@@ -34,6 +34,20 @@ class Column:
 
     def __getitem__(self, range_: Range) -> np.ndarray:
         try:
+            if False:
+                d =self.function(range_, self.args, self.stack) 
+                repr_ = f'.{self.word_name}'
+                if len(self.args) == 1:
+                    repr_ += '(' + ', '.join([f'{repr(v)}' for k,v in self.args.items()]) + ')'
+                if len(self.args) > 1:
+                    repr_ += '(' + ', '.join([f'{k}={repr(v)}' for k,v in self.args.items()]) + ')'
+                if len(d.shape) > 1:
+                    d2 = d[:,0]
+                else:
+                    d2 = d
+                print(repr_)
+                print(pd.Series(d2, index=range_.to_index()))
+                return d
             if self.no_cache:
                 return self.function(range_, self.args, self.stack)
             if not (self.id_, range_) in _CACHE:
@@ -98,8 +112,9 @@ class Word:
     @property
     def __(self):
         if not self.open_quote:
-            self.open_quote = True
-            return self.copy_expression()
+            this = self.copy_expression()
+            this.open_quote = True
+            return this
         else:
             current = self
             current.open_quote = False
@@ -110,8 +125,7 @@ class Word:
             current.next_.prev = None
             quote.prev = current
             current.next_ = quote
-        return quote
-
+            return quote
 
     def __getattr__(self, name):
         if re.match('f\d[_\d]*',name) is not None:

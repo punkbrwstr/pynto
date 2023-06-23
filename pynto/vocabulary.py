@@ -14,7 +14,7 @@ __all__ = [
 'interleave', 'inv', 'is_na', 'join', 'last', 'le',
 'log', 'log_change', 'logical_and', 'logical_not',
 'logical_or', 'logical_xor', 'lt', 'ma',
-'max', 'mean', 'min', 'mod', 'mul', 'ne',
+'max', 'mean', 'min', 'mod', 'mul','nan', 'ne',
 'neg', 'partial',
 'pct_change', 'peek', 'pow', 'prod', 'pull',
 'q', 'quote', 'rank', 'repeat', 'rev',
@@ -28,6 +28,7 @@ def _define(name: str, word) -> None:
     __all__.append(name)
 
 c = Constant()
+nan = Constant()(np.nan)
 timestamp = BaseWord('timestamp', operate=lambda stack: stack.append(Column('timestamp','timestamp', timestamp_col)))
 day_count = BaseWord('day_count', operate=lambda stack: stack.append(Column('days','day_count', daycount_col)))
 c_range = ConstantRange()

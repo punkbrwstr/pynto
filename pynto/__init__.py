@@ -28,8 +28,3 @@ def __getattr__(name):
         return vocabulary.c(-int(name[2:].replace('_','.')))
     else:
         return getattr(vocabulary, name)
-        
-    #elif name == '__':
-        #word  = Word('')
-        #word.open_quote = True
-        #return word
