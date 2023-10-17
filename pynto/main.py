@@ -101,6 +101,7 @@ class Word:
 
     def __add__(self, other: Word) -> Word:
         this = self.copy_expression()
+        this._stack = None
         other = other.copy_expression()
         other._stack = None
         other = other._head()[0]
