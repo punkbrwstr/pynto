@@ -125,10 +125,11 @@ class Word:
     def __add__(self, other: Word, copy_left=True) -> Word:
         this = self.copy_expression()
         if copy_left:
+            print('got here')
             other_tail = other.copy_expression()
         else:
             other_tail = other
-        other_head = other._head()[0]
+        other_head = other_tail._head()[0]
         this.next_ = other_head
         other_head.prev = this
         if this.open_quotes != 0:

@@ -117,6 +117,6 @@ ifexists = lambda: main.IfExists()
 if_ = lambda: main.If()
 ifelse = lambda: main.IfElse()
 
-zscore = lambda: main.c()(3) #quote(quote(std).quote(last).quote(mean).cleave(3, depth=1).sub.swap.div).call
+zscore = lambda: quote()(quote()(std()).quote(last()).quote(mean()).cleave(3, depth=1).sub.swap.div).call()
 
 rank = lambda: main.Rank('rank')
