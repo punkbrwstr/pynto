@@ -84,65 +84,94 @@ class QuotationColumn(Column):
     word_name: str = 'q'
     function: Callable[[Range,Dict[str, Any],List[Column]], np.ndarray] = \
                 quotation_col
-    quoted: Optional[Word] = None
 
     def __repr__(self):
-        return f'pt.q({self.quoted})'
+        return f'pt.q({self.args["quoted"]})'
+
+def _resolve(name: str) -> Word:
+    if re.match('f\d[_\d]*',name) is not None:
+        return Constant()(float(name[1:].replace('_','.')))
+    elif re.match('f_\d[_\d]*',name) is not None:
+        return Constant()(-float(name[2:].replace('_','.')))
+    elif re.match('i\d+',name) is not None:
+        return Constant()(int(name[1:].replace('_','.')))
+    elif re.match('i_\d+',name) is not None:
+        return Constant()(-int(name[2:].replace('_','.')))
+    elif re.match('r\d+_\d+',name) is not None:
+        start, end = name[1:].split('_')
+        return ConstantRange()(start,end)
+    elif re.match('r\d+',name) is not None:
+        return ConstantRange()(name[1:])
+    elif name in vocabulary._all_set:
+        return getattr(vocabulary, name)()
+    else:
+        raise KeyError
+
 
 @dataclass(repr=False)
 class Word:
     name: str
     next_: Word = None
     prev: Word = None
-    quoted: Word = None
     args: dict = None
-    open_quote: bool = False
+    open_quotes: int = 0
     _stack: Optional[List[Column]] = None
-
-    def __add__(self, other: Word) -> Word:
-        this = self.copy_expression()
-        this._stack = None
-        other = other.copy_expression()
-        other._stack = None
-        other = other._head()[0]
-        this.next_ = other
-        other.prev = this
-        other.open_quote = this.open_quote
-        return other._tail()
 
     @property
     def __(self):
-        if not self.open_quote:
-            this = self.copy_expression()
-            this.open_quote = True
-            return this
+        return self
+
+
+    def __add__(self, other: Word, copy_left=True) -> Word:
+        this = self.copy_expression()
+        if copy_left:
+            other_tail = other.copy_expression()
         else:
-            current = self
-            current.open_quote = False
-            while current.prev is not None and current.prev.open_quote:
-                current = current.prev
-                current.open_quote = False
-            quote = Quotation()(current.next_._tail())
-            current.next_.prev = None
-            quote.prev = current
-            current.next_ = quote
-            return quote
+            other_tail = other
+        other_head = other._head()[0]
+        this.next_ = other_head
+        other_head.prev = this
+        if this.open_quotes != 0:
+            current = other_head
+            while current.next_ is not None:
+                current.open_quotes += this.open_quotes
+                current = current.next_
+            current.open_quotes += this.open_quotes
+        return other_tail
 
     def __getattr__(self, name):
-        if re.match('f\d[_\d]*',name) is not None:
-            word = Constant()(float(name[1:].replace('_','.')))
-        elif re.match('f_\d[_\d]*',name) is not None:
-            word = Constant()(-float(name[2:].replace('_','.')))
-        elif re.match('i\d+',name) is not None:
-            word = Constant()(int(name[1:].replace('_','.')))
-        elif re.match('i_\d+',name) is not None:
-            word = Constant()(-int(name[2:].replace('_','.')))
-        else:
-            word = getattr(vocabulary,name)
-        return self.__add__(word)
+        try:
+            word = _resolve(name)
+            return self.__add__(word, copy_left=False)
+        except:
+            return self.__getattribute__(name)
+
+    @property
+    def p(self):
+        assert self.open_quotes > 0, 'No quote to close.'
+        current = self
+        open_quotes = self.open_quotes
+        while current.prev is not None and current.prev.open_quotes == open_quotes:
+            current.open_quotes = 0
+            current = current.prev
+        current.open_quotes -= 1 
+        assert isinstance(current, Quotation), 'something wrong'
+        current.next_.prev = None
+        current = current(current.next_._tail())
+        current.next_ = None
+        return current
+
+
+    def __dir__(self):
+        return sorted(set(dir(vocabulary)))
 
     def __getitem__(self, key: Any) -> pd.DataFrame:
-        range_ = key if isinstance(key, Range) else Range.from_indexer(key)
+        if isinstance(key, Range):
+            range_ = key 
+        elif isinstance(key, int):
+            range_ = Range(key)
+        else:
+            range_ = Range.from_indexer(key)
         if self._stack is None:
             self.evaluate()
         if len(self._stack) == 0:
@@ -164,7 +193,7 @@ class Word:
         return self._stack
 
     def evaluate(self, stack: Optional[List[Column]] = None) -> None:
-        assert not self.open_quote, 'Unclosed quotation'
+        assert self.open_quotes == 0, 'Unclosed quotation.  Cannot evaluate'
         start = self._head()[0]
         current = start
         if stack is None or len(stack) == 0:
@@ -183,7 +212,8 @@ class Word:
         current = start
         while current is not None:
             try:
-                if not current.args:
+                if current.args is None:
+                    # needed to initialize defaults if no args   
                     current = current()
                 current.operate(stack)
             except Exception as e:
@@ -204,8 +234,8 @@ class Word:
             self._stack = copy.copy(stack)
 
     def __str__(self):
-        if self.quoted:
-            return f'quote({self.quoted.__repr__()})'
+        if self.args and 'quoted' in self.args:
+            return f'quote({self.args["quoted"].__repr__()})'
         else:
             s = self.name
             if self.args:
@@ -231,6 +261,7 @@ class Word:
             else:
                 s = '.' + s
                 current = current.prev
+        s = 'pt.' + s
         return s
 
     def __len__(self):
@@ -238,10 +269,8 @@ class Word:
 
     def __call__(self, args = {}) -> Word:
         this = self.copy_expression()
-        if '__class__' in args:
-            del(args['__class__'])
-        if 'self' in args:
-            del(args['self'])
+        for name in ['__class__','self']:
+            args.pop(name, None)
         this.args = args
         return this
 
@@ -256,6 +285,7 @@ class Word:
 
     def copy_expression(self) -> Word:
         first = copy.copy(self)
+        first._stack = None
         current = first
         while current.prev is not None:
             prev = copy.copy(current.prev)
@@ -287,11 +317,21 @@ class Quotation(Word):
     name: str = 'quotation'
     
     def __call__(self, quoted):
-        self.quoted=quoted
-        return super().__call__(locals())
+        this = self.copy_expression()
+        this.args = {'quoted': quoted}
+        return this
+
+    def __getattr__(self, name):
+        try:
+            word = _resolve(name)
+            if self.args is None:
+                self.open_quotes += 1 
+            return self.__add__(word, False)
+        except:
+            return self.__getattribute__(name)
 
     def operate(self, stack):
-        stack.append(QuotationColumn(quoted=self.quoted))
+        stack.append(QuotationColumn(args={'quoted': self.args['quoted']}))
 
 @dataclass(repr=False)
 class BaseWord(Word):
@@ -340,6 +380,15 @@ class Constant(Word):
     def __call__(self, *values):
         return super().__call__(locals())
 
+    def __str__(self):
+        output = []
+        for value in self.args['values']:
+            if isinstance(value, int):
+                output.append('i' + str(value).replace('-','_'))
+            elif isinstance(value, float):
+                output.append('f' + str(value).replace('-','_').replace('.','_'))
+        return '.'.join(output)
+
     def operate(self, stack):
         for value in self.args['values']:
             stack.append(Column('c', 'c', const_col, {'values': value}, no_cache=True))
@@ -354,11 +403,14 @@ def daycount_col(range_, args, _):
 class ConstantRange(Word):
     name: str = 'c_range'
 
-    def __call__(self, value):
+    def __call__(self, end, start=0):
         return super().__call__(locals())
 
+    def __str__(self):
+        return f'r{self.args["start"]}_{self.args["end"]}'
+
     def operate(self, stack):
-        for value in range(self.args['value']):
+        for value in range(int(self.args['start']),int(self.args['end'])):
             stack.append(Column('c', 'c', const_col, {'values': value}, no_cache=True))
 
 def frame_col(range_, args, stack):
@@ -397,7 +449,7 @@ class Pandas(Word):
             frame = frame.toframe()
         if frame.index.freq is None:
             frame.index.freq = pd.infer_freq(frame.index)
-        for header, col in frame.iteritems():
+        for header, col in frame.items():
             stack.append(Column(header, self.name, frame_col, self.args, [col], no_cache=True))
 
 @dataclass(repr=False)
@@ -412,7 +464,7 @@ class CSV(Word):
                                     header=self.args['header'], parse_dates=True)
         if frame.index.freq is None:
             frame.index.freq = pd.infer_freq(frame.index)
-        for header, col in frame.iteritems():
+        for header, col in frame.items():
             stack.append(Column(header, self.name, frame_col, self.args, [col], no_cache=True))
 
 def unary_operator_col(range_, args, stack, op):
@@ -596,8 +648,8 @@ class Call(Word):
     name: str = 'call'
     def __call__(self, depth=None, copy=False): return super().__call__(locals())
     def operate(self, stack):
-        assert stack[-1].header == 'quotation', 'call needs a quotation on top of stack'
-        quoted = stack.pop().quoted
+        assert len(stack) == 0 or not isinstance(stack[-1],Quotation) , 'call needs a quotation on top of stack'
+        quoted = stack.pop().args['quoted']
         if 'depth' not in self.args or self.args['depth'] is None:
             depth = len(stack) 
         else:
@@ -617,16 +669,41 @@ class IfExists(Word):
     name: str = 'ifexists'
     def __call__(self, count=1, else_=False, copy=False): return super().__call__(locals())
     def operate(self, stack):
-        assert len(stack) == 0 or stack[-1].header == 'quotation', 'ifexists needs a quotation on top of stack'
-        quoted = stack.pop().quoted
+        assert len(stack) == 0 or not isinstance(stack[-1],Quotation) , 'ifexists needs a quotation on top of stack'
+        quoted = stack.pop().args['quoted']
         if self.args['else_']:
-            assert len(stack) == 0 or stack[-1].header == 'quotation', 'ifexists needs two quotations if else_ is True'
-            quoted_else = stack.pop().quoted
+            assert len(stack) == 0 or not isinstance(stack[-1],Quotation) , 'ifexists needs two quotations on top of stack for else_=True'
+            quoted_else = stack.pop().args['quoted']
         if len(stack) >= self.args['count']:
             quoted.evaluate(stack)
         elif self.args['else_']:
             quoted_else.evaluate(stack)
 
+@dataclass(repr=False)
+class If(Word):
+    name: str = 'if_'
+    def __call__(self, condition: Callable[[list[str]],bool]): return super().__call__(locals())
+    def operate(self, stack):
+        assert len(stack) == 0 or not isinstance(stack[-1],Quotation) , 'if_ needs a quotation on top of stack'
+        quoted = stack.pop().args['quoted']
+        if self.args['condition']([col.header for col in stack]):
+            quoted.evaluate(stack)
+
+@dataclass(repr=False)
+class IfElse(Word):
+    name: str = 'ifelse'
+    def __call__(self, condition: Callable[[list[str]],bool]): return super().__call__(locals())
+    def operate(self, stack):
+        assert len(stack) < 2 or \
+                not isinstance(stack[-1],Quotation) or \
+                not isinstance(stack[-2],Quotation) \
+                , 'if_ needs a quotation on top of stack'
+        quoted = stack.pop().args['quoted']
+        else_quoted = stack.pop().args['quoted']
+        if self.args['condition']([col.header for col in stack]):
+            quoted.evaluate(stack)
+        else:
+            else_quoted.evaluate(stack)
 
 def partial_stack_function(stack, partial_stack):
     stack.extend(partial_stack)
@@ -636,8 +713,8 @@ class Partial(Word):
     name: str = 'partial'
     def __call__(self, depth=1, copy=False): return super().__call__(locals())
     def operate(self, stack):
-        assert stack[-1].header == 'quotation', 'partial needs a quotation on top of stack'
-        quoted = stack.pop()
+        assert len(stack) == 0 or not isinstance(stack[-1],Quotation) , 'partial needs a quotation on top of stack'
+        quote = stack.pop()
         depth = self.args['depth']
         if depth != 0:
             this_stack = stack[-depth:]
@@ -646,16 +723,16 @@ class Partial(Word):
         else:
             this_stack = []
         stack_function = partial(partial_stack_function, partial_stack=this_stack)
-        quoted.quoted = BaseWord('partial', operate=stack_function) + quoted.quoted
-        stack.append(quoted)
+        quote.args['quoted'] = BaseWord('partial', operate=stack_function) + quote.args['quoted']
+        stack.append(quote)
 
 @dataclass(repr=False)
 class Each(Word):
     name: str = 'each'
     def __call__(self, start=0, end=None, every=1, copy=False): return super().__call__(locals())
     def operate(self, stack):
-        assert stack[-1].header == 'quotation'
-        quote = stack.pop().quoted
+        assert isinstance(stack[-1], QuotationColumn)
+        quote = stack.pop().args['quoted']
         end = 0 if self.args['end'] is None else -self.args['end']
         start = len(stack) if self.args['start'] == 0 else -self.args['start']
         selected = stack[end:start]
@@ -671,14 +748,14 @@ class Repeat(Word):
     name: str = 'repeat'
     def __call__(self, times): return super().__call__(locals())
     def operate(self, stack):
-        assert stack[-1].header == 'quotation'
-        quote = stack.pop().quoted
+        assert len(stack) == 0 or not isinstance(stack[-1],Quotation) , 'repeat needs a quotation on top of stack'
+        quote = stack.pop().args['quoted']
         for _ in range(self.args['times']):
             quote.evaluate(stack)
 
 def heach_stack_function(stack):
     assert stack[-1].header == 'quotation'
-    quote = stack.pop().quoted
+    quote = stack.pop().args['quoted']
     new_stack = []
     for header in set([c.header for c in stack]):
         to_del, filtered_stack = [], []
@@ -701,9 +778,9 @@ class Cleave(Word):
     def operate(self, stack):
         count = self.args['num_quotations']
         if self.args['num_quotations'] == 0:
-            while hasattr(stack[-count-1],'quoted') and stack[-count-1].quoted is not None:
+            while isinstance(stack[-count-1],QuotationColumn):
                 count +=1
-        quotes = [quote.quoted for quote in stack[-count:]]
+        quotes = [quote.args['quoted'] for quote in stack[-count:]]
         del(stack[-count:])
         depth = len(stack) if self.args['depth'] is None else self.args['depth']
         copied_stack = stack[-depth:] if depth != 0 else []

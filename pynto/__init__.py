@@ -1,30 +1,18 @@
 import re
 import sys
-from .vocabulary import *
+#from .vocabulary import *
+from .main import Word, _resolve
 from .periodicities import *
 from .ranges import Range
 from .vocabulary import _define as define
-from .database import get_client
-from . import main
-from . import vocabulary
+from .database import get_client, Saved
 
 db = get_client()
+define('db', lambda: Saved())
 
-__ = main.Word('')
+__ = Word('')
 __.open_quote = True
-
-       
 
 
 def __getattr__(name):
-
-    if re.match('f\d[_\d]*',name) is not None:
-        return vocabulary.c(float(name[1:].replace('_','.')))
-    elif re.match('f_\d[_\d]*',name) is not None:
-        return vocabulary.c(-float(name[2:].replace('_','.')))
-    elif re.match('i\d+',name) is not None:
-        return vocabulary.c(int(name[1:].replace('_','.')))
-    elif re.match('i_\d+',name) is not None:
-        return vocabulary.c(-int(name[2:].replace('_','.')))
-    else:
-        return getattr(vocabulary, name)
+    return _resolve(name)
