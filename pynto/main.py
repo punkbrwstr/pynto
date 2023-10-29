@@ -119,13 +119,12 @@ class Word:
 
     @property
     def __(self):
-        return self
+        raise Exception('Deprecated')
 
 
     def __add__(self, other: Word, copy_left=True) -> Word:
         this = self.copy_expression()
         if copy_left:
-            print('got here')
             other_tail = other.copy_expression()
         else:
             other_tail = other

@@ -1,7 +1,7 @@
 import re
 import sys
 #from .vocabulary import *
-from .main import Word, _resolve
+from .main import Word, Column, _resolve
 from .periodicities import *
 from .ranges import Range
 from .vocabulary import _define as define

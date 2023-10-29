@@ -35,8 +35,8 @@ def _define(name: str, word) -> None:
 
 c = lambda: main.Constant()
 nan = lambda: main.Constant()(np.nan)
-timestamp = lambda: main.BaseWord('timestamp', operate=lambda stack: stack.append(Column('timestamp','timestamp', timestamp_col)))
-day_count = lambda: main.BaseWord('day_count', operate=lambda stack: stack.append(Column('days','day_count', daycount_col)))
+timestamp = lambda: main.BaseWord('timestamp', operate=lambda stack: stack.append(main.Column('timestamp','timestamp', main.timestamp_col)))
+day_count = lambda: main.BaseWord('day_count', operate=lambda stack: stack.append(main.Column('days','day_count', main.daycount_col)))
 c_range = lambda: main.ConstantRange()
 pandas = lambda: main.Pandas()
 csv = lambda: main.CSV()
