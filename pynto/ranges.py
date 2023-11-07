@@ -15,14 +15,14 @@ class Range:
             periodicity = periodicities.B
         elif isinstance(periodicity, str):
             periodicity = getattr(periodicities, periodicity)
-        if start is None:
-            start = 0
-        elif not isinstance(start, int):
-            start = periodicity.get_index(start)
         if stop is None:
-            stop = periodicities.now(periodicity) 
-        if not isinstance(stop, int):
+            stop = periodicity.get_index(periodicities.now(periodicity))
+            if isinstance(start, int):
+                start = stop - abs(start)
+        elif not isinstance(stop, int):
             stop = periodicity.get_index(stop)
+        if not isinstance(start, int):
+            start = periodicity.get_index(start)
         self.start = start
         self.stop = stop
         self.periodicity = periodicity

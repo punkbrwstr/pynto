@@ -1,115 +1,124 @@
+from . import main
 import numpy as np
-from .main import *
-from .database import Saved
 
-__all__ = [
+__all__ = sorted(set([
 'abs', 'add', 'annotations', 'begin', 'c', 'c_range',
 'call', 'change', 'clear', 'cleave', 'copy', 'count',
 'crossing', 'csv', 'cumsum', 'day_count', 'db', 'div',
 'drop', 'dup', 'each', 'eq', 'ewma', 'exp', 'expanding',
 'expanding_mean', 'expanding_std', 'expanding_var',
 'ffill', 'fill', 'first', 'firstvalid', 'ge', 'gt',
-'happly', 'heach', 'hfilter', 'hformat', 'hpull',
-'hset', 'hsort', 'ifexists',
+'happly','hcopy', 'heach', 'hfilter', 'hformat', 'hpull',
+'hset', 'hsort', 'ifexists','if_','ifelse',
 'interleave', 'inv', 'is_na', 'join', 'last', 'le',
 'log', 'log_change', 'logical_and', 'logical_not',
-'logical_or', 'logical_xor', 'lt', 'ma',
+'logical_or', 'logical_xor', 'lt', 'ma','map',
 'max', 'mean', 'min', 'mod', 'mul','nan', 'ne',
-'neg', 'partial',
+'neg', 'pandas', 'partial',
 'pct_change', 'peek', 'pow', 'prod', 'pull',
 'q', 'quote', 'rank', 'repeat', 'rev',
 'rev_expanding', 'roll', 'rolling',
 'sqrt', 'std',
 'sub', 'sum', 'swap', 'timestamp', 'var',
-'zero_first', 'zero_to_na', 'zscore']
+'zero_first', 'zero_to_na', 'zscore']))
+
+_all_set = set(__all__)
+
+def __dir__():
+    return __all__
 
 def _define(name: str, word) -> None:
+    global __all__, _all_set
+    __all__ = sorted(__all__ + [name])
+    _all_set = set(__all__)
     globals()[name] = word
-    __all__.append(name)
 
-c = Constant()
-nan = Constant()(np.nan)
-timestamp = BaseWord('timestamp', operate=lambda stack: stack.append(Column('timestamp','timestamp', timestamp_col)))
-day_count = BaseWord('day_count', operate=lambda stack: stack.append(Column('days','day_count', daycount_col)))
-c_range = ConstantRange()
-pandas = Pandas()
-csv = CSV()
-add = BinaryOperator('add', operation=np.add)
-sub = BinaryOperator('sub', operation=np.subtract)
-mul = BinaryOperator('mul', operation= np.multiply)
-pow = BinaryOperator('pow', operation= np.power)
-div = BinaryOperator('div', operation= np.divide)
-mod = BinaryOperator('mod', operation= np.mod)
-eq = BinaryOperator('eq', operation= np.equal)
-ne = BinaryOperator('ne', operation= np.not_equal)
-ge = BinaryOperator('ge', operation= np.greater_equal)
-gt = BinaryOperator('gt', operation= np.greater)
-le = BinaryOperator('le', operation= np.less_equal)
-lt = BinaryOperator('lt', operation= np.less)
-logical_and = BinaryOperator('logical_and', operation= logical_and_op)
-logical_or = BinaryOperator('logical_or', operation= logical_or_op)
-logical_xor = BinaryOperator('logical_xor', operation= logical_xor_op)
+c = lambda: main.Constant()
+nan = lambda: main.Constant()(np.nan)
+timestamp = lambda: main.BaseWord('timestamp', operate=lambda stack: stack.append(main.Column('timestamp','timestamp', main.timestamp_col)))
+day_count = lambda: main.BaseWord('day_count', operate=lambda stack: stack.append(main.Column('days','day_count', main.daycount_col)))
+c_range = lambda: main.ConstantRange()
+pandas = lambda: main.Pandas()
+csv = lambda: main.CSV()
+add = lambda: main.BinaryOperator('add', operation=np.add)
+sub = lambda: main.BinaryOperator('sub', operation=np.subtract)
+mul = lambda: main.BinaryOperator('mul', operation= np.multiply)
+pow = lambda: main.BinaryOperator('pow', operation= np.power)
+div = lambda: main.BinaryOperator('div', operation= np.divide)
+mod = lambda: main.BinaryOperator('mod', operation= np.mod)
+eq = lambda: main.BinaryOperator('eq', operation= np.equal)
+ne = lambda: main.BinaryOperator('ne', operation= np.not_equal)
+ge = lambda: main.BinaryOperator('ge', operation= np.greater_equal)
+gt = lambda: main.BinaryOperator('gt', operation= np.greater)
+le = lambda: main.BinaryOperator('le', operation= np.less_equal)
+lt = lambda: main.BinaryOperator('lt', operation= np.less)
+logical_and = lambda: main.BinaryOperator('logical_and', operation= logical_and_op)
+logical_or = lambda: main.BinaryOperator('logical_or', operation= logical_or_op)
+logical_xor = lambda: main.BinaryOperator('logical_xor', operation= logical_xor_op)
 
-neg = get_unary_operator('neg', np.negative)
-inv = get_unary_operator('inv', np.reciprocal)
-abs = get_unary_operator('abs', np.abs)
-sqrt = get_unary_operator('sqrt', np.sqrt)
-exp = get_unary_operator('exp', np.exp)
-log = get_unary_operator('log', np.log)
-zero_to_na = get_unary_operator('zero_to_na', zero_to_na_op)
-is_na = get_unary_operator('is_na', is_na_op)
-zero_first = get_unary_operator('zero_first', zero_first_op)
-logical_not = get_unary_operator('logical_not', logical_not_op)
-roll = BaseWord('roll', operate=roll_stack_function)
-swap = BaseWord('swap', operate=swap_stack_function)
-drop = BaseWord('drop', operate=drop_stack_function)
-dup = BaseWord('dup', operate=dup_stack_function)
-rev = BaseWord('rev', operate=rev_stack_function)
-clear = BaseWord('clear', operate=clear_stack_function)
-hsort = BaseWord('hsort', operate=hsort_stack_function)
-interleave = Interleave()
-pull = Pull()
-hpull = HeaderPull()
-hfilter = HeaderFilter()
-ewma = EWMA()
-call = Call()
-partial = Partial()
-each = Each()
-repeat = Repeat()
-heach = BaseWord('heach',operate=heach_stack_function)
-cleave = Cleave()
-hset = HeaderSet()
-hformat = HeaderFormat()
-happly = HeaderApply()
-rolling = Rolling()
-expanding = Expanding()
-crossing = BaseWord('crossing', operate=crossing_op)
-rev_expanding = BaseWord('rev_expanding', operate=rev_expanding_op)
-fill = Fill()
-ffill = FFill()
-join = Join()
-cumsum = BaseWord('cumsum', operate=cumsum_stack_function)
-sum = get_window_operator('sum',np.nansum, sum_oned_op)
-count = get_window_operator('count',count_twod_op, count_oned_op)
-max = get_window_operator('max',np.nanmax,max_oned_op)
-min = get_window_operator('min',np.nanmin,min_oned_op)
-prod = get_window_operator('prod',np.nanprod,prod_oned_op)
-mean = get_window_operator('mean',np.nanmean, expanding_mean)
-var = get_window_operator('var', np.nanvar, expanding_var)
-std = get_window_operator('std', np.nanstd, expanding_var)
-change = get_window_operator('change', change_twod_op, change_oned_op)
-pct_change = get_window_operator('pct_change', pct_change_twod_op, pct_change_oned_op)
-log_change = get_window_operator('log_change', log_change_twod_op, log_change_oned_op)
-first = get_window_operator('first', first_twod_op, first_oned_op)
-firstvalid = get_window_operator('firstvalid', firstvalid_twod_op, firstvalid_oned_op)
-last = get_window_operator('last',last_twod_op,last_oned_op)
-quote = Quotation()
-q = Quotation()
-begin = Word('')
-peek = Peek()
-ifexists = IfExists()
-db = Saved()
+neg = lambda: main.get_unary_operator('neg', np.negative)
+inv = lambda: main.get_unary_operator('inv', np.reciprocal)
+abs = lambda: main.get_unary_operator('abs', np.abs)
+sqrt = lambda: main.get_unary_operator('sqrt', np.sqrt)
+exp = lambda: main.get_unary_operator('exp', np.exp)
+log = lambda: main.get_unary_operator('log', np.log)
+zero_to_na = lambda: main.get_unary_operator('zero_to_na', main.zero_to_na_op)
+is_na = lambda: main.get_unary_operator('is_na', is_na_op)
+zero_first = lambda: main.get_unary_operator('zero_first', main.zero_first_op)
+logical_not = lambda: main.get_unary_operator('logical_not', main.logical_not_op)
+roll = lambda: main.BaseWord('roll', operate=main.roll_stack_function)
+swap = lambda: main.BaseWord('swap', operate=main.swap_stack_function)
+drop = lambda: main.BaseWord('drop', operate=main.drop_stack_function)
+dup = lambda: main.BaseWord('dup', operate=main.dup_stack_function)
+rev = lambda: main.BaseWord('rev', operate=main.rev_stack_function)
+clear = lambda: main.BaseWord('clear', operate=main.clear_stack_function)
+hsort = lambda: main.BaseWord('hsort', operate=main.hsort_stack_function)
+interleave = lambda: main.Interleave()
+pull = lambda: main.Pull()
+hpull = lambda: main.HeaderPull()
+hfilter = lambda: main.HeaderFilter()
+ewma = lambda: main.EWMA()
+call = lambda: main.Call()
+partial = lambda: main.Partial()
+each = lambda: main.Each()
+map = lambda: main.Each()
+repeat = lambda: main.Repeat()
+heach = lambda: main.BaseWord('heach',operate=main.heach_stack_function)
+cleave = lambda: main.Cleave()
+hset = lambda: main.HeaderSet()
+hformat = lambda: main.HeaderFormat()
+happly = lambda: main.HeaderApply()
+hcopy = lambda: main.BaseWord('hcopy', operate=main.hcopy_stack_function)
+rolling = lambda: main.Rolling()
+expanding = lambda: main.Expanding()
+crossing = lambda: main.BaseWord('crossing', operate=main.crossing_op)
+rev_expanding = lambda: main.BaseWord('rev_expanding', operate=main.rev_expanding_op)
+fill = lambda: main.Fill()
+ffill = lambda: main.FFill()
+join = lambda: main.Join()
+cumsum = lambda: main.BaseWord('cumsum', operate=main.cumsum_stack_function)
+sum = lambda: main.get_window_operator('sum',np.nansum, main.sum_oned_op)
+count = lambda: main.get_window_operator('count',main.count_twod_op, main.count_oned_op)
+max = lambda: main.get_window_operator('max',np.nanmax,main.max_oned_op)
+min = lambda: main.get_window_operator('min',np.nanmin,main.min_oned_op)
+prod = lambda: main.get_window_operator('prod',np.nanprod,main.prod_oned_op)
+mean = lambda: main.get_window_operator('mean',np.nanmean, main.expanding_mean)
+var = lambda: main.get_window_operator('var', np.nanvar, main.expanding_var)
+std = lambda: main.get_window_operator('std', np.nanstd, main.expanding_std)
+change = lambda: main.get_window_operator('change', main.change_twod_op, main.change_oned_op)
+pct_change = lambda: main.get_window_operator('pct_change', main.pct_change_twod_op, main.pct_change_oned_op)
+log_change = lambda: main.get_window_operator('log_change', main.log_change_twod_op, main.log_change_oned_op)
+first = lambda: main.get_window_operator('first', main.first_twod_op, main.first_oned_op)
+firstvalid = lambda: main.get_window_operator('firstvalid', main.firstvalid_twod_op, main.firstvalid_oned_op)
+last = lambda: main.get_window_operator('last',main.last_twod_op,main.last_oned_op)
+quote = lambda: main.Quotation()
+q = lambda: main.Quotation()
+begin = lambda: main.Word('')
+peek = lambda: main.Peek()
+ifexists = lambda: main.IfExists()
+if_ = lambda: main.If()
+ifelse = lambda: main.IfElse()
 
-zscore = quote(quote(std).quote(last).quote(mean).cleave(3, depth=1).sub.swap.div).call
+zscore = lambda: quote()(quote()(std()).quote(last()).quote(mean()).cleave(3, depth=1).sub.swap.div).call()
 
-rank = Rank('rank')
+rank = lambda: main.Rank('rank')
