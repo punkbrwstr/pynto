@@ -8,11 +8,11 @@ __all__ = sorted(set([
 'drop', 'dup', 'each', 'eq', 'ewma', 'exp', 'expanding',
 'expanding_mean', 'expanding_std', 'expanding_var',
 'ffill', 'fill', 'first', 'firstvalid', 'ge', 'gt',
-'happly', 'heach', 'hfilter', 'hformat', 'hpull',
+'happly','hcopy', 'heach', 'hfilter', 'hformat', 'hpull',
 'hset', 'hsort', 'ifexists','if_','ifelse',
 'interleave', 'inv', 'is_na', 'join', 'last', 'le',
 'log', 'log_change', 'logical_and', 'logical_not',
-'logical_or', 'logical_xor', 'lt', 'ma',
+'logical_or', 'logical_xor', 'lt', 'ma','map',
 'max', 'mean', 'min', 'mod', 'mul','nan', 'ne',
 'neg', 'pandas', 'partial',
 'pct_change', 'peek', 'pow', 'prod', 'pull',
@@ -81,12 +81,14 @@ ewma = lambda: main.EWMA()
 call = lambda: main.Call()
 partial = lambda: main.Partial()
 each = lambda: main.Each()
+map = lambda: main.Each()
 repeat = lambda: main.Repeat()
 heach = lambda: main.BaseWord('heach',operate=main.heach_stack_function)
 cleave = lambda: main.Cleave()
 hset = lambda: main.HeaderSet()
 hformat = lambda: main.HeaderFormat()
 happly = lambda: main.HeaderApply()
+hcopy = lambda: main.BaseWord('hcopy', operate=main.hcopy_stack_function)
 rolling = lambda: main.Rolling()
 expanding = lambda: main.Expanding()
 crossing = lambda: main.BaseWord('crossing', operate=main.crossing_op)
@@ -96,7 +98,7 @@ ffill = lambda: main.FFill()
 join = lambda: main.Join()
 cumsum = lambda: main.BaseWord('cumsum', operate=main.cumsum_stack_function)
 sum = lambda: main.get_window_operator('sum',np.nansum, main.sum_oned_op)
-count = lambda: main.get_window_operator('count',count_twod_op, main.count_oned_op)
+count = lambda: main.get_window_operator('count',main.count_twod_op, main.count_oned_op)
 max = lambda: main.get_window_operator('max',np.nanmax,main.max_oned_op)
 min = lambda: main.get_window_operator('min',np.nanmin,main.min_oned_op)
 prod = lambda: main.get_window_operator('prod',np.nanprod,main.prod_oned_op)

@@ -105,7 +105,7 @@ def _resolve(name: str) -> Word:
     elif name in vocabulary._all_set:
         return getattr(vocabulary, name)()
     else:
-        raise KeyError
+        raise AttributeError
 
 
 @dataclass(repr=False)
@@ -809,6 +809,12 @@ class HeaderSet(Word):
             header = headers[i - start]
             stack[i] = Column(header, self.name, header_col,
                                 {'headers': header}, [stack[i]], no_cache=True)
+
+def hcopy_stack_function(stack):
+    col1 = stack.pop()
+    col2 = stack.pop()
+    stack.append(col2)
+    stack.append(Column(col2.header, 'hcopy', header_col, {}, [col1], no_cache=True))
 
 @dataclass(repr=False)
 class HeaderFormat(Word):
