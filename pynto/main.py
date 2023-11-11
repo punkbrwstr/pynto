@@ -9,7 +9,8 @@ import numpy.ma as ma
 import pandas as pd
 import traceback
 from dataclasses import dataclass, field
-from functools import partial
+from functools import partial,reduce
+from operator import add
 from typing import Callable, List, Dict, Any
 from .ranges import Range
 from .tools import *
@@ -727,6 +728,19 @@ class Partial(Word):
         stack.append(quote)
 
 @dataclass(repr=False)
+class Compose(Word):
+    name: str = 'compose'
+    def __call__(self, num_quotations=0): return super().__call__(locals())
+    def operate(self, stack):
+        count = self.args['num_quotations']
+        if self.args['num_quotations'] == 0:
+            while isinstance(stack[-count-1],QuotationColumn):
+                count +=1
+        quoted = reduce(add, [quote.args['quoted'] for quote in stack[-count:]])
+        del(stack[-count:])
+        stack.append(QuotationColumn(args={'quoted': quoted}))
+
+@dataclass(repr=False)
 class Each(Word):
     name: str = 'each'
     def __call__(self, start=0, end=None, every=1, copy=False): return super().__call__(locals())
@@ -790,7 +804,6 @@ class Cleave(Word):
             this_stack = copied_stack[:]
             quote.evaluate(this_stack)
             stack += this_stack
-
 
 # Header
 def header_col(range_, args, stack):

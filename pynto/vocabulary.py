@@ -3,7 +3,7 @@ import numpy as np
 
 __all__ = sorted(set([
 'abs', 'add', 'annotations', 'begin', 'c', 'c_range',
-'call', 'change', 'clear', 'cleave', 'copy', 'count',
+'call', 'change', 'clear', 'cleave', 'compose', 'copy', 'count',
 'crossing', 'csv', 'cumsum', 'day_count', 'db', 'div',
 'drop', 'dup', 'each', 'eq', 'ewma', 'exp', 'expanding',
 'expanding_mean', 'expanding_std', 'expanding_var',
@@ -85,6 +85,7 @@ map = lambda: main.Each()
 repeat = lambda: main.Repeat()
 heach = lambda: main.BaseWord('heach',operate=main.heach_stack_function)
 cleave = lambda: main.Cleave()
+compose = lambda: main.Compose()
 hset = lambda: main.HeaderSet()
 hformat = lambda: main.HeaderFormat()
 happly = lambda: main.HeaderApply()
