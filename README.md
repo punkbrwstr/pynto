@@ -1,6 +1,9 @@
 ## pynto: Time series analysis in Python using the concatenative paradigm
 
-pynto is a Python package that lets you manipulate tabular data with the expressiveness and code reusability of [concatenative](https://en.wikipedia.org/wiki/Concatenative_programming_language) programming.  With pynto you define an _expression_ that formally specifies how to calculate the data in your table.  Expressions are made by chaining together functions called _words_.  It works like a pipeline: the output from one word becomes the input for the following word.  The table of data is treated like a stack of independent columns.  The rightmost column in the table is the top of the stack.  Words can add, remove or modify columns, but they are row-agnostic--expressions can be evaluated over any range of rows.  
+pynto is a Python package that lets you manipulate evenly spaced time series with the expressiveness and code reusability of [concatenative](https://en.wikipedia.org/wiki/Concatenative_programming_language) (or stack-oriented) programming.  With pynto you define an _expression_ that formally specifies how to calculate one or more time series.  This _expression_ can then be evaluated over any range of time.
+
+_Expressions_ are made by chaining together functions called _words_.  When an _expression_ is evaluated, each of its _words_ is called in left-to-right order.  The _words_ operate on a _stack_ that contains time series columns or other "_quoted_" _expressions_.  _Words_ can add, remove or modify columns.  When all its _words_ have operated, the _expression_ returns a pandas DataFrame, with the top of the _stack_ becoming the rightmost column of the frame.
+
 ## What does it look like?
 ```
 >>> import pynto as pt 
