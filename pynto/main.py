@@ -140,6 +140,9 @@ class Word:
             current.open_quotes += this.open_quotes
         return other_tail
 
+    def concat(self, other:Word) -> Word:
+        return self.__add__(other)
+
     def __getattr__(self, name):
         try:
             word = _resolve(name)
@@ -330,6 +333,12 @@ class Quotation(Word):
             return self.__add__(word, False)
         except:
             return self.__getattribute__(name)
+
+    def __add__(self, other: Word, copy_left=True) -> Word:
+        if self.args is None and copy_left:
+            self.open_quotes += 1 
+        return super().__add__(other, copy_left)
+
 
     def operate(self, stack):
         stack.append(QuotationColumn(args={'quoted': self.args['quoted']}))
@@ -577,6 +586,15 @@ class Interleave(Word):
                 last = i
         del(stack[:last])
         stack += [val for tup in zip(*lists) for val in tup]
+
+@dataclass(repr=False)
+class Pop(Word):
+    name: str = 'pop'
+
+    def __call__(self, count=1): return super().__call__(locals())
+
+    def operate(self, stack):
+        del(stack[-abs(int(self.args['count'])):])
 
 @dataclass(repr=False)
 class Pull(Word):
@@ -836,6 +854,15 @@ class HeaderFormat(Word):
     def operate(self, stack):
         col = stack.pop()
         header = self.args['format_string'].format(col.header)
+        stack.append(Column(header, self.name, header_col, self.args, [col], no_cache=True))
+
+@dataclass(repr=False)
+class HeaderReplace(Word):
+    name: str = 'hreplace'
+    def __call__(self, old, new): return super().__call__(locals())
+    def operate(self, stack):
+        col = stack.pop()
+        header = col.header.replace(self.args['old'],self.args['new'])
         stack.append(Column(header, self.name, header_col, self.args, [col], no_cache=True))
 
 @dataclass(repr=False)

@@ -8,14 +8,14 @@ __all__ = sorted(set([
 'drop', 'dup', 'each', 'eq', 'ewma', 'exp', 'expanding',
 'expanding_mean', 'expanding_std', 'expanding_var',
 'ffill', 'fill', 'first', 'firstvalid', 'ge', 'gt',
-'happly','hcopy', 'heach', 'hfilter', 'hformat', 'hpull',
+'happly','hcopy', 'heach', 'hfilter', 'hformat','hreplace','hpull',
 'hset', 'hsort', 'ifexists','if_','ifelse',
 'interleave', 'inv', 'is_na', 'join', 'last', 'le',
 'log', 'log_change', 'logical_and', 'logical_not',
 'logical_or', 'logical_xor', 'lt', 'ma','map',
 'max', 'mean', 'min', 'mod', 'mul','nan', 'ne',
 'neg', 'pandas', 'partial',
-'pct_change', 'peek', 'pow', 'prod', 'pull',
+'pct_change', 'peek', 'pow', 'prod', 'pull','pop',
 'q', 'quote', 'rank', 'repeat', 'rev',
 'rev_expanding', 'roll', 'rolling',
 'sqrt', 'std',
@@ -75,6 +75,7 @@ clear = lambda: main.BaseWord('clear', operate=main.clear_stack_function)
 hsort = lambda: main.BaseWord('hsort', operate=main.hsort_stack_function)
 interleave = lambda: main.Interleave()
 pull = lambda: main.Pull()
+pop = lambda: main.Pop()
 hpull = lambda: main.HeaderPull()
 hfilter = lambda: main.HeaderFilter()
 ewma = lambda: main.EWMA()
@@ -88,6 +89,7 @@ cleave = lambda: main.Cleave()
 compose = lambda: main.Compose()
 hset = lambda: main.HeaderSet()
 hformat = lambda: main.HeaderFormat()
+hreplace = lambda: main.HeaderReplace()
 happly = lambda: main.HeaderApply()
 hcopy = lambda: main.BaseWord('hcopy', operate=main.hcopy_stack_function)
 rolling = lambda: main.Rolling()
