@@ -597,6 +597,15 @@ class Pop(Word):
         del(stack[-abs(int(self.args['count'])):])
 
 @dataclass(repr=False)
+class Top(Word):
+    name: str = 'top'
+
+    def __call__(self, count=1): return super().__call__(locals())
+
+    def operate(self, stack):
+        del(stack[:-abs(int(self.args['count']))])
+
+@dataclass(repr=False)
 class Pull(Word):
     name: str = 'pull'
 
@@ -995,12 +1004,19 @@ def ffill_col(range_, args, stack):
     x = stack[0][expanded_range]
     idx = np.where(~np.isnan(x),np.arange(len(x)),0)
     np.maximum.accumulate(idx,out=idx)
-    return x[idx][lookback:]
+    filled = x[idx][lookback:]
+    if args['leave_end']:
+        print(len(x))
+        print(idx.max())
+        if len(x) > idx.max() + 1:
+            at_end = len(x) - idx.max() - 1
+            filled[-at_end:] = np.nan
+    return filled
 
 @dataclass(repr=False)
 class FFill(Word):
     name: str = 'ffill'
-    def __call__(self, lookback=0): return super().__call__(locals())
+    def __call__(self, lookback=0, leave_end=False): return super().__call__(locals())
     def operate(self, stack):
         if len(stack) == 0: return
         col = stack.pop()

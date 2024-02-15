@@ -19,7 +19,7 @@ __all__ = sorted(set([
 'q', 'quote', 'rank', 'repeat', 'rev',
 'rev_expanding', 'roll', 'rolling',
 'sqrt', 'std',
-'sub', 'sum', 'swap', 'timestamp', 'var',
+'sub', 'sum', 'swap', 'timestamp', 'top','var',
 'zero_first', 'zero_to_na', 'zscore']))
 
 _all_set = set(__all__)
@@ -76,6 +76,7 @@ hsort = lambda: main.BaseWord('hsort', operate=main.hsort_stack_function)
 interleave = lambda: main.Interleave()
 pull = lambda: main.Pull()
 pop = lambda: main.Pop()
+top = lambda: main.Top()
 hpull = lambda: main.HeaderPull()
 hfilter = lambda: main.HeaderFilter()
 ewma = lambda: main.EWMA()
