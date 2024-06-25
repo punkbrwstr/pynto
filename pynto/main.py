@@ -184,6 +184,9 @@ class Word:
         _CACHE.clear()
         return pd.DataFrame(values, columns=[col.header for col in self._stack], index=range_.to_index())
 
+    def __len__(self):
+        return len(self.columns())
+
     @property
     def columns(self):
         if self._stack is None:
@@ -268,8 +271,8 @@ class Word:
         s = 'pt.' + s
         return s
 
-    def __len__(self):
-        return self._head()[1]
+    #def __len__(self):
+    #    return self._head()[1]
 
     def __call__(self, args = {}) -> Word:
         this = self.copy_expression()
@@ -868,7 +871,7 @@ class HeaderFormat(Word):
 @dataclass(repr=False)
 class HeaderReplace(Word):
     name: str = 'hreplace'
-    def __call__(self, old, new): return super().__call__(locals())
+    def __call__(self, old, new=''): return super().__call__(locals())
     def operate(self, stack):
         col = stack.pop()
         header = col.header.replace(self.args['old'],self.args['new'])

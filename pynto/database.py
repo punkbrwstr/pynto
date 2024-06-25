@@ -49,7 +49,7 @@ _DATATYPES = [
 _ORDINAL_FOR_DTYPE = {k.dtype: i for i,k in enumerate(_DATATYPES)}
 
 _PERIODICITY_FOR_ORDINAL = [p.B, p.W_T, p.W_F, p.M, p.Q, p.Y]
-_ORDINAL_FOR_FREQ = {'B': 0, 'W-TUE': 1, 'W-FRI': 2, 'BM': 3, 'BQ-DEC': 4, 'BA-DEC': 5}
+_ORDINAL_FOR_FREQ = {'B': 0, 'W-TUE': 1, 'W-FRI': 2, 'BME': 3, 'BQ-DEC': 4, 'BA-DEC': 5}
 
 METADATA_FORMAT = '<BBll'
 METADATA_SIZE = struct.calcsize(METADATA_FORMAT)

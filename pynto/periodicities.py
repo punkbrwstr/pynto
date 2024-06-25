@@ -1,6 +1,7 @@
 import datetime
+import pytz
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Union
 from .dates import *
 
 @dataclass
@@ -41,23 +42,27 @@ W_F = Periodicity('W_F', datetime.date(1970,1,2), 1, 52, 'W-FRI',
         round_w_fri, count_w, offset_w) 
 W_T = Periodicity('W_T', datetime.date(1969,12,30), 1, 52, 'W-TUE',
         round_w_tue, count_w, offset_w)
-M = Periodicity('M', datetime.date(1970,1,30), 2, 12, 'BM',
+M = Periodicity('M', datetime.date(1970,1,30), 2, 12, 'BME',
         round_bm, count_m, add_bm)
 Q = Periodicity('Q', datetime.date(1970,3,31), 3, 4, 'BQ-DEC',
         round_bq_dec, count_q, offset_q)
 Y = Periodicity('Y', datetime.date(1970,12,31), 3, 1, 'BA-DEC',
         round_ba_dec, count_y, offset_y)
 
-_pandas_map = {'B': B, 'W-TUE': W_T, 'W-FRI': W_F, 'BM': M, 'BQ-DEC': Q, 'BA-DEC': Y}
+_pandas_map = {'B': B, 'W-TUE': W_T, 'W-FRI': W_F, 'BME': M, 'BQ-DEC': Q, 'BA-DEC': Y}
 from_pandas = _pandas_map.get
 
 values = lambda: set([B,W_F,W_T,M,Q,Y])
 
 
-def now(periodicity: Periodicity = B) -> datetime.date:
-    dt = datetime.datetime.utcnow()
-    d = dt.date()
-    #if periodicity != B or dt.weekday() < 5 and dt.hour >= 23:
-    if periodicity != B or dt.weekday() < 5 and dt.hour >= 22:
-        d =  periodicity.get_date(periodicity.get_index(d) + 1)
-    return d
+def now(periodicity: Union[str,Periodicity] = B, add: int = 0) -> datetime.date:
+    if isinstance(periodicity, str):
+        periodicity = globals()[periodicity]
+    ny = pytz.timezone('US/Eastern').fromutc(datetime.datetime.utcnow())
+    if ny.weekday() < 5 and ny.hour >= 17:
+        ny =  B.offset(ny.date(), 1)
+    else:
+        ny = ny.date()
+    if periodicity != B:
+        add += 1
+    return periodicity.offset(ny, add)
