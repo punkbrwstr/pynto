@@ -46,8 +46,8 @@ class Column:
                     d2 = d[:,0]
                 else:
                     d2 = d
-                print(repr_)
-                print(pd.Series(d2, index=range_.to_index()))
+                #print(repr_)
+                #print(pd.Series(d2, index=range_.to_index()))
                 return d
             if self.no_cache:
                 return self.function(range_, self.args, self.stack)
@@ -1009,8 +1009,8 @@ def ffill_col(range_, args, stack):
     np.maximum.accumulate(idx,out=idx)
     filled = x[idx][lookback:]
     if args['leave_end']:
-        print(len(x))
-        print(idx.max())
+        #print(len(x))
+        #print(idx.max())
         if len(x) > idx.max() + 1:
             at_end = len(x) - idx.max() - 1
             filled[-at_end:] = np.nan
