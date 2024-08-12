@@ -100,7 +100,7 @@ def _resolve(name: str) -> Word:
         return Constant()(-int(name[2:].replace('_','.')))
     elif re.match('r\d+_\d+',name) is not None:
         start, end = name[1:].split('_')
-        return ConstantRange()(start,end)
+        return ConstantRange()(end,start)
     elif re.match('r\d+',name) is not None:
         return ConstantRange()(name[1:])
     elif name in vocabulary._all_set:
