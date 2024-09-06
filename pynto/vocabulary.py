@@ -19,7 +19,7 @@ __all__ = sorted(set([
 'q', 'quote', 'rank', 'repeat', 'rev',
 'rev_expanding', 'roll', 'rolling',
 'sqrt', 'std',
-'sub', 'sum', 'swap', 'timestamp', 'top','var',
+'sub', 'sum','sumnonan', 'swap', 'timestamp', 'top','var',
 'zero_first', 'zero_to_na', 'zscore']))
 
 _all_set = set(__all__)
@@ -115,6 +115,7 @@ log_change = lambda: main.get_window_operator('log_change', main.log_change_twod
 first = lambda: main.get_window_operator('first', main.first_twod_op, main.first_oned_op)
 firstvalid = lambda: main.get_window_operator('firstvalid', main.firstvalid_twod_op, main.firstvalid_oned_op)
 last = lambda: main.get_window_operator('last',main.last_twod_op,main.last_oned_op)
+sumnonan = lambda: main.get_window_operator('sumnonan',np.sum, main.sumnonan_oned_op)
 quote = lambda: main.Quotation()
 q = lambda: main.Quotation()
 begin = lambda: main.Word('')

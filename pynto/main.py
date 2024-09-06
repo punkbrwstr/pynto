@@ -1090,6 +1090,9 @@ def sum_oned_op(x, axis):
     mask = np.isnan(x)
     return np.where(mask, np.nan, np.add.accumulate(np.where(mask,0,x)))
 
+def sumnonan_oned_op(x, axis):
+    return np.cumsum(x)
+
 def max_oned_op(x, axis):
     mask = np.isnan(x)
     return np.where(mask, np.nan, np.maximum.accumulate(np.where(mask,0,x)))
