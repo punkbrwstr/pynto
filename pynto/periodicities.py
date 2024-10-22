@@ -44,12 +44,12 @@ W_T = Periodicity('W_T', datetime.date(1969,12,30), 1, 52, 'W-TUE',
         round_w_tue, count_w, offset_w)
 M = Periodicity('M', datetime.date(1970,1,30), 2, 12, 'BME',
         round_bm, count_m, add_bm)
-Q = Periodicity('Q', datetime.date(1970,3,31), 3, 4, 'BQ-DEC',
+Q = Periodicity('Q', datetime.date(1970,3,31), 3, 4, 'BQE-DEC',
         round_bq_dec, count_q, offset_q)
-Y = Periodicity('Y', datetime.date(1970,12,31), 3, 1, 'BA-DEC',
+Y = Periodicity('Y', datetime.date(1970,12,31), 3, 1, 'BYE-DEC',
         round_ba_dec, count_y, offset_y)
 
-_pandas_map = {'B': B, 'W-TUE': W_T, 'W-FRI': W_F, 'BME': M, 'BQ-DEC': Q, 'BA-DEC': Y}
+_pandas_map = {'B': B, 'W-TUE': W_T, 'W-FRI': W_F, 'BME': M, 'BQE-DEC': Q, 'BYE-DEC': Y}
 from_pandas = _pandas_map.get
 
 values = lambda: set([B,W_F,W_T,M,Q,Y])
