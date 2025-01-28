@@ -4,21 +4,22 @@ import copy
 import warnings
 import numbers
 import uuid
+import datetime
 import numpy as np
 import numpy.ma as ma
 import pandas as pd
 import traceback
+from collections import deque
 from dataclasses import dataclass, field
 from functools import partial,reduce
 from operator import add
-from typing import Callable, List, Dict, Any
-from .ranges import Range
+from typing import Callable, Any
 from .tools import *
 from . import vocabulary
-from . import periodicities
+from .periods import Range,Periodicity
 
 
-_CACHE: dict[tuple[uuid.UUID,pd.Range],np.array] = {}
+_CACHE: dict[tuple[uuid.UUID,Range],np.ndarray] = {}
 
 class ColumnError(Exception):
     pass
@@ -27,33 +28,23 @@ class ColumnError(Exception):
 class Column:
     header : str
     word_name: str
-    function: Callable[[Range,Dict[str, Any],List[Column]], np.ndarray]
-    args: Dict[str, Any] = field(default_factory=dict)
+    function: Callable[[Range,dict[str, Any],list[Column]], np.ndarray]
+    args: dict[str, Any] = field(default_factory=dict)
     stack: list[Column] = field(default_factory=list)
     id_: uuid.UUID = field(default_factory=uuid.uuid4)
     no_cache: bool = False
+    min_: datetime.date | None = None
+    max_: datetime.date | None = None
 
     def __getitem__(self, range_: Range) -> np.ndarray:
         try:
-            if False:
-                d =self.function(range_, self.args, self.stack) 
-                repr_ = f'.{self.word_name}'
-                if len(self.args) == 1:
-                    repr_ += '(' + ', '.join([f'{repr(v)}' for k,v in self.args.items()]) + ')'
-                if len(self.args) > 1:
-                    repr_ += '(' + ', '.join([f'{k}={repr(v)}' for k,v in self.args.items()]) + ')'
-                if len(d.shape) > 1:
-                    d2 = d[:,0]
-                else:
-                    d2 = d
-                #print(repr_)
-                #print(pd.Series(d2, index=range_.to_index()))
-                return d
-            if self.no_cache:
-                return self.function(range_, self.args, self.stack)
-            if not (self.id_, range_) in _CACHE:
-                _CACHE[(self.id_, range_)] = self.function(range_, self.args, self.stack)
-            return _CACHE[(self.id_, range_)]
+            if self.no_cache or (self.id_, range_) not in _CACHE:
+                values = self.function(range_, self.args, self.stack)
+                if not self.no_cache:
+                    _CACHE[(self.id_, range_)] = values
+            else:
+                values = _CACHE[(self.id_, range_)]
+            return values
         except Exception as e:
             if not isinstance(e, ColumnError):
                 raise ColumnError(f'{type(e).__name__}: {e} getting {range_} for' \
@@ -83,25 +74,25 @@ def quotation_col(range_, args, _):
 class QuotationColumn(Column):
     header: str = 'quotation'
     word_name: str = 'q'
-    function: Callable[[Range,Dict[str, Any],List[Column]], np.ndarray] = \
+    function: Callable[[Range,dict[str, Any],list[Column]], np.ndarray] = \
                 quotation_col
 
     def __repr__(self):
         return f'pt.q({self.args["quoted"]})'
 
 def _resolve(name: str) -> Word:
-    if re.match('f\d[_\d]*',name) is not None:
+    if re.match(r'f\d[_\d]*',name) is not None:
         return Constant()(float(name[1:].replace('_','.')))
-    elif re.match('f_\d[_\d]*',name) is not None:
+    elif re.match(r'f_\d[_\d]*',name) is not None:
         return Constant()(-float(name[2:].replace('_','.')))
-    elif re.match('i\d+',name) is not None:
+    elif re.match(r'i\d+',name) is not None:
         return Constant()(int(name[1:].replace('_','.')))
-    elif re.match('i_\d+',name) is not None:
+    elif re.match(r'i_\d+',name) is not None:
         return Constant()(-int(name[2:].replace('_','.')))
-    elif re.match('r\d+_\d+',name) is not None:
+    elif re.match(r'r\d+_\d+',name) is not None:
         start, end = name[1:].split('_')
         return ConstantRange()(end,start)
-    elif re.match('r\d+',name) is not None:
+    elif re.match(r'r\d+',name) is not None:
         return ConstantRange()(name[1:])
     elif name in vocabulary._all_set:
         return getattr(vocabulary, name)()
@@ -112,11 +103,11 @@ def _resolve(name: str) -> Word:
 @dataclass(repr=False)
 class Word:
     name: str
-    next_: Word = None
-    prev: Word = None
-    args: dict = None
+    next_: Word | None = None
+    prev: Word | None = None
+    args: dict | None = None
     open_quotes: int = 0
-    _stack: Optional[List[Column]] = None
+    _stack: list[Column] | None = None
 
     @property
     def __(self):
@@ -129,7 +120,7 @@ class Word:
             other_tail = other.copy_expression()
         else:
             other_tail = other
-        other_head = other_tail._head()[0]
+        other_head = other_tail._head()
         this.next_ = other_head
         other_head.prev = this
         if this.open_quotes != 0:
@@ -169,29 +160,43 @@ class Word:
     def __dir__(self):
         return sorted(set(dir(vocabulary)))
 
-    def __getitem__(self, key: Any) -> pd.DataFrame:
+    def __getitem__(self, key: Range | slice) -> pd.DataFrame | None:
+        if self.stack is None or len(self.stack) == 0:
+            return None
         if isinstance(key, Range):
             range_ = key 
-        elif isinstance(key, int):
-            range_ = Range(key)
         else:
-            range_ = Range.from_indexer(key)
-        if self._stack is None:
-            self.evaluate()
-        if len(self._stack) == 0:
-            return None
-        values = np.column_stack([col[range_] for col in self._stack])
+            p = Periodicity[key.step] if key.step else Periodicity.B 
+            if key.start is None or key.stop is None:
+                min_: datetime.date | None = None
+                max_: datetime.date | None = None
+                stacks = deque([self.stack])
+                while stacks:
+                    for col in stacks.popleft():
+                        stacks.append(col.stack)
+                        if min_ is None:
+                            min_ = col.min_
+                        elif col.min_ is not None:
+                            min_ = max(min_, col._min)
+                        if max_ is None:
+                            max_ = col.max_
+                        elif col.max_ is not None:
+                            max_ = min(max_, col._max)
+                start = key.start if key.start is not None else min_
+                stop = key.stop if key.stop is not None else max_
+            else:
+                start,stop = key.start, key.stop
+            range_ = p[start:stop].expand(1)
+        values = np.column_stack([col[range_] for col in self.stack])
         _CACHE.clear()
-        return pd.DataFrame(values, columns=[col.header for col in self._stack], index=range_.to_index())
+        return pd.DataFrame(values, columns=self.columns, index=range_.to_index())
 
     def __len__(self):
-        return len(self.columns())
+        return len(self.stack)
 
     @property
     def columns(self):
-        if self._stack is None:
-            self.evaluate()
-        return [col.header for col in self._stack]
+        return [col.header for col in self.stack]
 
     @property
     def stack(self):
@@ -199,20 +204,21 @@ class Word:
             self.evaluate()
         return self._stack
 
-    def evaluate(self, stack: Optional[List[Column]] = None) -> None:
+    def evaluate(self, stack: list[Column] | None = None) -> None:
         assert self.open_quotes == 0, 'Unclosed quotation.  Cannot evaluate'
-        start = self._head()[0]
+        start: Word | None = self._head()
         current = start
         if stack is None or len(stack) == 0:
             if stack is None:
                 stack = []
             while True:
-                if current._stack is not None:
+                if current is not None and current._stack is not None:
                     stack.extend(copy.copy(current._stack))
                     start = current.next_
-                if current.next_ is None:
+                if current is not None and current.next_ is None:
+                    current = current.next_
+                else:
                     break
-                current = current.next_
             keep = True
         else:
             keep = False
@@ -271,9 +277,6 @@ class Word:
         s = 'pt.' + s
         return s
 
-    #def __len__(self):
-    #    return self._head()[1]
-
     def __call__(self, args = {}) -> Word:
         this = self.copy_expression()
         for name in ['__class__','self']:
@@ -307,7 +310,7 @@ class Word:
         while current.prev is not None:
             count += 1
             current = current.prev
-        return (current, count)
+        return current
 
     def _tail(self) -> Word:
         current = self
@@ -349,7 +352,7 @@ class Quotation(Word):
 @dataclass(repr=False)
 class BaseWord(Word):
     name: str
-    operate: Callable[[List[Column]],None]
+    operate: Callable[[list[Column]],None] | None = None
 
 def peek_col(range_, args, stack, output):
     values = stack[0][range_]
@@ -357,7 +360,7 @@ def peek_col(range_, args, stack, output):
             
     return values
 
-PEEK = {}
+PEEK: dict[str,pd.Series | None] = {}
 
 def get_peek(name):
     return pd.concat(PEEK[name], axis=1)
@@ -511,9 +514,9 @@ def get_binary_operator(name, op):
 @dataclass(repr=False)
 class BinaryOperator(Word):
     name: str
-    operation: Union[np.ufunc,Callable[[np.ndarray,np.ndarray],np.ndarray]] = None
+    operation: np.ufunc | Callable[[np.ndarray,np.ndarray],np.ndarray] | None = None
 
-    def __call__(self, operand: float = None):
+    def __call__(self, operand: float | None = None):
         return super().__call__(locals())
 
     def operate(self, stack):
@@ -661,7 +664,7 @@ def ewma_col(range_, args, stack):
     data = data[~np.isnan(data)]
     if len(data) == 0:
         return np.full(idx.shape[0],np.nan)
-    out = ewma_vectorized_safe(data,alpha)
+    out = ewma(data,alpha)
     #return out[idx] * starting_nans
     return out[idx] * nans
 
@@ -713,7 +716,8 @@ class IfExists(Word):
 @dataclass(repr=False)
 class If(Word):
     name: str = 'if_'
-    def __call__(self, condition: Callable[[list[str]],bool]): return super().__call__(locals())
+    def __call__(self, condition: Callable[[list[str]],bool] = lambda _: True):
+        return super().__call__(locals())
     def operate(self, stack):
         assert len(stack) == 0 or not isinstance(stack[-1],Quotation) , 'if_ needs a quotation on top of stack'
         quoted = stack.pop().args['quoted']
@@ -723,7 +727,8 @@ class If(Word):
 @dataclass(repr=False)
 class IfElse(Word):
     name: str = 'ifelse'
-    def __call__(self, condition: Callable[[list[str]],bool]): return super().__call__(locals())
+    def __call__(self, condition: Callable[[list[str]],bool] = lambda _: True):
+        return super().__call__(locals())
     def operate(self, stack):
         assert len(stack) < 2 or \
                 not isinstance(stack[-1],Quotation) or \
@@ -1147,11 +1152,11 @@ def last_twod_op(x, axis):
 def last_oned_op(x, axis):
     return  x
 
-def _multicol_rows_function(range_: pt.Range,
-                            args: Dict[str, Any],
-                            stack: List[Column],
+def _multicol_rows_function(range_: Range,
+                            args: dict[str, Any],
+                            stack: list[Column],
                             table_id: uuid.UUID,
-                            table_function: Callable[[pt.Range, Dict[str, Any], List[Column]], np.ndarray],
+                            table_function: Callable[[Range, dict[str, Any], list[Column]], np.ndarray],
                             ):#lock: AcquirerProxy) -> np.ndarray:
         if (table_id, range_) not in _CACHE:
             #print(f'computing table: {table_id}')
@@ -1160,10 +1165,10 @@ def _multicol_rows_function(range_: pt.Range,
 
 @dataclass(repr=False)
 class MultiColCachedWord(Word):
-    name = None
-    table_function: Callable[[pt.Range, Dict[str, Any], List[Column]], np.ndarray] = None
-    table_columns: Callable[[Dict[str, Any], List[Column]], int] = None
-    table_headers: Callable[[Dict[str, Any], List[Column], int], str] = None
+    name: str = ''
+    table_function: Callable[[Range, dict[str, Any], list[Column]], np.ndarray] | None= None
+    table_columns: Callable[[dict[str, Any], list[Column]], int] | None = None
+    table_headers: Callable[[dict[str, Any], list[Column], int], str] | None = None
 
     def operate(self, stack):
         inputs = stack.copy()
@@ -1176,7 +1181,7 @@ class MultiColCachedWord(Word):
             header = self.table_headers(col_args, inputs, i)
             stack.append(Column(header, self.name, row_function, col_args, inputs, no_cache=True))
 
-def _rank_table_function(range_: pt.Range, args: Dict[str, Any], stack: List[Column]) -> np.ndarray:
+def _rank_table_function(range_: Range, args: dict[str, Any], stack: list[Column]) -> np.ndarray:
     return pd.DataFrame(np.column_stack([c[range_] for c in stack])).rank(axis=1).values
 
 def _rank_table_columns(args, stack):

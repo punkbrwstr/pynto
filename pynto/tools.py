@@ -1,52 +1,43 @@
+from typing import Union
 import numpy as np
+import numpy.typing as npt
 
+_ary64 = npt.NDArray[np.float64]
 
-def expanding_mean(x, axis=None):
-    nan_mask = np.isnan(x)
-    cumsum = np.add.accumulate(np.where(nan_mask, 0, x))
-    count = np.add.accumulate(np.where(nan_mask, 0, x / x))
+def expanding_mean(x: np.ndarray, _: int) -> np.ndarray:
+    nan_mask: npt.NDArray[np.bool] = np.isnan(x)
+    cumsum: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x))
+    count: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x / x))
     return np.where(nan_mask, np.nan, cumsum) / count
 
-def expanding_var(x, axis=None):
-    nan_mask = np.isnan(x)
-    cumsum = np.add.accumulate(np.where(nan_mask, 0, x))
-    cumsumOfSquares = np.add.accumulate(np.where(nan_mask, 0, x * x))
-    count = np.add.accumulate(np.where(nan_mask, 0, x / x))
+def expanding_var(x: np.ndarray, _: int) -> np.ndarray:
+    nan_mask: npt.NDArray[np.bool] = np.isnan(x)
+    cumsum: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x))
+    cumsumOfSquares: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x * x))
+    count: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x / x))
     return (cumsumOfSquares - cumsum * cumsum / count) / (count - 1)
 
-def expanding_std(x, axis=None):
+def expanding_std(x: np.ndarray, _: int) -> np.ndarray:
     nan_mask = np.isnan(x)
     cumsum = np.add.accumulate(np.where(nan_mask, 0, x))
     cumsumOfSquares = np.add.accumulate(np.where(nan_mask, 0, x * x))
     count = np.add.accumulate(np.where(nan_mask, 0, x / x))
     return np.sqrt((cumsumOfSquares - cumsum * cumsum / count) / (count - 1))
 
-def ewma_vectorized_safe(data, alpha, row_size=None, dtype=None, order='C', out=None):
-    data = np.array(data, copy=False)
+def ewma(data: np.ndarray, alpha: float) -> np.ndarray:
 
-    if dtype is None:
-        if data.dtype == np.float32:
-            dtype = np.float32
-        else:
-            dtype = np.float64
-    else:
-        dtype = np.dtype(dtype)
-
-    row_size = int(row_size) if row_size is not None else _get_max_row_size(alpha, dtype)
+    dtype = np.float64 if data.dtype != np.float32 else np.float32
+    row_size = _get_max_row_size(data, alpha)
+    out = np.empty_like(data, dtype=dtype)
 
     if data.size <= row_size:
         # The normal function can handle this input, use that
-        return ewma_vectorized(data, alpha, dtype=dtype, order=order, out=out)
+        return _ewma_vectorized(data, alpha, offset=0, out=out)
 
     if data.ndim > 1:
         # flatten input
-        data = np.reshape(data, -1, order=order)
+        data = np.reshape(data, -1, order='C')
 
-    if out is None:
-        out = np.empty_like(data, dtype=dtype)
-    else:
-        assert out.shape == data.shape
-        assert out.dtype == dtype
 
     row_n = int(data.size // row_size)  # the number of rows to use
     trailing_n = int(data.size % row_size)  # the amount of data leftover
@@ -61,8 +52,8 @@ def ewma_vectorized_safe(data, alpha, row_size=None, dtype=None, order='C', out=
         data_main_view = data
 
     # get all the scaled cumulative sums with 0 offset
-    ewma_vectorized_2d(data_main_view, alpha, axis=1, offset=0, dtype=dtype,
-                       order='C', out=out_main_view)
+    _ewma_vectorized_2d(data_main_view, alpha, axis=1,
+                    offset=np.array([0]),out=out_main_view)
 
     scaling_factors = (1 - alpha) ** np.arange(1, row_size + 1)
     last_scaling_factor = scaling_factors[-1]
@@ -79,51 +70,40 @@ def ewma_vectorized_safe(data, alpha, row_size=None, dtype=None, order='C', out=
 
     if trailing_n > 0:
         # process trailing data in the 2nd slice of the out parameter
-        ewma_vectorized(data[-trailing_n:], alpha, offset=out_main_view[-1, -1],
-                        dtype=dtype, order='C', out=out[-trailing_n:])
+        _ewma_vectorized(data[-trailing_n:], alpha, offset=out_main_view[-1, -1],
+                            out=out[-trailing_n:])
     return out
 
-def _get_max_row_size(alpha, dtype=float):
+def _get_max_row_size(data: np.ndarray, alpha: float):
     assert 0. <= alpha < 1.
+    dtype = np.float64 if data.dtype != np.float32 else np.float32
     epsilon = np.finfo(dtype).tiny
     return int(np.log(epsilon)/np.log(1-alpha)) + 1
 
-def ewma_vectorized(data, alpha, offset=None, dtype=None, order='C', out=None):
-    data = np.array(data, copy=False)
+def _ewma_vectorized(data: np.ndarray, alpha: float,
+            offset: int, out: np.ndarray) -> np.ndarray:
 
-    if dtype is None:
-        if data.dtype == np.float32:
-            dtype = np.float32
-        else:
-            dtype = np.float64
-    else:
-        dtype = np.dtype(dtype)
+    dtype = np.float64 if data.dtype != np.float32 else np.float32
 
     if data.ndim > 1:
         # flatten input
-        data = data.reshape(-1, order)
+        data = data.reshape(-1, order='C')
 
-    if out is None:
-        out = np.empty_like(data, dtype=dtype)
-    else:
-        assert out.shape == data.shape
-        assert out.dtype == dtype
+    assert out.shape == data.shape
+    assert out.dtype == dtype
 
     if data.size < 1:
         # empty input, return empty array
         return out
 
-    if offset is None:
-        offset = data[0]
-
-    alpha = np.array(alpha, copy=False).astype(dtype, copy=False)
+    alpha_ary: _ary64 = np.array(alpha, copy=False).astype(dtype, copy=False)
 
     # scaling_factors -> 0 as len(data) gets large
     # this leads to divide-by-zeros below
-    scaling_factors = np.power(1. - alpha, np.arange(data.size + 1, dtype=dtype),
+    scaling_factors = np.power(1. - alpha_ary, np.arange(data.size + 1, dtype=dtype),
                                dtype=dtype)
     # create cumulative sum array
-    np.multiply(data, (alpha * scaling_factors[-2]) / scaling_factors[:-1],
+    np.multiply(data, (alpha_ary * scaling_factors[-2]) / scaling_factors[:-1],
                 dtype=dtype, out=out)
     np.cumsum(out, dtype=dtype, out=out)
 
@@ -131,30 +111,18 @@ def ewma_vectorized(data, alpha, offset=None, dtype=None, order='C', out=None):
     out /= scaling_factors[-2::-1]
 
     if offset != 0:
-        offset = np.array(offset, copy=False).astype(dtype, copy=False)
+        offset_ary = np.array(offset, copy=False).astype(dtype, copy=False)
         # add offsets
-        out += offset * scaling_factors[1:]
+        out += offset_ary * scaling_factors[1:]
 
     return out
 
-def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order='C', out=None):
-    data = np.array(data, copy=False)
-
+def _ewma_vectorized_2d(data: np.ndarray, alpha: float, axis: int,
+                    offset: np.ndarray, out: np.ndarray):
+    dtype = np.float64 if data.dtype != np.float32 else np.float32
     assert data.ndim <= 2
-
-    if dtype is None:
-        if data.dtype == np.float32:
-            dtype = np.float32
-        else:
-            dtype = np.float64
-    else:
-        dtype = np.dtype(dtype)
-
-    if out is None:
-        out = np.empty_like(data, dtype=dtype)
-    else:
-        assert out.shape == data.shape
-        assert out.dtype == dtype
+    assert out.shape == data.shape
+    assert out.dtype == dtype
 
     if data.size < 1:
         # empty input, return empty array
@@ -162,10 +130,7 @@ def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order='C
 
     if axis is None or data.ndim < 2:
         # use 1D version
-        if isinstance(offset, np.ndarray):
-            offset = offset[0]
-        return ewma_vectorized(data, alpha, offset, dtype=dtype, order=order,
-                               out=out)
+        return _ewma_vectorized(data, alpha, offset[0], out=out)
 
     assert -data.ndim <= axis < data.ndim
 
@@ -179,23 +144,17 @@ def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order='C
         data = data.T
         out_view = out_view.T
 
-    if offset is None:
-        # use the first element of each row as the offset
-        offset = np.copy(data[:, 0])
-    elif np.size(offset) == 1:
-        offset = np.reshape(offset, (1,))
-
-    alpha = np.array(alpha, copy=False).astype(dtype, copy=False)
+    alpha_ary:_ary64 = np.array(alpha, copy=False).astype(dtype, copy=False)
 
     # calculate the moving average
     row_size = data.shape[1]
     row_n = data.shape[0]
-    scaling_factors = np.power(1. - alpha, np.arange(row_size + 1, dtype=dtype),
+    scaling_factors = np.power(1. - alpha_ary, np.arange(row_size + 1, dtype=dtype),
                                dtype=dtype)
     # create a scaled cumulative sum array
     np.multiply(
         data,
-        np.multiply(alpha * scaling_factors[-2], np.ones((row_n, 1), dtype=dtype),
+        np.multiply(alpha_ary * scaling_factors[-2], np.ones((row_n, 1), dtype=dtype),
                     dtype=dtype)
         / scaling_factors[np.newaxis, :-1],
         dtype=dtype, out=out_view
@@ -241,14 +200,15 @@ def corr2_coeff_rowwise(A,B):
 
     # Finally get corr coeff
     return np.einsum('ij,ij->i',A_mA,B_mB)/np.sqrt(ssA*ssB)
-def nancorrcoeff_1d(A,B):
+
+def nancorrcoeff_1d(A: np.ndarray,B: np.ndarray):
     # Get combined mask
-    comb_mask = ~(np.isnan(A) & ~np.isnan(B))
+    comb_mask: npt.NDArray[np.bool] = ~(np.isnan(A) & ~np.isnan(B))
     count = comb_mask.sum()
 
     # Rowwise mean of input arrays & subtract from input arrays themeselves
-    A_mA = A - np.nansum(A * comb_mask,-1,keepdims=1)/count
-    B_mB = B - np.nansum(B * comb_mask,-1,keepdims=1)/count
+    A_mA = A - np.nansum(A * comb_mask,-1,keepdims=True)/count
+    B_mB = B - np.nansum(B * comb_mask,-1,keepdims=True)/count
 
     # Replace NaNs with zeros, so that later summations could be computed    
     A_mA[~comb_mask] = 0
@@ -267,8 +227,8 @@ def nancorrcoeff_rowwise(A,B):
     count = comb_mask.sum(axis=-1,keepdims=1)
 
     # Rowwise mean of input arrays & subtract from input arrays themeselves
-    A_mA = A - np.nansum(A * comb_mask,-1,keepdims=1)/count
-    B_mB = B - np.nansum(B * comb_mask,-1,keepdims=1)/count
+    A_mA = A - np.nansum(A * comb_mask,-1,keepdims=True)/count
+    B_mB = B - np.nansum(B * comb_mask,-1,keepdims=True)/count
 
     # Replace NaNs with zeros, so that later summations could be computed    
     A_mA[~comb_mask] = 0

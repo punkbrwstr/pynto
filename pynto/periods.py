@@ -1,0 +1,284 @@
+from __future__ import annotations
+import calendar
+import datetime
+import pytz
+import pandas as pd
+from enum import Enum
+from dataclasses import dataclass, field
+from typing import Callable
+from abc import ABC, abstractmethod
+from collections.abc import Iterator
+
+datelike = str | datetime.date | datetime.datetime | pd.Timestamp
+
+def parse_date(date: datelike) -> datetime.date:
+    if isinstance(date, pd._libs.tslibs.timestamps.Timestamp):
+        return date.date() # type: ignore[no-any-return]
+    elif isinstance(date, datetime.date):
+        return date       
+    elif isinstance(date, datetime.datetime):
+        return date.date()
+    elif isinstance(date, str):
+        return datetime.datetime.strptime(date[:10], "%Y-%m-%d").date()
+    else:
+        raise TypeError(f'{type(date)} is not datelike')
+
+def _round_b(date: datetime.date) -> datetime.date:
+    weekday = date.weekday()
+    if weekday < 5:
+        return date
+    else:
+        return date + datetime.timedelta(days=7 - weekday)
+
+def _count_b(d1: datetime.date, d2: datetime.date) -> int:
+    daysSinceMonday1 = d1.weekday()
+    prevMonday1 = d1 - datetime.timedelta(days=daysSinceMonday1)
+    daysSinceMonday2 = d2.weekday()
+    prevMonday2 = d2 - datetime.timedelta(days=daysSinceMonday2)
+    days = (prevMonday2 - prevMonday1).days
+    days -= days * 2 // 7
+    return days - daysSinceMonday1 + daysSinceMonday2
+
+def _offset_b(date: datetime.date, b: int) -> datetime.date:
+    daysSinceMonday = date.weekday()
+    prevMonday = date - datetime.timedelta(days=daysSinceMonday)
+    weekendsInDistance = (b + daysSinceMonday) // 5
+    return prevMonday + datetime.timedelta(days=b + weekendsInDistance * 2 + daysSinceMonday)
+
+
+def _count_w(d1: datetime.date, d2: datetime.date) -> int:
+    return (d2 - d1).days // 7
+
+def _offset_w(date: datetime.date, by: int) -> datetime.date:
+    return date + datetime.timedelta(days=by * 7) 
+
+def _round_wf(date: datetime.date) -> datetime.date:
+    weekday = date.weekday()
+    if weekday == 4:
+        return date
+    else:
+        return date + datetime.timedelta(days=4 - weekday)
+
+def _round_wt(date: datetime.date) -> datetime.date:
+    weekday = date.weekday()
+    if weekday == 1:
+        return date
+    elif weekday == 0:
+        return date + datetime.timedelta(days=1)
+    else:
+        return date + datetime.timedelta(days=8 - weekday)
+
+def _round_m(date: datetime.date) -> datetime.date:
+    next_month = date.replace(day=28) + datetime.timedelta(days=4) 
+    last_day = next_month - datetime.timedelta(days=next_month.day)
+    return last_day - datetime.timedelta(days=max(0,last_day.weekday() - 4))
+
+def _offset_m(date: datetime.date, months: int) -> datetime.date:
+    month = date.month - 1 + months
+    year = date.year + month // 12
+    month = month % 12 + 1
+    day = min(date.day, calendar.monthrange(year,month)[1])
+    date = datetime.date(year, month, day)
+    return _round_m(date)
+
+def _count_m(d1: datetime.date, d2: datetime.date) -> int:
+    return (d2.year - d1.year) * 12 + d2.month - d1.month
+
+def _round_q(date: datetime.date) -> datetime.date:
+    remainder = date.month % 3
+    plusmonths = 0 if remainder == 0 else 2 // remainder
+    month = date.month + plusmonths
+    year = date.year
+    if  month > 12:
+        month -= 12
+        year += 1
+    date = datetime.date(year, month, 28)
+    return _round_m(date)
+
+def _count_q(self, d1: datetime.date, d2: datetime.date) -> int:
+    return ((d2.year - d1.year) * 12 + d2.month - d1.month) // 3
+
+def _offset_q(self, d: datetime.date, i: int) -> datetime.date:
+    return _offset_m(d, i * 3)
+
+
+def _round_y(date: datetime.date) -> datetime.date:
+    return _round_m(datetime.date(date.year, 12, 31))
+
+def _count_y(d1: datetime.date, d2: datetime.date) -> int:
+    return d2.year - d1.year
+
+def _offset_y(date: datetime.date, by: int) -> datetime.date:
+    return _offset_m(date, by * 12)
+
+@dataclass(repr=False)
+class PeriodicityMixin:
+    ordinal: int
+    epoque: datetime.date
+    annualization_factor: int
+    offset_code: str
+    _round: Callable[[datetime.date], datetime.date]
+    _count: Callable[[datetime.date, datetime.date], int]
+    _offset: Callable[[datetime.date, int], datetime.date]
+
+
+class Periodicity(PeriodicityMixin,Enum):
+    B =  0, datetime.date(1970,1,1), 260, 'B', _round_b, _count_b, _offset_b
+    W_T = 1, datetime.date(1969,12,30), 52, 'W-TUE', _round_wt, _count_w, _offset_w
+    W_F = 2, datetime.date(1970,1,2), 52, 'W-FRI', _round_wf, _count_w, _offset_w
+    M = 3, datetime.date(1970,1,30), 12, 'BME', _round_m, _count_m, _offset_m
+    Q = 4, datetime.date(1970,3,31), 4, 'BQE-DEC', _round_q, _count_q, _offset_q
+    Y = 5, datetime.date(1970,12,31), 1, 'BYE-DEC', _round_y, _count_y, _offset_y
+
+    def __getitem__(self, index: datelike | int | slice) -> Range:
+        if isinstance(index, datelike):
+            ordinal = self._count(self.epoque, self._round(parse_date(index)))
+            return Range(ordinal, ordinal + 1, self)
+        elif isinstance(index, int):
+            return Range(index, index + 1, self)
+        elif isinstance(index, slice):
+            if isinstance(index.start, datelike):
+                date = parse_date(index.start)
+                start = self._count(self.epoque, self._round(date))
+            elif isinstance(index.start, int):
+                start = index.start
+            elif index.start is None:
+                start = 0
+            else: 
+                raise TypeError(f'Unsupported indexer')
+            if isinstance(index.stop, datelike):
+                date = parse_date(index.stop)
+                stop = self._count(self.epoque, self._round(date))
+            elif isinstance(index.stop, int):
+                stop = index.stop
+            elif index.stop is None:
+                stop = self.now().ordinal
+            else: 
+                raise TypeError(f'Unsupported indexer')
+            return Range(start, stop, self)
+        else:
+            raise TypeError(f'Unsupported indexer')
+
+    def now(self, add: int = 0) -> Period:
+        ny = pytz.timezone('US/Eastern').fromutc(datetime.datetime.utcnow())
+        ny_date = ny.date()
+        if ny.hour >= 17:
+            ny_date += datetime.timedelta(days=1)
+        return Period(self._count(self.epoque, self._round(ny_date)) + 1 + add, self)
+
+    @classmethod
+    def from_offset_code(cls, code: str) -> Periodicity:
+        for p in cls:
+            if p.offset_code == code:
+                return p
+        raise ValueError()
+
+    @classmethod
+    def from_ordinal(cls, ordinal: int) -> Periodicity:
+        for p in cls:
+            if p.ordinal == ordinal:
+                return p
+        raise ValueError()
+
+@dataclass
+class Period:
+    ordinal: int
+    periodicity: Periodicity
+
+    @property
+    def last_date(self) -> datetime.date:
+        return self.periodicity._offset(self.periodicity.epoque, self.ordinal)
+
+    @property
+    def first_date(self) -> datetime.date:
+        return self.periodicity._offset(self.periodicity.epoque,
+                self.ordinal -1 ) + datetime.timedelta(days=1)
+
+    def offset(self, by: int) -> Period:
+        return Period(self.ordinal + by, self.periodicity)
+
+    def expand(self, by: int = 1) -> Range:
+        if by >= 0:
+            return Range(self.ordinal, self.ordinal + by, self.periodicity)
+        else:
+            return Range(self.ordinal + by, self.ordinal + 1, self.periodicity)
+
+
+    def __str__(self) -> str:
+        return f'{self.periodicity}[{self.last_date}]'
+
+    def __repr__(self) -> str:
+        return f'{self.periodicity}[{self.last_date}]'
+
+@dataclass
+class Range:
+    start: int #inclusive
+    stop: int #exclusive
+    periodicity: Periodicity
+
+    @classmethod
+    def from_index(cls, date_range: pd.DatetimeIndex) -> Range:
+        assert date_range.freq is not None, 'Index must have freq.' 
+        return  Periodicity.from_offset_code(date_range.freq.name) \
+            [date_range[0]:date_range[-1]].expand() # type: ignore
+
+    def change_periodicity(self, periodicity: Periodicity):
+        return periodicity[self[0]:self[-1]].expand() # type: ignore
+
+    def __iter__(self) -> Iterator[Period]:
+        i = 0
+        while i + self.start < self.stop:
+            yield self[i]
+            i += 1
+
+    def __getitem__(self, index: int) -> Period:
+        if index >= 0:
+            if index >= self.stop - self.start:
+                raise IndexError
+            per = self.periodicity[index + self.start][0]
+        else:
+            if abs(index) > self.stop - self.start:
+                raise IndexError
+            per = self.periodicity[index + self.stop][0]
+        return per
+
+    def __len__(self) -> int:
+        assert self.stop >= self.start, f'Negative range length {self.start}-{self.stop}'
+        return self.stop - self.start
+                
+    def __repr__(self) -> str:
+        if len(self) == 0:
+            return '[]'
+        start = self.periodicity[self.start][0]
+        stop = self.periodicity[self.stop][0]
+        return f'{str(self.periodicity)}[{start.last_date}:{stop.last_date}]'
+
+    def __hash__(self) -> int:
+        return hash((self.start,self.stop,self.periodicity))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Range):
+            return NotImplemented
+        return self.start == other.start and self.stop == other.stop and self.periodicity == other.periodicity
+
+    def expand(self, by: int = 1) -> Range:   
+        expanded = Range(self.start, self.stop,self.periodicity)
+        if by > 0:
+            expanded.stop += by
+        elif by < 0:
+            expanded.start += by
+        return expanded
+
+    def offset(self, by) -> Range:   
+        return Range(self.start + by, self.stop + by,self.periodicity)
+
+    def to_index(self) -> pd.DatetimeIndex:
+        return pd.date_range(self[0].last_date, self[-1].last_date,
+                    freq=self.periodicity.offset_code)
+
+    def day_counts(self) -> list[int]:
+        dates = [p.last_date for p in self.expand(-1)]
+        return [(d1 - d0).days for d1,d0 in zip(dates[1:], dates[:-1])]
+
+
+
