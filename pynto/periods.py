@@ -52,21 +52,12 @@ def _count_w(d1: datetime.date, d2: datetime.date) -> int:
 def _offset_w(date: datetime.date, by: int) -> datetime.date:
     return date + datetime.timedelta(days=by * 7) 
 
-def _round_wf(date: datetime.date) -> datetime.date:
-    weekday = date.weekday()
-    if weekday == 4:
-        return date
-    else:
-        return date + datetime.timedelta(days=4 - weekday)
-
-def _round_wt(date: datetime.date) -> datetime.date:
-    weekday = date.weekday()
-    if weekday == 1:
-        return date
-    elif weekday == 0:
-        return date + datetime.timedelta(days=1)
-    else:
-        return date + datetime.timedelta(days=8 - weekday)
+def _get_round_w(weekday: int) -> Callable[[datetime.date], datetime.date]:
+    def _round_w(date: datetime.date) -> datetime.date:
+        days_ahead = weekday - date.weekday()
+        if days_ahead <= 0:  # Target day already happened this week
+            days_ahead += 7
+        return date + datetime.timedelta(days_ahead)
 
 def _round_m(date: datetime.date) -> datetime.date:
     next_month = date.replace(day=28) + datetime.timedelta(days=4) 
@@ -113,7 +104,7 @@ def _offset_y(date: datetime.date, by: int) -> datetime.date:
 
 @dataclass(repr=False)
 class PeriodicityMixin:
-    ordinal: int
+    code: str
     epoque: datetime.date
     annualization_factor: int
     offset_code: str
@@ -123,12 +114,15 @@ class PeriodicityMixin:
 
 
 class Periodicity(PeriodicityMixin,Enum):
-    B =  0, datetime.date(1970,1,1), 260, 'B', _round_b, _count_b, _offset_b
-    W_T = 1, datetime.date(1969,12,30), 52, 'W-TUE', _round_wt, _count_w, _offset_w
-    W_F = 2, datetime.date(1970,1,2), 52, 'W-FRI', _round_wf, _count_w, _offset_w
-    M = 3, datetime.date(1970,1,30), 12, 'BME', _round_m, _count_m, _offset_m
-    Q = 4, datetime.date(1970,3,31), 4, 'BQE-DEC', _round_q, _count_q, _offset_q
-    Y = 5, datetime.date(1970,12,31), 1, 'BYE-DEC', _round_y, _count_y, _offset_y
+    B = 'B',datetime.date(1970,1,1), 260, 'B', _round_b, _count_b, _offset_b
+    N = 'N',datetime.date(1969,12,29), 52, 'W-MON', _get_round_w(0), _count_w, _offset_w
+    T = 'T',datetime.date(1969,12,30), 52, 'W-TUE', _get_round_w(1), _count_w, _offset_w
+    W = 'W',datetime.date(1969,12,31), 52, 'W-WED', _get_round_w(2), _count_w, _offset_w
+    H = 'H',datetime.date(1969,1,1), 52, 'W-THU', _get_round_w(3), _count_w, _offset_w
+    F = 'F',datetime.date(1970,1,2), 52, 'W-FRI', _get_round_w(4), _count_w, _offset_w
+    M = 'M',datetime.date(1970,1,30), 12, 'BME', _round_m, _count_m, _offset_m
+    Q = 'Q',datetime.date(1970,3,31), 4, 'BQE-DEC', _round_q, _count_q, _offset_q
+    Y = 'Y',datetime.date(1970,12,31), 1, 'BYE-DEC', _round_y, _count_y, _offset_y
 
     def __getitem__(self, index: datelike | int | slice) -> Range:
         if isinstance(index, datelike):
@@ -142,6 +136,8 @@ class Periodicity(PeriodicityMixin,Enum):
                 start = self._count(self.epoque, self._round(date))
             elif isinstance(index.start, int):
                 start = index.start
+                if start < 0:
+                    start += self.now().ordinal
             elif index.start is None:
                 start = 0
             else: 
@@ -151,6 +147,8 @@ class Periodicity(PeriodicityMixin,Enum):
                 stop = self._count(self.epoque, self._round(date))
             elif isinstance(index.stop, int):
                 stop = index.stop
+                if stop < 0:
+                    stop += self.now().ordinal
             elif index.stop is None:
                 stop = self.now().ordinal
             else: 
@@ -166,12 +164,15 @@ class Periodicity(PeriodicityMixin,Enum):
             ny_date += datetime.timedelta(days=1)
         return Period(self._count(self.epoque, self._round(ny_date)) + 1 + add, self)
 
+    def __hash__(self):
+        return hash(self.code)
+
     @classmethod
     def from_offset_code(cls, code: str) -> Periodicity:
         for p in cls:
             if p.offset_code == code:
                 return p
-        raise ValueError()
+        raise ValueError('Incompatible index freq: ' + code)
 
     @classmethod
     def from_ordinal(cls, ordinal: int) -> Periodicity:
@@ -179,6 +180,9 @@ class Periodicity(PeriodicityMixin,Enum):
             if p.ordinal == ordinal:
                 return p
         raise ValueError()
+
+    def __str__(self):
+        return self.name
 
 @dataclass
 class Period:
@@ -194,7 +198,7 @@ class Period:
         return self.periodicity._offset(self.periodicity.epoque,
                 self.ordinal -1 ) + datetime.timedelta(days=1)
 
-    def offset(self, by: int) -> Period:
+    def __add__(self, by: int) -> Period:
         return Period(self.ordinal + by, self.periodicity)
 
     def expand(self, by: int = 1) -> Range:
@@ -223,7 +227,17 @@ class Range:
             [date_range[0]:date_range[-1]].expand() # type: ignore
 
     def change_periodicity(self, periodicity: Periodicity):
-        return periodicity[self[0]:self[-1]].expand() # type: ignore
+        return periodicity[self[0].last_date:self[-1].last_date].expand() # type: ignore
+
+    def resample_indicies(self, range_: Range, round_: bool = True) -> tuple[int,list[int]]:
+        my_ordinals, target_ordinals = [], []
+        for i, target_per in enumerate(range_):
+            my_per = self.periodicity[target_per.last_date][0]
+            if my_per.ordinal >= self.start and my_per.ordinal < self.stop \
+                and (round_ or my_per.last_date == target_per.last_date) :
+                my_ordinals.append(my_per.ordinal - self.start)
+                target_ordinals.append(i)
+        return target_ordinals, my_ordinals
 
     def __iter__(self) -> Iterator[Period]:
         i = 0
@@ -235,11 +249,11 @@ class Range:
         if index >= 0:
             if index >= self.stop - self.start:
                 raise IndexError
-            per = self.periodicity[index + self.start][0]
+            per = Period(index + self.start, self.periodicity)
         else:
             if abs(index) > self.stop - self.start:
                 raise IndexError
-            per = self.periodicity[index + self.stop][0]
+            per = Period(index + self.stop, self.periodicity)
         return per
 
     def __len__(self) -> int:
@@ -249,9 +263,7 @@ class Range:
     def __repr__(self) -> str:
         if len(self) == 0:
             return '[]'
-        start = self.periodicity[self.start][0]
-        stop = self.periodicity[self.stop][0]
-        return f'{str(self.periodicity)}[{start.last_date}:{stop.last_date}]'
+        return f'{str(self.periodicity)}[{self[0].last_date}:{(self[-1] + 1).last_date}]'
 
     def __hash__(self) -> int:
         return hash((self.start,self.stop,self.periodicity))

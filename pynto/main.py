@@ -246,25 +246,26 @@ class Word:
         if keep:
             self._stack = copy.copy(stack)
 
-    def __str__(self):
+    def __str__(self) -> str:
+        print('got')
         if self.args and 'quoted' in self.args:
             return f'quote({self.args["quoted"].__repr__()})'
         else:
-            s = self.name
-            if self.args:
-                str_args = []
-                for k,v in self.args.items():
-                    if k != self:
-                        if isinstance(v, str):
-                            str_args.append(f"{k}='{v[:2000]}'")
-                            if len(v) > 2000:
-                                str_args[-1] += '...'
-                        else:
-                            str_args.append(f"{k}={str(v)}")
-                s += '(' + ', '.join(str_args) + ')'
+            s = self.__class__.__name__
+            str_args = []
+            for k,v in self.__dict__.items():
+                if k != self or k in ['prev','next_','open_quotes']:
+                    if isinstance(v, str):
+                        str_args.append(f"{k}='{v[:2000]}'")
+                        if len(v) > 2000:
+                            str_args[-1] += '...'
+                    else:
+                        str_args.append(f"{k}={str(v)}")
+            s += '(' + ', '.join(str_args) + ')'
         return s
 
     def __repr__(self):
+        print('a')
         s = ''
         current = self
         while True:
@@ -386,73 +387,6 @@ class Peek(Word):
             col_args['header'] = col.header
             stack.insert(0, Column(col.header, self.name, col_func, col_args, [col]))
 
-def const_col(range_, args, _):
-    return np.full(len(range_), args['values'])
-
-@dataclass(repr=False)
-class Constant(Word):
-    name: str = 'c'
-
-    def __call__(self, *values):
-        return super().__call__(locals())
-
-    def __str__(self):
-        output = []
-        for value in self.args['values']:
-            if isinstance(value, int):
-                output.append('i' + str(value).replace('-','_'))
-            elif isinstance(value, float):
-                output.append('f' + str(value).replace('-','_').replace('.','_'))
-        return '.'.join(output)
-
-    def operate(self, stack):
-        for value in self.args['values']:
-            stack.append(Column('c', 'c', const_col, {'values': value}, no_cache=True))
-
-def timestamp_col(range_, args, _):
-    return np.array(range_.to_index().view('int'))
-
-def daycount_col(range_, args, _):
-    return np.array(range_.day_counts())
-
-@dataclass(repr=False)
-class ConstantRange(Word):
-    name: str = 'c_range'
-
-    def __call__(self, end, start=0):
-        return super().__call__(locals())
-
-    def __str__(self):
-        return f'r{self.args["start"]}_{self.args["end"]}'
-
-    def operate(self, stack):
-        for value in range(int(self.args['start']),int(self.args['end'])):
-            stack.append(Column('c', 'c', const_col, {'values': value}, no_cache=True))
-
-def frame_col(range_, args, stack):
-    col = stack[0]
-    if col.index.freq is None:
-        try:
-            col.index.freq = pd.infer_freq(col.index)
-        except:
-            raise Exception('Unable to determine periodicity of pandas data.')
-    periodicity = periodicities.from_pandas(col.index.freq.name)
-    if periodicity != range_.periodicity:
-        col =  col.resample(range_.to_index()).asfreq()
-    start = range_.periodicity.get_index(col.index[0].date())
-    end = range_.periodicity.get_index(col.index[-1].date()) + 1
-    values = []
-    if range_.start < start:
-        values.append(np.full(min(start - range_.start, len(range_)), np.nan))
-    if range_.start < end and range_.stop >= start:
-        values.append(col.values[max(range_.start - start,0):min(range_.stop - start, len(col))])
-    if len(values) > 0:
-        values = np.concatenate(values)
-    else:
-        values = pd.Series()
-    if len(values) < len(range_):
-        values = np.concatenate([values, np.full(len(range_) - len(values), np.nan)])
-    return values
 
 @dataclass(repr=False)
 class Pandas(Word):
@@ -575,98 +509,11 @@ def clear_stack_function(stack):
 def hsort_stack_function(stack):
     stack.sort(key=lambda c: c.header)
 
-@dataclass(repr=False)
-class Interleave(Word):
-    name: str = 'interleave'
 
-    def __call__(self, count=None, split_into=2): return super().__call__(locals())
-
-    def operate(self, stack):
-        if len(stack) == 0: return
-        count = self.args['count'] if self.args['count'] else len(stack) // self.args['split_into']
-        last = 0
-        lists = []
-        for i in range(len(stack)+1):
-            if i % count == 0 and i != 0:
-                lists.append(stack[i-count:i])
-                last = i
-        del(stack[:last])
-        stack += [val for tup in zip(*lists) for val in tup]
 
 @dataclass(repr=False)
-class Pop(Word):
-    name: str = 'pop'
-
-    def __call__(self, count=1): return super().__call__(locals())
-
-    def operate(self, stack):
-        del(stack[-abs(int(self.args['count'])):])
-
-@dataclass(repr=False)
-class Top(Word):
-    name: str = 'top'
-
-    def __call__(self, count=1): return super().__call__(locals())
-
-    def operate(self, stack):
-        del(stack[:-abs(int(self.args['count']))])
-
-@dataclass(repr=False)
-class Pull(Word):
-    name: str = 'pull'
-
-    def __call__(self, start, end=None, clear=False): return super().__call__(locals())
-
-    def operate(self, stack):
-        end = -self.args['start'] - 1 if self.args['end'] is None else -self.args['end']
-        start = len(stack) if self.args['start'] == 0 else -self.args['start']
-        pulled = stack[end:start]
-        if self.args['clear']:
-            del(stack[:])
-        else:
-            del(stack[end:start])
-        stack += pulled
-
-@dataclass(repr=False)
-class HeaderPull(Word):
-    name: str = 'hpull'
-
-    def __call__(self, *headers, clear=False, exact_match=False):
-        return super().__call__(locals())
-    def operate(self, stack):
-        filtered_stack = []
-        for header in self.args['headers']:
-            to_del = []
-            matcher = lambda c: header == c.header if self.args['exact_match'] else re.match(header,col.header) is not None
-            for i,col in enumerate(stack):
-                if matcher(col):
-                    filtered_stack.append(stack[i])
-                    to_del.append(i)
-            to_del.sort(reverse=True)
-            for i in to_del:
-                del(stack[i])
-        if self.args['clear']:
-            del(stack[:])
-        stack += filtered_stack
-
-@dataclass(repr=False)
-class HeaderFilter(HeaderPull):
-    name: str = 'hfilter'
-    def __call__(self, *headers, clear=True, exact_match=False):
-        return super().__call__(*headers, clear=True, exact_match=False)
 
 def ewma_col(range_, args, stack):
-    alpha = 2 /(args['window'] + 1.0)
-    data = stack[0][range_]
-    idx = np.cumsum(np.where(~np.isnan(data),1,0)) - 1
-    nans = np.where(~np.isnan(data),1,np.nan)
-#     starting_nans = np.where(idx == -1,np.nan,1)
-    data = data[~np.isnan(data)]
-    if len(data) == 0:
-        return np.full(idx.shape[0],np.nan)
-    out = ewma(data,alpha)
-    #return out[idx] * starting_nans
-    return out[idx] * nans
 
 @dataclass(repr=False)
 class EWMA(Word):
@@ -677,168 +524,7 @@ class EWMA(Word):
         stack.append(Column(col.header,'ewma', ewma_col, self.args, [col]))
 
 # Combinators
-@dataclass(repr=False)
-class Call(Word):
-    name: str = 'call'
-    def __call__(self, depth=None, copy=False): return super().__call__(locals())
-    def operate(self, stack):
-        assert len(stack) == 0 or not isinstance(stack[-1],Quotation) , 'call needs a quotation on top of stack'
-        quoted = stack.pop().args['quoted']
-        if 'depth' not in self.args or self.args['depth'] is None:
-            depth = len(stack) 
-        else:
-            depth = self.args['depth']
 
-        if depth != 0:
-            this_stack = stack[-depth:]
-            if 'copy' not in self.args or not self.args['copy']:
-                del(stack[-depth:])
-        else:
-            this_stack = []
-        quoted.evaluate(this_stack)
-        stack.extend(this_stack)
-
-@dataclass(repr=False)
-class IfExists(Word):
-    name: str = 'ifexists'
-    def __call__(self, count=1, else_=False, copy=False): return super().__call__(locals())
-    def operate(self, stack):
-        assert len(stack) == 0 or not isinstance(stack[-1],Quotation) , 'ifexists needs a quotation on top of stack'
-        quoted = stack.pop().args['quoted']
-        if self.args['else_']:
-            assert len(stack) == 0 or not isinstance(stack[-1],Quotation) , 'ifexists needs two quotations on top of stack for else_=True'
-            quoted_else = stack.pop().args['quoted']
-        if len(stack) >= self.args['count']:
-            quoted.evaluate(stack)
-        elif self.args['else_']:
-            quoted_else.evaluate(stack)
-
-@dataclass(repr=False)
-class If(Word):
-    name: str = 'if_'
-    def __call__(self, condition: Callable[[list[str]],bool] = lambda _: True):
-        return super().__call__(locals())
-    def operate(self, stack):
-        assert len(stack) == 0 or not isinstance(stack[-1],Quotation) , 'if_ needs a quotation on top of stack'
-        quoted = stack.pop().args['quoted']
-        if self.args['condition']([col.header for col in stack]):
-            quoted.evaluate(stack)
-
-@dataclass(repr=False)
-class IfElse(Word):
-    name: str = 'ifelse'
-    def __call__(self, condition: Callable[[list[str]],bool] = lambda _: True):
-        return super().__call__(locals())
-    def operate(self, stack):
-        assert len(stack) < 2 or \
-                not isinstance(stack[-1],Quotation) or \
-                not isinstance(stack[-2],Quotation) \
-                , 'if_ needs a quotation on top of stack'
-        quoted = stack.pop().args['quoted']
-        else_quoted = stack.pop().args['quoted']
-        if self.args['condition']([col.header for col in stack]):
-            quoted.evaluate(stack)
-        else:
-            else_quoted.evaluate(stack)
-
-def partial_stack_function(stack, partial_stack):
-    stack.extend(partial_stack)
-
-@dataclass(repr=False)
-class Partial(Word):
-    name: str = 'partial'
-    def __call__(self, depth=1, copy=False): return super().__call__(locals())
-    def operate(self, stack):
-        assert len(stack) == 0 or not isinstance(stack[-1],Quotation) , 'partial needs a quotation on top of stack'
-        quote = stack.pop()
-        depth = self.args['depth']
-        if depth != 0:
-            this_stack = stack[-depth:]
-            if not self.args['copy']:
-                del(stack[-depth:])
-        else:
-            this_stack = []
-        stack_function = partial(partial_stack_function, partial_stack=this_stack)
-        quote.args['quoted'] = BaseWord('partial', operate=stack_function) + quote.args['quoted']
-        stack.append(quote)
-
-@dataclass(repr=False)
-class Compose(Word):
-    name: str = 'compose'
-    def __call__(self, num_quotations=0): return super().__call__(locals())
-    def operate(self, stack):
-        count = self.args['num_quotations']
-        if self.args['num_quotations'] == 0:
-            while isinstance(stack[-count-1],QuotationColumn):
-                count +=1
-        quoted = reduce(add, [quote.args['quoted'] for quote in stack[-count:]])
-        del(stack[-count:])
-        stack.append(QuotationColumn(args={'quoted': quoted}))
-
-@dataclass(repr=False)
-class Each(Word):
-    name: str = 'each'
-    def __call__(self, start=0, end=None, every=1, copy=False): return super().__call__(locals())
-    def operate(self, stack):
-        assert isinstance(stack[-1], QuotationColumn)
-        quote = stack.pop().args['quoted']
-        end = 0 if self.args['end'] is None else -self.args['end']
-        start = len(stack) if self.args['start'] == 0 else -self.args['start']
-        selected = stack[end:start]
-        assert len(selected) % self.args['every'] == 0, f'Stack length {len(selected)} not evenly divisible by every {self.args["every"]}'
-        if not self.args['copy']:
-            del(stack[end:start])
-        for t in zip(*[iter(selected)]*self.args['every']):
-            this_stack = list(t)
-            quote.evaluate(this_stack)
-            stack += this_stack
-@dataclass(repr=False)
-class Repeat(Word):
-    name: str = 'repeat'
-    def __call__(self, times): return super().__call__(locals())
-    def operate(self, stack):
-        assert len(stack) == 0 or not isinstance(stack[-1],Quotation) , 'repeat needs a quotation on top of stack'
-        quote = stack.pop().args['quoted']
-        for _ in range(self.args['times']):
-            quote.evaluate(stack)
-
-def heach_stack_function(stack):
-    assert stack[-1].header == 'quotation'
-    quote = stack.pop().args['quoted']
-    new_stack = []
-    for header in set([c.header for c in stack]):
-        to_del, filtered_stack = [], []
-        for i,col in enumerate(stack):
-            if header == col.header:
-                filtered_stack.append(stack[i])
-                to_del.append(i)
-        quote.evaluate(filtered_stack)
-        new_stack += filtered_stack
-        to_del.sort(reverse=True)
-        for i in to_del:
-            del(stack[i])
-    del(stack[:])
-    stack += new_stack
-
-@dataclass(repr=False)
-class Cleave(Word):
-    name: str = 'cleave'
-    def __call__(self, num_quotations=0, depth=None, copy=False): return super().__call__(locals())
-    def operate(self, stack):
-        count = self.args['num_quotations']
-        if self.args['num_quotations'] == 0:
-            while isinstance(stack[-count-1],QuotationColumn):
-                count +=1
-        quotes = [quote.args['quoted'] for quote in stack[-count:]]
-        del(stack[-count:])
-        depth = len(stack) if self.args['depth'] is None else self.args['depth']
-        copied_stack = stack[-depth:] if depth != 0 else []
-        if not self.args['copy'] and depth != 0:
-            del(stack[-depth:])
-        for quote in quotes:
-            this_stack = copied_stack[:]
-            quote.evaluate(this_stack)
-            stack += this_stack
 
 # Header
 def header_col(range_, args, stack):
