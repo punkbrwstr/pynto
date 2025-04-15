@@ -94,7 +94,6 @@ class Word(abc.ABC):
             addend_tail = addend
         addend_head = addend_tail._head()
         if isinstance(addend_head, Combinator):
-            print(addend_head)
             current = this
             while addend_head.num_quotations != 0 \
                     and current is not None and isinstance(current, Quotation):
@@ -166,21 +165,20 @@ class Word(abc.ABC):
 
     def build_stack(self, stack: list[Column]) -> None:
         assert self.open_quotes == 0, 'Unclosed quotation.  Cannot evaluate'
-        print(self)
         assert not isinstance(self, Quotation), 'Cannot evaluate quotation'
         current = self._head()
         while current is not None:
             if not current.called: # need to set defaults (if any)
                 current()
-            if self.filters is None:
-                current_stack = stack[self.slice_]
-                if not self.keep:
-                    del(stack[self.slice_])
+            if current.filters is None:
+                current_stack = stack[current.slice_]
+                if not current.keep:
+                    del(stack[current.slice_])
             else:
                 current_stack = []
-                for header in self.headers:
+                for header in current.headers:
                     to_del = []
-                    matcher = lambda c: header == c.header if self.exact_match \
+                    matcher = lambda c: header == c.header if current.exact_match \
                                 else re.match(header,col.header) is not None
                     for i,col in enumerate(stack):
                         if matcher(col):
@@ -355,16 +353,16 @@ class RandomNormal(NullaryWord):
     def generate(range_: Range, values: np.ndarray):
         values[:] = np.random.randn(len(range_))
 
-    def __init__(self):
-        super().__init__('randn',  self.generate)
+    def __init__(self, name: str):
+        super().__init__(name,  self.generate)
 
 class Timestamp(NullaryWord):
     @staticmethod
     def generate(range_: Range, values: np.ndarray):
         values[:] = range_.to_index().view('int').astype(np.float64)
 
-    def __init__(self):
-        super().__init__('ts', self.generate)
+    def __init__(self, name: str):
+        super().__init__(name, self.generate)
 
 
 class Daycount(NullaryWord):
@@ -372,16 +370,16 @@ class Daycount(NullaryWord):
     def generate(range_: Range, values: np.ndarray):
         values[:] = np.array(range_.day_counts(), dtype=np.float64)
 
-    def __init__(self):
-        super().__init__('dc', self.generate)
+    def __init__(self, name: str):
+        super().__init__(name, self.generate)
 
 class Constant(NullaryWord):
     @staticmethod
     def generate(constant: float, range_: Range, values: np.ndarray):
         values[:] = constant
 
-    def __init__(self):
-        super().__init__('f', self.generate)
+    def __init__(self, name: str):
+        super().__init__(name, self.generate)
 
     def __call__(self, *constants: list[float]) -> Word:
         self.constants = constants
@@ -403,8 +401,8 @@ class SavedColumn(Column):
         return (self.md[0], self.md[-1], self.md.periodicity)
 
 class Saved(Word):
-    def __init__(self):
-        super().__init__('db', slice(-1,0))
+    def __init__(self, name: str):
+        super().__init__(name, slice(-1,0))
 
     def __call__(self, key: str) -> Word:
         self.key = key
@@ -417,8 +415,8 @@ class Saved(Word):
 
 # Quotation / combinator words
 class Quotation(Word):
-    def __init__(self):
-        super().__init__('q', slice(-1,0))
+    def __init__(self, name: str):
+        super().__init__(name, slice(-1,0))
     
     def __call__(self, quoted: Word | None = None) -> Word:
         this = self.copy_expression()
@@ -453,15 +451,15 @@ class Combinator(Word):
         pass
 
 class Call(Combinator):
-    def __init__(self):
-        super().__init__('call', slice(-1,None))
+    def __init__(self, name: str):
+        super().__init__(name, slice(-1,None))
 
     def operate(self, stack: list[Column]) -> None:
         self.quotations[0].quoted.build_stack(stack)
 
 class IfExists(Combinator):
-    def __init__(self):
-        super().__init__('ifexists', slice(-1,None))
+    def __init__(self, name: str):
+        super().__init__(name, slice(-1,None))
 
     def __call__(self, count: int = 2, else_: bool = False, copy: bool = False) -> Word:
         self.count = count
@@ -483,9 +481,6 @@ class IfExists(Combinator):
             quoted_else.build_stack(stack)
 
 class Map(Combinator):
-    def __init__(self):
-        super().__init__('map')
-
     def __call__(self, every: int = 1):
         self.every = every
         return super().__call__()
@@ -493,19 +488,21 @@ class Map(Combinator):
     def operate(self, stack: list[Column]) -> None:
         assert len(stack) % self.every == 0, \
            f'Stack length {len(stack)} not evenly divisible by every {self.every}'
-        for t in zip(*[iter(stack)]*self.every):
+        copied = stack[:]
+        stack.clear()
+        for t in zip(*[iter(copied)]*self.every):
             this_stack = list(t)
-            self.quotations[0].build_stack(this_stack)
+            self.quotations[0].quoted.build_stack(this_stack)
             stack += this_stack
 
 class Repeat(Combinator):
-    def __call__(self, times: int = 1) -> Word:
+    def __call__(self, times: int = 2) -> Word:
         self.times = times
         return super().__call__()
 
     def operate(self, stack: list[Column]) -> None:
         for _ in range(self.times):
-            self.quotations[0].build_stack(stack)
+            self.quotations[0].quoted.build_stack(stack)
 
 class HMap(Combinator):
     def operate(self, stack: list[Column]) -> None:
@@ -525,8 +522,8 @@ class HMap(Combinator):
         stack += new_stack
 
 class Cleave(Combinator):
-    def __init__(self, num_quotations: int = -1):
-        return super().__call__(num_quotations)
+    def __init__(self, name: str,  num_quotations: int = -1):
+        return super().__call__(name, num_quotations=num_quotations)
 
     def operate(self, stack: list[Column]) -> None:
         for quote in self.quotations:
@@ -535,6 +532,9 @@ class Cleave(Combinator):
             stack += this_stack
 
 class BoundWord(Word):
+    def __init__(self):
+        super().__init__('bound')
+
     def __init__(self, bound: list[Column]):
         self.bound = bound
         super().__init__()
@@ -543,13 +543,15 @@ class BoundWord(Word):
         stack.extend(self.bound)
 
 class Partial(Quotation, Combinator):
+    def __init__(self):
+        super().__init__('partial')
 
     def operate(self, stack: list[Column]) -> None:
         self.quoted = BoundWord(stack) + self.quoted
 
 class Compose(Quotation, Combinator):
-    def __init__(self):
-        super(Combinator, self).__init__(2)
+    def __init__(self, name: str):
+        super(Combinator, self).__init__(name, num_quotations=2)
 
     def __call__(self, num_quotations: int = 2):
         self.num_quotations = num_quotations
@@ -611,12 +613,14 @@ class BinaryOperator(Operator):
     def __call__(self, rolling: int | None = None,
                         accumulate: bool = False) -> Word:
         self.rolling, self.accumulate = rolling, accumulate
+        if self.rolling:
+            self.slice_ = slice(-1,None)
         return super().__call__()
 
     def operate(self, stack: list[Column]) -> None:
         children = [*stack]
         stack.clear()
-        if not hasattr(self, 'rolling'): 
+        if not self.rolling: 
             stack.append(BinaryOperatorColumn(children[0].header,
                         operation=self.operation,
                         children=children))
@@ -629,11 +633,11 @@ class BinaryOperator(Operator):
 @dataclass(kw_only=True)
 class BinaryOperatorColumn(Column):
     operation: np.ufunc | Callable[[np.ndarray,np.ndarray,np.ndarray],None]
-    window: int = -1
+    window: int | None = None
 
     def set_range(self, range_: Range) -> None:
         self.range_ = range_
-        if self.window != -1:
+        if self.window:
             child_range = self.range_.expand(int(-self.window * 1.25))
         else:
             child_range = self.range_
@@ -643,7 +647,7 @@ class BinaryOperatorColumn(Column):
 
     def calculate(self) -> None:
         operands = np.column_stack([child.values for child in self.children])
-        if self.window == -1: 
+        if not self.window: 
             self.operation.reduce(operands, out=self.values, axis=1)
         else:
             lookback = int(self.window * 1.25)
@@ -663,9 +667,8 @@ class BinaryOperatorColumn(Column):
 
 class UnaryOperator(Operator):
     def __init__(self, name: str,
-                    operation: np.ufunc | Callable[[np.ndarray,np.ndarray],None],
-                    start: int | None = -1, stop: int | None = None):
-        super().__init__(name, operation, start, stop)
+                    operation: np.ufunc | Callable[[np.ndarray,np.ndarray],None]):
+        super().__init__(name, operation, slice(-1,None))
 
     def operate(self, stack: list[Column]) -> None:
         values_cache = {}
@@ -712,6 +715,9 @@ class EWMAColumn(Column):
         self.values[:] = out[idx]
 
 class EWMA(Word):
+    def __init__(self, name: str):
+        super().__init__(name, slice(-1,None))
+
     def __call__(self, window: float, fill_nans: bool = True) -> Word:
         self.window = window
         self.fill_nans = fill_nans
@@ -722,19 +728,29 @@ class EWMA(Word):
                         fill_nans=self.fill_nans, children=[stack.pop()]))
 
 class Duplicate(Word):
+    def __init__(self, name: str):
+        super().__init__(name, slice(-1,None))
+
     def operate(self, stack: list[Column]) -> None:
-        stack[-1].references[0] += 1
-        stack.append(copy.copy(stack[-1]))
+        for column in stack[:]:
+            column.references[0] += 1
+            stack.append(copy.copy(column))
 
 class Roll(Word):
     def operate(self, stack: list[Column]) -> None:
         stack.insert(0,stack.pop())
 
 class Swap(Word):
+    def __init__(self):
+        super().__init__('swap', slice(-2,None))
+
     def operate(self, stack: list[Column]) -> None:
         stack.insert(-1,stack.pop())
 
 class Drop(Word):
+    def __init__(self):
+        super().__init__('drop')
+
     def operate(self, stack: list[Column]) -> None:
         stack.pop()
 
@@ -865,12 +881,12 @@ def logical_xor_op(x: np.ndarray, y: np.ndarry, out: np.ndarray) -> None:
 
 
 vocab: dict[str, type] = {}
-def register_word(name: str, word_type: Callable[[],Word]):
-    vocab[name] = word_type
+def register_word(name: str, word_constructor: Callable[[str],Word]):
+    vocab[name] = word_constructor(name)
 
 register_word('rows',Rows)
 register_word('f',Constant)
-register_word('nan',lambda: Constant()(np.nan))
+register_word('nan',lambda name: Constant(name)(np.nan))
 register_word('saved',Saved)
 register_word('randn',RandomNormal)
 register_word('ts',Timestamp)
@@ -888,34 +904,34 @@ register_word('hmap',HMap)
 register_word('cleave',Cleave)
 register_word('resample',Resample)
 register_word('per',SetPeriodicity)
-register_word('add',lambda: BinaryOperator('add',np.add))
-register_word('sub',lambda: BinaryOperator('sub',np.subtract))
-register_word('mul',lambda: BinaryOperator('mul',np.multiply))
-register_word('pow',lambda: BinaryOperator('pow',np.power))
-register_word('div',lambda: BinaryOperator('div',np.divide))
-register_word('mod',lambda: BinaryOperator('mod',np.mod))
-register_word('expm1',lambda: BinaryOperator('expm1',np.expm1))
-register_word('log1p',lambda: BinaryOperator('log1p',np.log1p))
+register_word('add',lambda name: BinaryOperator(name,np.add))
+register_word('sub',lambda name: BinaryOperator(name,np.subtract))
+register_word('mul',lambda name: BinaryOperator(name,np.multiply))
+register_word('pow',lambda name: BinaryOperator(name,np.power))
+register_word('div',lambda name: BinaryOperator(name,np.divide))
+register_word('mod',lambda name: BinaryOperator(name,np.mod))
+register_word('expm1',lambda name: BinaryOperator(name,np.expm1))
+register_word('log1p',lambda name: BinaryOperator(name,np.log1p))
 
-register_word('eq',lambda: BinaryOperator('eq',np.equal))
-register_word('ne',lambda: BinaryOperator('ne',np.not_equal))
-register_word('ge',lambda: BinaryOperator('add',np.greater_equal))
-register_word('gt',lambda: BinaryOperator('gt',np.greater))
-register_word('le',lambda: BinaryOperator('le',np.less_equal))
-register_word('lt',lambda: BinaryOperator('lt',np.less))
-register_word('logical_and',lambda: BinaryOperator('logical_and', logical_and_op))
-register_word('logical_or',lambda: BinaryOperator('logical_or', logical_or_op))
-register_word('logical_xor',lambda: BinaryOperator('logical_xor', logical_xor_op))
-register_word('neg',lambda: UnaryOperator('neg',np.negative))
-register_word('inv',lambda: UnaryOperator('inv',np.reciprocal))
-register_word('abs',lambda: UnaryOperator('abs',np.abs))
-register_word('sqrt',lambda: UnaryOperator('sqrt',np.sqrt))
-register_word('exp',lambda: UnaryOperator('exp',np.exp))
-register_word('log',lambda: UnaryOperator('log',np.log))
-register_word('zero_first',lambda: UnaryOperator('zero_first', zero_first_op))
-register_word('zero_to_na',lambda: UnaryOperator('zero_to_na', zero_to_na_op))
-register_word('logical_not',lambda: UnaryOperator('logical_not', logical_not_op))
-register_word('rank',lambda: UnaryOperator('rank', rank, -1))
+register_word('eq',lambda name: BinaryOperator(name,np.equal))
+register_word('ne',lambda name: BinaryOperator(name,np.not_equal))
+register_word('ge',lambda name: BinaryOperator(name,np.greater_equal))
+register_word('gt',lambda name: BinaryOperator(name,np.greater))
+register_word('le',lambda name: BinaryOperator(name,np.less_equal))
+register_word('lt',lambda name: BinaryOperator(name,np.less))
+register_word('logical_and',lambda name: BinaryOperator(name, logical_and_op))
+register_word('logical_or',lambda name: BinaryOperator(name, logical_or_op))
+register_word('logical_xor',lambda name: BinaryOperator(name, logical_xor_op))
+register_word('neg',lambda name: UnaryOperator(name,np.negative))
+register_word('inv',lambda name: UnaryOperator(name,np.reciprocal))
+register_word('abs',lambda name: UnaryOperator(name,np.abs))
+register_word('sqrt',lambda name: UnaryOperator(name,np.sqrt))
+register_word('exp',lambda name: UnaryOperator(name,np.exp))
+register_word('log',lambda name: UnaryOperator(name,np.log))
+register_word('zero_first',lambda name: UnaryOperator(name, zero_first_op))
+register_word('zero_to_na',lambda name: UnaryOperator(name, zero_to_na_op))
+register_word('logical_not',lambda name: UnaryOperator(name, logical_not_op))
+register_word('rank',lambda name: UnaryOperator(name, rank, -1))
 register_word('ewma', EWMA)
 register_word('dup', Duplicate)
 register_word('roll', Roll)
