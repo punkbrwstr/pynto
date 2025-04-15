@@ -740,27 +740,16 @@ class Roll(Word):
     def operate(self, stack: list[Column]) -> None:
         stack.insert(0,stack.pop())
 
-class Swap(Word):
-    def __init__(self):
-        super().__init__('swap', slice(-2,None))
-
-    def operate(self, stack: list[Column]) -> None:
-        stack.insert(-1,stack.pop())
-
 class Drop(Word):
-    def __init__(self):
-        super().__init__('drop')
+    def __init__(self, name: str):
+        super().__init__(name, slice(-1,None))
 
     def operate(self, stack: list[Column]) -> None:
-        stack.pop()
+        stack.clear()
 
 class Rev(Word):
     def operate(self, stack: list[Column]) -> None:
         stack.reverse()
-
-class Clear(Word):
-    def operate(self, stack: list[Column]) -> None:
-        stack.clear()
 
 class Interleave(Word):
     def __call__(self, count=None, split_into: int = 2) -> Word:
@@ -935,8 +924,9 @@ register_word('rank',lambda name: UnaryOperator(name, rank, -1))
 register_word('ewma', EWMA)
 register_word('dup', Duplicate)
 register_word('roll', Roll)
-register_word('swap', Swap)
+register_word('swap', lamdbda name: Roll(name, slice(-2,None))
 register_word('drop', Drop)
+register_word('clear', lamdbda name: Drop(name, slice(None))
 register_word('rev', Rev)
 register_word('clear', Clear)
 register_word('interleave', Interleave)
