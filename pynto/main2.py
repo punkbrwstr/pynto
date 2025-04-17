@@ -68,14 +68,16 @@ class Column:
 
         
 class Word(abc.ABC):
-    def __init__(self, name: str, slice_: slice = slice(None)):
+    def __init__(self, name: str, slice_: slice = slice(None),
+                    copy_selected: bool = False, discard_excluded: bool = False):
         self.name = name
         self.slice_ = slice_
+        self.copy_selected: bool = copy_selected
+        self.discard_excluded: bool = discard_excluded
+        self.filters: list[str] | None = None
         self.next_: Word | None = None
         self.prev: Word | None = None
         self.open_quotes: int = 0
-        self.keep: bool = False
-        self.filters: list[str] | None = None
         self.called: bool = False
 
     #@abc.abstractmethod
@@ -128,9 +130,11 @@ class Word(abc.ABC):
                                 | str | tuple[str, bool] \
                                 | list[str] | tuple[list[str], bool] ) -> Word:
         if isinstance(key, tuple):
-            assert len(key) == 2, 'Indexer must have 1 or 2 arguments'
-            assert isinstance(key[1], bool), 'Keep argument must be boolean'
-            self.keep = key[1]
+            assert isinstance(key[1], bool), 'Second argument must be boolean'
+            self.copy_selected = key[1]
+            if len(key) == 3:
+                assert isinstance(key[2], bool), 'Third argument must be boolean'
+                self.discard_excluded = key[2]
             key = key[0]
         if isinstance(key, int):
             self.slice_ = slice(key, key + 1)
@@ -171,22 +175,27 @@ class Word(abc.ABC):
             if not current.called: # need to set defaults (if any)
                 current()
             if current.filters is None:
-                current_stack = stack[current.slice_]
-                if not current.keep:
-                    del(stack[current.slice_])
+                selected = list(range(len(stack))[current.slice_])
             else:
-                current_stack = []
-                for header in current.headers:
-                    to_del = []
-                    matcher = lambda c: header == c.header if current.exact_match \
-                                else re.match(header,col.header) is not None
+                selected = []
+                for filter_ in current.filters:
+                    pattern = re.compile(filter_)
                     for i,col in enumerate(stack):
-                        if matcher(col):
-                            current_stack.append(stack[i])
-                            to_del.append(i)
-                    to_del.sort(reverse=True)
-                    for i in to_del:
-                        del(stack[i])
+                        if bool(pattern.match(col.header)):
+                            selected.append(i)
+            current_stack = []
+            to_delete = []
+            for i in selected:
+                if current.copy_selected:
+                    stack[i].references[0] += 1
+                else:
+                    to_delete.append(i)
+                current_stack.append(stack[i])
+            if current.discard_excluded:
+                to_delete.extend(set(range(len(stack))) - set(selected))
+            for i in sorted(to_delete, reverse=True):
+                stack[i].references[0] -= 1
+                del(stack[i])
             current.operate(current_stack)
             stack.extend(current_stack)
             current = current.next_
@@ -206,6 +215,10 @@ class Word(abc.ABC):
     @property
     def rows(self) -> Rows:
         return Rows(self)
+    
+    @property
+    def values(self) -> Rows:
+        return Rows(self, True)
     
     def __copy__(self) -> Word:
         cls = self.__class__
@@ -237,13 +250,13 @@ class Word(abc.ABC):
 
     @property
     def local(self) -> Word:
-        return Quotation()(self).call(0)
+        return Quotation('q')(self).call(0)
 
     def __str__(self) -> str:
         s = self.name
         str_args = []
         for k,v in self.__dict__.items():
-            if k != self and k not in ['prev','next_','open_quotes','closed', 'called']:
+            if k != self and k not in ['prev','next_','closed', 'called']:
                 if isinstance(v, str):
                     str_args.append(f"{k}='{v[:2000]}'")
                     if len(v) > 2000:
@@ -267,10 +280,11 @@ class Word(abc.ABC):
         return s
 
 class Rows:
-    def __init__(self, word: Word):
+    def __init__(self, word: Word, values_only: bool = False):
         self.word = word
+        self.values_only = values_only
 
-    def __getitem__(self, key: Range | slice) -> pd.DataFrame:
+    def __getitem__(self, key: slice | int | Range) -> pd.DataFrame:
         stack = []
         self.word.build_stack(stack)
         min_, max_, per = None, None, None
@@ -291,6 +305,8 @@ class Rows:
         if isinstance(key, Range):
             range_ = key 
         else:
+            if isinstance(key, int):
+                key = slice(key, key + 1)
             p = Periodicity[key.step] if hasattr(key, 'step') and key.step \
                 else per if per else Periodicity.B
             range_ = p[key.start or min_:key.stop or max_]
@@ -328,8 +344,10 @@ class Rows:
         for i, col in enumerate(stack):
             assert col.range_ == range_, \
                 f'Mismatching range needs resample for col {i - len(stack)}: {col.header}'
-        return pd.DataFrame(np.column_stack([col.values for col in stack]),
-                            columns=[col.header for col in stack], index=range_.to_index())
+        values = np.concatenate([col.values for col in stack]).reshape((len(range_),len(stack)),order='F')
+        if self.values_only:
+            return values
+        return pd.DataFrame(values, columns=[col.header for col in stack], index=range_.to_index())
 
 
 # Nullary/generator words
@@ -415,26 +433,13 @@ class Saved(Word):
 
 # Quotation / combinator words
 class Quotation(Word):
-    def __init__(self, name: str):
-        super().__init__(name, slice(-1,0))
-    
     def __call__(self, quoted: Word | None = None) -> Word:
         this = self.copy_expression()
         this.quoted = quoted
         return this
 
-    def __getattr__(self, name):
-        try:
-            word = resolve(name)
-            if  not hasattr(self, 'quoted'):
-                self.open_quotes += 1 
-            return self.__add__(word, False)
-        except Exception as e:
-            #raise e
-            return self.__getattribute__(name)
-
     def __add__(self, other: Word, copy_addend: bool = True) -> Word:
-        if not hasattr(self, 'quoted') and copy_addend:
+        if not hasattr(self, 'quoted') or self.quoted is None:
             self.open_quotes += 1 
         return super().__add__(other, copy_addend)
 
@@ -451,9 +456,6 @@ class Combinator(Word):
         pass
 
 class Call(Combinator):
-    def __init__(self, name: str):
-        super().__init__(name, slice(-1,None))
-
     def operate(self, stack: list[Column]) -> None:
         self.quotations[0].quoted.build_stack(stack)
 
@@ -523,7 +525,7 @@ class HMap(Combinator):
 
 class Cleave(Combinator):
     def __init__(self, name: str,  num_quotations: int = -1):
-        return super().__call__(name, num_quotations=num_quotations)
+        return Combinator.__init__(self, name, num_quotations=num_quotations)
 
     def operate(self, stack: list[Column]) -> None:
         for quote in self.quotations:
@@ -543,15 +545,12 @@ class BoundWord(Word):
         stack.extend(self.bound)
 
 class Partial(Quotation, Combinator):
-    def __init__(self):
-        super().__init__('partial')
-
     def operate(self, stack: list[Column]) -> None:
         self.quoted = BoundWord(stack) + self.quoted
 
 class Compose(Quotation, Combinator):
     def __init__(self, name: str):
-        super(Combinator, self).__init__(name, num_quotations=2)
+        Combinator.__init__(self, name, num_quotations=2)
 
     def __call__(self, num_quotations: int = 2):
         self.num_quotations = num_quotations
@@ -667,8 +666,9 @@ class BinaryOperatorColumn(Column):
 
 class UnaryOperator(Operator):
     def __init__(self, name: str,
-                    operation: np.ufunc | Callable[[np.ndarray,np.ndarray],None]):
-        super().__init__(name, operation, slice(-1,None))
+                    operation: np.ufunc | Callable[[np.ndarray,np.ndarray],None],
+                    slice_ = slice(-1, None)):
+        super().__init__(name, operation, slice_)
 
     def operate(self, stack: list[Column]) -> None:
         values_cache = {}
@@ -741,13 +741,15 @@ class Roll(Word):
         stack.insert(0,stack.pop())
 
 class Drop(Word):
-    def __init__(self, name: str):
-        super().__init__(name, slice(-1,None))
-
     def operate(self, stack: list[Column]) -> None:
         stack.clear()
 
-class Rev(Word):
+class Pull(Word):
+    def operate(self, stack: list[Column]) -> None:
+        pass
+
+
+class Reverse(Word):
     def operate(self, stack: list[Column]) -> None:
         stack.reverse()
 
@@ -770,37 +772,6 @@ class Interleave(Word):
         del(stack[:last])
         stack += [val for tup in zip(*lists) for val in tup]
 
-class Pop(Word):
-    def __call__(self, count: int = 1) -> Word:
-        self.count = count
-        return super().__call__()
-
-    def operate(self, stack: list[Column]) -> None:
-        del(stack[-abs(int(self.count)):])
-
-class Top(Word):
-    def __call__(self, count: int = 1) -> Word:
-        self.count = count
-        return super().__call__()
-
-    def operate(self, stack: list[Column]) -> None:
-        del(stack[:-abs(int(self.count))])
-
-class Pull(Word):
-    def __call__(self, start: int, end: int | None = None, clear: bool = False):
-        self.start, self.end, self.clear = start, end, clear
-        return super().__call__()
-
-    def operate(self, stack: list[Column]) -> None:
-        end = -self.start - 1 if self.end is None else -self.end
-        start = len(stack) if self.start == 0 else -self.start
-        pulled = stack[end:start]
-        if self.clear:
-            del(stack[:])
-        else:
-            del(stack[end:start])
-        stack += pulled
-
 class HSort(Word):
     def operate(self, stack: list[Column]) -> None:
         stack.sort(key=lambda c: c.header)
@@ -815,36 +786,6 @@ class HeaderSet(Word):
         for i in range(start,len(stack)):
             header = self.headers[i - start]
             stack[i].header = header
-
-class HeaderPull(Word):
-    def __call__(self, *headers: str, clear: bool = False, \
-                    exact_match: bool = False) -> Word:
-        self.headers = headers
-        self.clear = clear
-        self.exact_match = exact_match
-        return super().__call__()
-
-    def operate(self, stack: list[Column]) -> None:
-        filtered_stack = []
-        for header in self.headers:
-            to_del = []
-            matcher = lambda c: header == c.header if self.exact_match \
-                        else re.match(header,col.header) is not None
-            for i,col in enumerate(stack):
-                if matcher(col):
-                    filtered_stack.append(stack[i])
-                    to_del.append(i)
-            to_del.sort(reverse=True)
-            for i in to_del:
-                del(stack[i])
-        if self.clear:
-            del(stack[:])
-        stack += filtered_stack
-
-class HeaderFilter(HeaderPull):
-    def __call__(self, *headers: str, exact_match: bool = False) -> Word:
-        return super().__call__(*headers, clear=True, exact_match=exact_match)
-
 
 def zero_first_op(x: np.ndarray, out: np.ndarray) -> None:
     out[1:] = x
@@ -871,9 +812,8 @@ def logical_xor_op(x: np.ndarray, y: np.ndarry, out: np.ndarray) -> None:
 
 vocab: dict[str, type] = {}
 def register_word(name: str, word_constructor: Callable[[str],Word]):
-    vocab[name] = word_constructor(name)
+    vocab[name] = word_constructor
 
-register_word('rows',Rows)
 register_word('f',Constant)
 register_word('nan',lambda name: Constant(name)(np.nan))
 register_word('saved',Saved)
@@ -923,26 +863,24 @@ register_word('logical_not',lambda name: UnaryOperator(name, logical_not_op))
 register_word('rank',lambda name: UnaryOperator(name, rank, -1))
 register_word('ewma', EWMA)
 register_word('dup', Duplicate)
-register_word('roll', Roll)
-register_word('swap', lamdbda name: Roll(name, slice(-2,None))
 register_word('drop', Drop)
-register_word('clear', lamdbda name: Drop(name, slice(None))
-register_word('rev', Rev)
-register_word('clear', Clear)
-register_word('interleave', Interleave)
-register_word('pop', Pop)
-register_word('top', Top)
 register_word('pull', Pull)
+register_word('filter', lambda name: Pull(name, discard_excluded=True))
+register_word('roll', Roll)
+register_word('swap', lambda name: Roll(name, slice(-2,None)))
+register_word('clear', lambda name: Drop(name, slice(None)))
+register_word('rev', Reverse)
+register_word('interleave', Interleave)
 register_word('hsort', HSort)
 register_word('hset', HeaderSet)
 
 def resolve(name: str, throw_exception: bool = True) -> Word | None:
     if re.match(r'f\d[_\d]*',name) is not None:
-        return Constant()(float(name[1:].replace('_','.')))
+        return Constant('f')(float(name[1:].replace('_','.')))
     elif re.match(r'f_\d[_\d]*',name) is not None:
-        return Constant()(-float(name[2:].replace('_','.')))
+        return Constant('f')(-float(name[2:].replace('_','.')))
     elif name in vocab:
-        return vocab[name]()
+        return vocab[name](name)
     else:
         if throw_exception:
             raise NameError(f"name '{name}' is not defined")

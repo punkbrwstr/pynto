@@ -1,7 +1,7 @@
 from __future__ import annotations
 import calendar
 import datetime
-import pytz
+import zoneinfo
 import pandas as pd
 from enum import Enum
 from dataclasses import dataclass, field
@@ -158,7 +158,7 @@ class Periodicity(PeriodicityMixin,Enum):
             raise TypeError(f'Unsupported indexer')
 
     def now(self, add: int = 0) -> Period:
-        ny = pytz.timezone('US/Eastern').fromutc(datetime.datetime.utcnow())
+        ny = datetime.datetime.now(datetime.UTC).astimezone(zoneinfo.ZoneInfo(key='US/Eastern'))
         ny_date = ny.date()
         if ny.hour >= 17:
             ny_date += datetime.timedelta(days=1)

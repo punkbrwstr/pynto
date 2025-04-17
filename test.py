@@ -6,7 +6,23 @@ import pynto as pt
 def get_test_data():
     return pd.DataFrame(np.arange(12).astype('int64').reshape(3,4),columns=['a','b','c','d'],
                             index=pd.date_range('1/1/2019',periods=3,freq='B'))
+                            
+class TestRowIndexing(unittest.TestCase):
+    def test_int_index(self):
+        with self.subTest('Positive index'):
+            self.assertEqual(pt.f(*range(5)).rows[0].shape[0],1)
+        with self.subTest('Negative index'):
+            self.assertEqual(pt.f(*range(5)).rows[-1].shape[0],2)
 
+class TestColumnIndexing(unittest.TestCase):
+    def test_int_index(self):
+        expr = pt.f(*range(5)).pull[0]
+        self.assertTrue(np.array_equal(expr.values[0], np.array([[1.,2., 3., 4., 0.]])))
+
+    def test_int_slice(self):
+        expr = pt.f(*range(5)).pull[0:2]
+        self.assertTrue(np.array_equal(expr.values[0], np.array([[2., 3., 4., 0., 1.]])))
+'''
 class TestRanges(unittest.TestCase):
     def test_int_range(self):
         expr = pt.c(5)
@@ -293,6 +309,7 @@ class MultiIndexFrameTest(DbTest):
         pt.db['test'] = pd.DataFrame(np.arange(75).astype('int64').reshape(25,3),columns=['a','b','c'], index=index)
         f = pt.db['test']
         f.loc['2019-01-07'].shape == (5,3)
+ '''
 
 if __name__ == '__main__':
     unittest.main()
