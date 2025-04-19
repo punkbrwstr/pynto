@@ -611,6 +611,7 @@ class BinaryOperator(Operator):
 
     def __call__(self, rolling: int | None = None,
                         accumulate: bool = False) -> Word:
+        assert not (accumulate and rolling), 'Cannot have accumulate and rolling'
         self.rolling, self.accumulate = rolling, accumulate
         if self.rolling:
             self.slice_ = slice(-1,None)
@@ -619,50 +620,65 @@ class BinaryOperator(Operator):
     def operate(self, stack: list[Column]) -> None:
         children = [*stack]
         stack.clear()
-        if not self.rolling: 
-            stack.append(BinaryOperatorColumn(children[0].header,
-                        operation=self.operation,
-                        children=children))
-        else:
+        if self.rolling: 
             for col in children:
-                stack.append(BinaryOperatorColumn(col.header,
+                stack.append(RollingReduceColumn(col.header,
                         operation=self.operation, children=[col],
                         window=self.rolling))
+        elif self.accumulate:
+            values_cache = {}
+            siblings = []
+            for i, col in enumerate(children):
+                siblings.append(UnaryOperatorColumn(col.header,
+                            operation=self.operation.accumulate,
+                            children=children,
+                            values_cache=values_cache,
+                            siblings=siblings,
+                            sibling_ordinal=i))
+            stack.extend(siblings)
+        else:
+            stack.append(CrossReduceColumn(children[0].header,
+                        operation=self.operation,
+                        children=children))
 
 @dataclass(kw_only=True)
-class BinaryOperatorColumn(Column):
+class CrossReduceColumn(Column):
     operation: np.ufunc | Callable[[np.ndarray,np.ndarray,np.ndarray],None]
-    window: int | None = None
+
+    def calculate(self) -> None:
+        operands = np.concatenate([col.values for col in self.children]) \
+                        .reshape((len(self.range_),len(self.children)),order='F')
+        self.operation.reduce(operands, out=self.values, axis=1)
+
+@dataclass(kw_only=True)
+class RollingReduceColumn(Column):
+    operation: np.ufunc | Callable[[np.ndarray,np.ndarray,np.ndarray],None]
+    window: int 
 
     def set_range(self, range_: Range) -> None:
         self.range_ = range_
-        if self.window:
-            child_range = self.range_.expand(int(-self.window * 1.25))
-        else:
-            child_range = self.range_
+        child_range = self.range_.expand(int(-self.window * 1.25))
         for col in self.children:
             col.set_range(child_range)
 
 
     def calculate(self) -> None:
-        operands = np.column_stack([child.values for child in self.children])
-        if not self.window: 
-            self.operation.reduce(operands, out=self.values, axis=1)
-        else:
-            lookback = int(self.window * 1.25)
-            expanded = self.children[0].values
-            mask = ~np.isnan(expanded)
-            no_nans = expanded[mask]
-            indexes = np.add.accumulate(np.where(mask))[0]
-            if no_nans.shape[-1] - self.window < 0:
-                #warnings.warn('Insufficient non-nan values in lookback.')
-                no_nans = np.hstack([np.full(self.window - len(no_nans),np.nan),no_nans])
-            shape = no_nans.shape[:-1] + (no_nans.shape[-1] - self.window + 1, self.window)
-            strides = no_nans.strides + (no_nans.strides[-1],)
-            windows = np.lib.stride_tricks.as_strided(no_nans, shape=shape, strides=strides)
-            td = np.full((expanded.shape[0],self.window), np.nan)
-            td[indexes[-windows.shape[0]:],:] = windows
-            self.operation.reduce(td[lookback:,::-1], out=self.values, axis=1)
+        operands = np.concatenate([col.values for col in self.children]) \
+                        .reshape((len(self.children[0].range_),len(self.children)),order='F')
+        lookback = int(self.window * 1.25)
+        expanded = self.children[0].values
+        mask = ~np.isnan(expanded)
+        no_nans = expanded[mask]
+        indexes = np.add.accumulate(np.where(mask))[0]
+        if no_nans.shape[-1] - self.window < 0:
+            #warnings.warn('Insufficient non-nan values in lookback.')
+            no_nans = np.hstack([np.full(self.window - len(no_nans),np.nan),no_nans])
+        shape = no_nans.shape[:-1] + (no_nans.shape[-1] - self.window + 1, self.window)
+        strides = no_nans.strides + (no_nans.strides[-1],)
+        windows = np.lib.stride_tricks.as_strided(no_nans, shape=shape, strides=strides)
+        td = np.full((expanded.shape[0],self.window), np.nan)
+        td[indexes[-windows.shape[0]:],:] = windows
+        self.operation.reduce(td[lookback:,::-1], out=self.values, axis=1)
 
 class UnaryOperator(Operator):
     def __init__(self, name: str,
@@ -690,7 +706,9 @@ class UnaryOperatorColumn(Column):
 
     def calculate(self) -> None:
         if len(self.children) > 1:
-            operands = np.column_stack([child.values for child in self.children])
+            operands = np.concatenate([col.values for col in self.children]) \
+                        .reshape((len(self.range_),len(self.children)),order='F')
+            #operands = np.column_stack([child.values for child in self.children])
         else:
             operands = self.children[0].values
         self.operation(operands, out=self.values_cache[self.range_])
