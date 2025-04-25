@@ -262,5 +262,5 @@ class Db:
                 (stop - saved.start) * saved.type_.length - 1)
         else: # no overlap with saved 
             offset = -1
-            p.getrange(md.data_key, -1, 0)
+            p.getrange(saved.data_key, -1, 0)
         return offset

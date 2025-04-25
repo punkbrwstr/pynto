@@ -17,7 +17,7 @@ from functools import partial,reduce
 from operator import add
 from typing import Callable, Any
 from . import tools
-from .periods import Range,Periodicity
+from .periods import Range, Periodicity, datelike
 
 
 
@@ -66,7 +66,7 @@ class Column:
        # for col in self.children:
        #     assert col.range_ == self.range_, 'Mismatching child range'
 
-        
+
 class Word(abc.ABC):
     def __init__(self, name: str, slice_: slice = slice(None),
                     copy_selected: bool = False, discard_excluded: bool = False):
@@ -294,16 +294,16 @@ class Rows:
             col = working.pop()
             bounds = col.get_bounds()
             if bounds:
-                min_ = bounds[0].last_date if not min_ \
-                    else max(min_, bounds[0].last_date)
-                max_ = bounds[1].last_date if not max_ \
-                    else min(max_, bounds[1].last_date)
+                min_ = bounds[0] if not min_ \
+                    else max(min_, bounds[0])
+                max_ = bounds[1] if not max_ \
+                    else min(max_, bounds[1])
                 per = bounds[2]
             flat.append(col)
             working.extend(col.children)
         flat.reverse()
         if isinstance(key, Range):
-            range_ = key 
+            range_ = key
         else:
             if isinstance(key, int):
                 key = slice(key, key + 1)
@@ -331,7 +331,9 @@ class Rows:
                 if col.values is None and child.references[0] == 0 \
                     and col.range_ == child.range_ \
                     and len(col.siblings) == 0:
-                    col.values = child.values 
+                    col.values = child.values
+            if not col.range_: # unused col
+                continue
             if col.values is None:
                 rows, cols = len(col.range_), len(col.siblings)
                 shape = (rows, cols) if cols else rows
@@ -409,14 +411,56 @@ class Constant(NullaryWord):
                 generator=partial(self.generate, constant)))
 
 @dataclass(kw_only=True)
+class PandasColumn(Column):
+    pandas: pd.DataFrame
+    round_: bool
+
+    def get_bounds(self) -> tuple[datetime.date,datetime.date,Periodicity] | None:
+        return (self.pandas.index[0].date(),
+                self.pandas.index[-1].date(),
+                Periodicity.from_offset_code(self.pandas.index.freq))
+
+    def calculate(self) -> None:
+        pandas_range = Range.from_index(self.pandas.index)
+        self.values_cache[self.range_][:] = np.nan
+        idx, idx_child = pandas_range \
+                            .resample_indicies(self.range_, self.round_)
+        self.values_cache[self.range_][idx,:] = self.pandas.values[idx_child,:]
+
+class FromPandas(Word):
+    def __call__(self, pandas: pd.DataFrame | pd.Series, round_: bool = False) -> Word:
+        if isinstance(pandas, pd.Series):
+            self.pandas = self.pandas.toframe()
+        else:
+            self.pandas = pandas
+        if self.pandas.index.freq is None:
+            self.pandas.index.freq = pd.infer_freq(self.pandas.index)
+        self.round_ = round_
+        return super().__call__()
+
+    def operate(self, stack):
+        if self.pandas.index.freq is None:
+            self.pandas.index.freq = pd.infer_freq(self.pandas.index)
+        siblings = []
+        values_cache = {}
+        for i, (header, col) in enumerate(self.pandas.items()):
+            siblings.append(PandasColumn(header,
+                        round_=self.round_,
+                        pandas=self.pandas,
+                        values_cache=values_cache,
+                        siblings=siblings,
+                        sibling_ordinal=i))
+        stack.extend(siblings)
+
+@dataclass(kw_only=True)
 class SavedColumn(Column):
     md: db.Metadata
 
     def set_range(self, range_: Range) -> None:
         self.range_ = range_.change_periodicity(self.md.periodicity)
 
-    def get_bounds(self) -> tuple[datetime.date,datetime.date] | None:
-        return (self.md[0], self.md[-1], self.md.periodicity)
+    def get_bounds(self) -> tuple[datetime.date,datetime.date,Periodicity] | None:
+        return (self.md[0].last_date, self.md[-1].last_date, self.md.periodicity)
 
 class Saved(Word):
     def __init__(self, name: str):
@@ -567,6 +611,7 @@ class ResampleColumn(Column):
         pass
 
     def calculate(self) -> None:
+        self.values[:] = np.nan
         idx, idx_child = self.children[0].range_ \
                             .resample_indicies(self.range_, self.round_)
         self.values[idx] = self.children[0].values[idx_child]
@@ -577,27 +622,133 @@ class Resample(Word):
         return super().__call__()
 
     def operate(self, stack: list[Column]) -> None:
-        stack.append(ResampleColumn(stack[-1].header, 
-                        round_=self.round_, children=[stack.pop()]))
+        children = stack[:]
+        stack.clear()
+        for col in children:
+            stack.append(ResampleColumn(col.header, 
+                        round_=self.round_, children=[col]))
 
 @dataclass(kw_only=True)
-class PeriodicityColumn(Column):
+class PeriodicityColumn(ResampleColumn):
     periodicity: Periodicity
 
     def set_range(self, range_: Range) -> None:
-        self.range_ = range_.change_periodicity(self.periodicity)
+        self.range_ = range_
+        for col in self.children:
+            col.set_range(range_.change_periodicity(self.periodicity))
 
 class SetPeriodicity(Word):
-    def __call__(self, periodicity: str | Periodicity) -> Word:
+    def __call__(self, periodicity: str | Periodicity, \
+                    round_: bool = False) -> Word:
         if isinstance(periodicity, str):
             self.periodicity = Periodicity[periodicity]
         else:
             self.periodicity = periodicity
+        self.round_ = round_
         return super().__call__()
 
     def operate(self, stack: list[Column]) -> None:
-        stack.append(ResampleColumn('per', periodicity=self.periodicity,
-                        children=[stack.pop()]))
+        children = stack[:]
+        stack.clear()
+        for col in children:
+            stack.append(PeriodicityColumn(col.header, round_=self.round_,
+                               periodicity=self.periodicity, children=[col]))
+
+@dataclass(kw_only=True)
+class FillColumn(Column):
+    value: float
+
+    def calculate(self) -> None:
+        self.values[:] = self.children[0].values
+        self.values[np.isnan(self.values)] = self.value
+
+class Fill(Word):
+    def __call__(self, value: float) -> Word:
+        self.value = value
+        return super().__call__()
+
+    def operate(self, stack: list[Column]) -> None:
+        children = stack[:]
+        stack.clear()
+        for col in children:
+            stack.append(FillColumn(col.header, value=self.value, children=[col]))
+
+@dataclass(kw_only=True)
+class FFillColumn(Column):
+    lookback: int
+    leave_end: bool
+
+    def set_range(self, range_: Range) -> None:
+        self.range_ = range_
+        child_range = self.range_.expand(int(-self.lookback))
+        for col in self.children:
+            col.set_range(child_range)
+
+    def calculate(self) -> None:
+        x = self.children[0].values
+        idx = np.where(~np.isnan(x),np.arange(len(x)),0)
+        np.maximum.accumulate(idx,out=idx)
+        self.values[:] = x[idx][self.lookback:]
+        if self.leave_end:
+            if len(x) > idx.max() + 1:
+                at_end = len(x) - idx.max() - 1
+                self.values[-at_end:] = np.nan
+
+class FFill(Word):
+    def __call__(self, lookback: int = 0, leave_end: bool = False) -> Word:
+        self.lookback = lookback
+        self.leave_end = leave_end
+        return super().__call__()
+
+    def operate(self, stack: list[Column]) -> None:
+        children = stack[:]
+        stack.clear()
+        for col in children:
+            stack.append(FFillColumn(col.header, lookback=self.lookback,
+                                     leave_end=self.leave_end, children=[col]))
+
+@dataclass(kw_only=True)
+class JoinColumn(Column):
+    date: datelike
+
+    def set_range(self, range_: Range) -> None:
+        self.range_ = range_
+        cutover_index = range_.periodicity[self.date].start
+        if range_.stop < cutover_index:
+            print('1')
+            self.children.pop()
+            self.children[0].set_range(range_)
+        elif range_.start >= cutover_index:
+            print('2')
+            self.children.pop(-2)
+            self.children[0].set_range(range_)
+        else:
+            print('3')
+            r_first = copy.copy(range_)
+            r_first.stop = cutover_index
+            self.children[0].set_range(r_first)
+            r_second = copy.copy(range_)
+            r_second.start = cutover_index
+            self.children[1].set_range(r_second)
+
+    def calculate(self) -> None:
+        i = 0
+        for child in self.children:
+            v = child.values
+            self.values[i:i+len(v)] = v
+            i += len(v)
+
+class Join(Word):
+    def __init__(self, name: str):
+        super().__init__(name, slice_=slice(-2,None))
+
+    def __call__(self, date: datelike) -> Word:
+        self.date = date
+        return super().__call__()
+
+    def operate(self, stack: list[Column]) -> None:
+        stack.append(JoinColumn(stack[-2].header, date=self.date,
+                                children=[stack.pop(-2),stack.pop()]))
 
 class Operator(Word):
     def __init__(self, name: str, operation: np.ufunc, slice_: slice):
@@ -613,14 +764,14 @@ class BinaryOperator(Operator):
                         accumulate: bool = False) -> Word:
         assert not (accumulate and rolling), 'Cannot have accumulate and rolling'
         self.rolling, self.accumulate = rolling, accumulate
-        if self.rolling:
+        if self.rolling or self.accumulate:
             self.slice_ = slice(-1,None)
         return super().__call__()
 
     def operate(self, stack: list[Column]) -> None:
         children = [*stack]
         stack.clear()
-        if self.rolling: 
+        if self.rolling:
             for col in children:
                 stack.append(RollingReduceColumn(col.header,
                         operation=self.operation, children=[col],
@@ -653,7 +804,7 @@ class CrossReduceColumn(Column):
 @dataclass(kw_only=True)
 class RollingReduceColumn(Column):
     operation: np.ufunc | Callable[[np.ndarray,np.ndarray,np.ndarray],None]
-    window: int 
+    window: int
 
     def set_range(self, range_: Range) -> None:
         self.range_ = range_
@@ -710,7 +861,7 @@ class UnaryOperatorColumn(Column):
                         .reshape((len(self.range_),len(self.children)),order='F')
             #operands = np.column_stack([child.values for child in self.children])
         else:
-            operands = self.children[0].values
+            operands = self.children[0].values[:,np.newaxis]
         self.operation(operands, out=self.values_cache[self.range_])
 
 def rank(inputs: np.ndarray, out: np.ndarray) -> None:
@@ -838,6 +989,7 @@ register_word('saved',Saved)
 register_word('randn',RandomNormal)
 register_word('ts',Timestamp)
 register_word('dc',Daycount)
+register_word('pandas',FromPandas)
 register_word('q',Quotation)
 register_word('call',Call)
 register_word('ifexists',IfExists)
@@ -851,6 +1003,9 @@ register_word('hmap',HMap)
 register_word('cleave',Cleave)
 register_word('resample',Resample)
 register_word('per',SetPeriodicity)
+register_word('fill',Fill)
+register_word('ffill',FFill)
+register_word('join',Join)
 register_word('add',lambda name: BinaryOperator(name,np.add))
 register_word('sub',lambda name: BinaryOperator(name,np.subtract))
 register_word('mul',lambda name: BinaryOperator(name,np.multiply))
@@ -878,7 +1033,7 @@ register_word('log',lambda name: UnaryOperator(name,np.log))
 register_word('zero_first',lambda name: UnaryOperator(name, zero_first_op))
 register_word('zero_to_na',lambda name: UnaryOperator(name, zero_to_na_op))
 register_word('logical_not',lambda name: UnaryOperator(name, logical_not_op))
-register_word('rank',lambda name: UnaryOperator(name, rank, -1))
+register_word('rank',lambda name: UnaryOperator(name, rank, slice_=slice(None)))
 register_word('ewma', EWMA)
 register_word('dup', Duplicate)
 register_word('drop', Drop)

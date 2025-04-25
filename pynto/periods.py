@@ -15,7 +15,7 @@ def parse_date(date: datelike) -> datetime.date:
     if isinstance(date, pd._libs.tslibs.timestamps.Timestamp):
         return date.date() # type: ignore[no-any-return]
     elif isinstance(date, datetime.date):
-        return date       
+        return date
     elif isinstance(date, datetime.datetime):
         return date.date()
     elif isinstance(date, str):
