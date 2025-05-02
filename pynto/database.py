@@ -84,7 +84,7 @@ class Metadata(Range):
     type_: DataType
     ordinal: int
     col_header: str
-    row_header: str 
+    row_header: str
     id_: uuid.UUID = field(default_factory = uuid.uuid4)
     create_timestamp: datetime.datetime = field(default_factory= \
         lambda: datetime.datetime.now(datetime.UTC))
@@ -95,7 +95,9 @@ class Metadata(Range):
     def data_key(self):
         return DATA_PREFIX + self.id_.bytes
 
-    def pack(self, key: str) -> bytes:
+    def pack(self, key: str, keep_timestamp: bool = False) -> bytes:
+        update = self.update_timestamp.timestamp() if keep_timestamp else \
+                    datetime.datetime.now(datetime.UTC).timestamp()
         return struct.pack(METADATA_FORMAT,
                     key.encode(),
                     self.col_header.encode(),
@@ -106,9 +108,9 @@ class Metadata(Range):
                     self.periodicity.code.encode(),
                     self.type_.name.encode(),
                     self.create_timestamp.timestamp(),
-                    datetime.datetime.now(datetime.UTC).timestamp(),
+                    update,
                     self.id_.bytes)
-                
+
     @classmethod
     def unpack(cls, bytes_: bytes) -> Metadata:
         key, col_header, row_header, ordinal, start, stop, per, \
@@ -132,7 +134,7 @@ class Db:
     @property
     def connection(self):
         return redis.Redis(connection_pool=self._pool)
-    
+
     def make_key(self, key: str) -> str:
         pattern = r'([^#]+)(?:#([^$]*))?(?:\$(.*))?'
         frame, column, row =  re.match(pattern, key).groups()
@@ -145,15 +147,16 @@ class Db:
 
     def get_metadata(self, key: str) -> list[Metadata]:
         key = self.make_key(key)
-        return [Metadata.unpack(p) for p in 
+        return [Metadata.unpack(p) for p in
                     self.connection.zrangebylex(INDEX, f'[{key}', f'[{key}\xff')]
 
     def __setitem__(self, key: str, pandas: pd.Series | pd.DataFrame):
         saved: dict[tuple[str,str],Metadata] = {}
         series: list[tuple[str,str,np.ndarray]] = []
-        for packed in self.connection.zrangebylex(INDEX, f'[{key}', f'[{key}\xff'):
-            md = Metadata.unpack(packed)
-            saved[(md.col_header, md.row_header)] = md
+        safe_key = self.make_key(key)
+        for p in self.connection.zrangebylex(INDEX, f'[{safe_key}', f'[{safe_key}\xff'):
+            md = Metadata.unpack(p)
+            saved[(md.col_header, md.row_header)] = (md, p)
         if isinstance(pandas, pd.Series):
             series.append((pandas.name or '', '', pandas))
         else:
@@ -170,19 +173,22 @@ class Db:
             else:
                 series.extend([(h,'',s) for h,s in pandas.items()])
         p = self.connection.pipeline()
+        toadd, todel = [],[]
         for col, row, s in series:
             assert not isinstance(s.dtype,  pd.api.extensions.ExtensionDtype)
             type_ = DataType.from_dtype(s.dtype.str)
             s = _trim_values(s)
             range_ = Range.from_index(s.index)
             data = s.to_numpy()
-            series_md = saved.get((col,row))
-            if not series_md:
+            md_tuple = saved.get((col,row))
+            if not md_tuple:
                 data_offset = 0
                 series_md = Metadata(range_.start, range_.stop, range_.periodicity,
                                         type_, len(saved), col, row)
                 saved[(col, row)] = series_md
+                toadd.append(series_md)
             else:
+                series_md, packed = md_tuple
                 assert series_md.periodicity.code == range_.periodicity.code, \
                     f'Periodicity does match saved for {key}'
                 assert series_md.type_ == type_, \
@@ -190,7 +196,7 @@ class Db:
                 assert series_md.start <= range_.stop and \
                         series_md.stop >= range_.start,  \
                     f'Data not contiguous with saved for {key}'
-                if series_md.start > range_.start: 
+                if series_md.start > range_.start:
                     if range_.stop < series_md.stop:
                         existing_start = range_.stop - series_md.start
                         data = np.hstack([data,
@@ -199,10 +205,13 @@ class Db:
                     series_md.range_.start = range_.start
                 else: #series_md.range_.stop <= range_.start
                     data_offset = range_.start - series_md.start
-                series_md.stop = max(range_.stop, series_md.stop) 
-                series_md.update_timestamp = datetime.datetime.now(datetime.UTC)
+                series_md.stop = max(range_.stop, series_md.stop)
+                toadd.append(series_md)
+                todel.append(packed)
             p.setrange(series_md.data_key, data_offset * type_.length, data.tobytes())
-        p.zadd(INDEX, {m.pack(key): 0.0 for m in saved.values()})
+        if todel:
+            p.zrem(INDEX, *todel)
+        p.zadd(INDEX, {m.pack(key): 0.0 for m in toadd})
         p.execute()
 
     def __delitem__(self, key: str):
@@ -224,13 +233,17 @@ class Db:
         mds = [Metadata.unpack(d) for d in \
                 self.connection.zrangebylex(INDEX, f'[{key}', f'[{key}\xff')]
         if not mds:
-            raise KeyError(f'Key "{key}" not found')  
+            raise KeyError(f'Key "{key}" not found')
         mds.sort(key=attrgetter('ordinal'))
         per = mds[0].periodicity
         if start is None:
-            start = max([md.start for md in mds])
+            start = min([md.start for md in mds])
+        elif not isinstance(start, int):
+            start = per[start].start
         if stop is None:
-            stop = min([md.stop for md in mds])
+            stop = max([md.stop for md in mds])
+        elif not isinstance(stop, int):
+            stop = per[stop].start
         ary = np.full((stop - start,len(mds)), mds[0].type_.pad_value, order='F')
         p = self.connection.pipeline()
         offsets = [self._req(md, start, stop, p) for md in mds]

@@ -1,4 +1,5 @@
 import unittest
+import datetime
 import pandas as pd
 import numpy as np
 import pynto as pt
@@ -6,202 +7,226 @@ import pynto as pt
 def get_test_data():
     return pd.DataFrame(np.arange(12).astype('int64').reshape(3,4),columns=['a','b','c','d'],
                             index=pd.date_range('1/1/2019',periods=3,freq='B'))
-                            
+
 class TestRowIndexing(unittest.TestCase):
     def test_int_index(self):
         with self.subTest('Positive index'):
-            self.assertEqual(pt.f(*range(5)).rows[0].shape[0],1)
+            self.assertEqual(pt.c(*range(5)).rows[0].shape[0],1)
         with self.subTest('Negative index'):
-            self.assertEqual(pt.f(*range(5)).rows[-1].shape[0],2)
+            self.assertEqual(pt.c(*range(5)).rows[-1].shape[0],1)
+        with self.subTest('Date index'):
+            self.assertEqual(pt.c(*range(5)).rows['2024-05-02'].shape[0],1)
+        with self.subTest('Int range'):
+            self.assertEqual(pt.c(*range(5)).rows[2:5].shape[0],3)
+        with self.subTest('Int range neg'):
+            self.assertEqual(pt.c(*range(5)).rows[-5:-2].shape[0],3)
+        with self.subTest('Int range open start'):
+            self.assertEqual(pt.c(*range(5)).rows[:5].shape[0],5)
+        with self.subTest('Int range open stop'):
+            self.assertEqual(pt.c(*range(5)).rows[-5:].shape[0],5)
+        with self.subTest('Date range'):
+            self.assertEqual(pt.c(*range(5)).rows['2023-04-01':'2023-04-05'].shape[0],2)
+        with self.subTest('Date range pre epoque'):
+            self.assertEqual(pt.c(*range(5)).rows['1969-12-15':'1970-01-08'].shape[0],18)
+        with self.subTest('Date range open'):
+            self.assertEqual(pt.c(*range(5)).rows[:'1970-01-08'].shape[0],5)
+        with self.subTest('Specify per'):
+            self.assertEqual(pt.c(*range(5)).rows[:1:'M'].index[0].date(),datetime.date(1970,1,30))
 
 class TestColumnIndexing(unittest.TestCase):
     def test_int_index(self):
-        expr = pt.f(*range(5)).pull[0]
-        self.assertTrue(np.array_equal(expr.values[0], np.array([[1.,2., 3., 4., 0.]])))
+        a = pt.c(*range(5)).pull[0].values[0]
+        self.assertTrue(np.array_equal(a, np.array([[1.,2., 3., 4., 0.]])))
 
     def test_int_slice(self):
-        expr = pt.f(*range(5)).pull[0:2]
-        self.assertTrue(np.array_equal(expr.values[0], np.array([[2., 3., 4., 0., 1.]])))
-'''
-class TestRanges(unittest.TestCase):
-    def test_int_range(self):
-        expr = pt.c(5)
-        result = expr[-10]
-        self.assertEqual(result.shape[0], 10)
+        a = pt.c(*range(5)).pull[0:2].values[0]
+        self.assertTrue(np.array_equal(a, np.array([[2., 3., 4., 0., 1.]])))
 
-    def test_date_range(self):
-        expr = pt.c(5)
-        result = expr['2019-01-01':'2019-01-15']
-        self.assertEqual(result.shape[0], 10)
+    def test_copy(self):
+        a = pt.c(*range(5)).pull[2:4, True].values[0]
+        self.assertTrue(np.array_equal(a, np.array([[0., 1., 2., 3., 4., 2., 3.]])))
+
+    def test_discard(self):
+        a = pt.c(*range(5)).pull[2:4, False, True].values[0]
+        self.assertTrue(np.array_equal(a, np.array([[ 2., 3.]])))
+
+    def test_copy_safety(self):
+        a = pt.c(*range(5)).pull[2:4, True].neg.values[0]
+        self.assertEqual( a[0,3], 3.)
+
+    def test_header_filter(self):
+        a = pt.c(*range(5)).hset('a,b,c,d,e').pull['d'].values[0]
+        self.assertEqual( a[0,-1], 3.)
+
+    def test_header_filter_duplicate(self):
+        a = pt.c(*range(5)).hset('a,d,c,d,e').pull[['d'],False,True].rows[-1]
+        self.assertTrue(np.array_equal(a, np.array([[ 1., 3.]])))
+
+    def test_multiple_header_filter(self):
+        a = pt.c(*range(5)).hset('a,b,c,d,e').pull[['c','d'], True].values[0]
+        self.assertTrue(np.array_equal(a, np.array([[0., 1., 2., 3., 4., 2., 3.]])))
+
+    def test_combined_index(self):
+        a = pt.c(*range(5)).hset('a,d,c,d,e').pull[2:5][['d'],True].values[-1]
+        self.assertTrue(np.array_equal(a, np.array([[0., 1., 2., 3., 4., 3.]])))
+
+class TestOtherColumnIndexingWords(unittest.TestCase):
+    def test_drop(self):
+        a = pt.c(*range(5)).hset('a,d,c,d,e').drop['d'].rows[0]
+        self.assertTrue(np.array_equal(a, np.array([[0., 2., 4.]])))
+
+    def test_filter(self):
+        a = pt.c(*range(5)).hset('a,d,c,d,e').filter['d'].rows[0]
+        self.assertTrue(np.array_equal(a, np.array([[1., 3,]])))
+
+    def test_dup(self):
+        a = pt.c(*range(5)).hset('a,d,c,d,e').dup['d'].rows[0]
+        self.assertTrue(np.array_equal(a, np.array([[0., 1., 2., 3, 4., 1., 3.]])))
 
 class TestOperators(unittest.TestCase):
-    def test_add(self):
-        expr = pt.c(5).c(6).add
-        result = expr['2019-01-01'].iloc[0,0]
-        self.assertEqual(result, 11.)
+    def test_binary_add(self):
+        a = pt.c(*range(5)).add.values[0]
+        self.assertTrue(np.array_equal(a, np.array([[0., 1., 2., 7.]])))
 
-    def test_sub(self):
-        expr = pt.c(5).c(6).sub
-        result = expr['2019-01-01'].iloc[0,0]
-        self.assertEqual(result, -1.)
+    def test_cross_add(self):
+        a = pt.c(*range(5)).add[:].values[0]
+        self.assertTrue(np.array_equal(a, np.array([[10.]])))
 
-    def test_le(self):
-        expr = pt.c(5).c(6).le
-        result = expr['2019-01-01'].iloc[0,0]
-        self.assertEqual(result, 1.)
+    def test_rolling_add(self):
+        a = pt.c(*range(5)).wadd(3).values[0]
+        self.assertTrue(np.array_equal(a, np.array([[0., 1., 2., 3., 12.]])))
 
-    def test_ge(self):
-        expr = pt.c(5).c(6).ge
-        result = expr['2019-01-01'].iloc[0,0]
-        self.assertEqual(result, 0.)
+    def test_accumulate_add(self):
+        a = pt.c(*range(5)).sadd.values[-5:]
+        self.assertTrue(np.array_equal(a[-1], np.array([0., 1., 2., 3., 20.])))
 
-    def test_neg(self):
-        expr = pt.c(5).neg
-        result = expr['2019-01-01'].iloc[0,0]
-        self.assertEqual(result, -5.)
+    def test_unary(self):
+        a = pt.c(*range(5)).neg.values[0]
+        self.assertTrue(np.array_equal(a[-1], np.array([0., 1., 2., 3., -4.])))
 
-class TestPandas(unittest.TestCase):
-    def test_int_index(self):
-        expr = pt.pandas(get_test_data())
-        result = expr['2019-01-01'].iloc[0,0]
-        self.assertEqual(result, 0)
+    def test_rank(self):
+        df = pd.DataFrame(np.roll(np.arange(25),12).reshape((5,5)),
+                        index=pt.periods.Periodicity.B[:5].to_index(),
+                        columns=['a','b','c','d','e'])
+        a = pt.pandas(df).rank.values[:]
+        self.assertTrue(np.array_equal(a[2], np.array([3., 4., 0., 1., 2.])))
+        self.assertTrue(np.array_equal(a[3], np.array([0., 1., 2., 3., 4.])))
 
-    def test_date_index(self):
-        expr = pt.pandas(get_test_data())
-        result = expr['2019-01-01'].iloc[0,0]
-        self.assertEqual(result, 0)
 
-    def test_date_range(self):
-        expr = pt.pandas(get_test_data())
-        result = expr['2019-01-01':'2019-01-03']
-        self.assertEqual(result.shape[0], 2)
+class TestNullary(unittest.TestCase):
+    df = pd.DataFrame(np.roll(np.arange(25),12).reshape((5,5)),
+                        index=pt.periods.Periodicity.B[:5].to_index(),
+                        columns=['a','b','c','d','e'])
+    def test_pandas(self):
+        a = pt.pandas(self.df).values[:]
+        self.assertEqual(a.shape[0], 5)
+        self.assertEqual(a.shape[1], 5)
+
+    def test_dc(self):
+        a = pt.dc.values[:5]
+        self.assertTrue(np.array_equal(a.T, np.array([[1.,1.,3.,1.,1.]])))
 
 class TestStackManipulation(unittest.TestCase):
-    def test_pull(self):
-        expr = pt.pandas(get_test_data()).pull(2)
-        result = expr['2019-01-01'].iloc[0,-1]
-        self.assertEqual(result, 1)
 
     def test_interleave(self):
-        expr = pt.pandas(get_test_data()).interleave
-        result = expr['2019-01-01']
-        self.assertEqual(result.iloc[0,-2], 1)
-        
-    def test_hpull(self):
-        expr = pt.pandas(get_test_data()).hpull('b')
-        result = expr['2019-01-01']
-        self.assertEqual(result.iloc[0,-1], 1)
+        a = pt.c(*range(6)).interleave.values[0]
+        self.assertTrue(np.array_equal(a, np.array([[0.,3.,1.,4.,2.,5.]])))
 
 class TestCombinators(unittest.TestCase):
-    def test_single_quoted_word(self):
-        expr = pt.c(5).c(6).quote(pt.add).call
-        result = expr['2019-01-01'].iloc[0,-1]
+    def test_locals_quote(self):
+        result = pt.c5.c6.q(pt.add).call.rows['2019-01-01'].iloc[0,-1]
         self.assertEqual(result, 11)
 
-    def test_inline_quoted_word(self):
-        expr = pt.c(5).c(6).q.add.p.call
-        result = expr['2019-01-01'].iloc[0,-1]
+    def test_inline_quote(self):
+        result = pt.c(5).c(6).q.add.p.call.rows['2019-01-01'].iloc[0,-1]
         self.assertEqual(result, 11)
 
     def test_nested_quotes(self):
-        expr = pt.r9.q.q.sub(100).p.call(2).p.each(every=3)
-        result = expr[-1]
+        result = pt.c(*range(9)).q.q.c100.sub.p.call.p.map(every=3).rows[-1]
         self.assertTrue(np.array_equal(result.values[-1],[0,1.,-98,3,4,-95,6,7,-92]))
 
     def test_nested_mix(self):
-        expr = pt.r9.q.q(pt.sub(100)).call(2).p.each(every=3)
-        result = expr[-1]
+        result = pt.c(*range(9)).q.q(pt.c100.sub).call.p.map(every=3).rows[-1]
         self.assertTrue(np.array_equal(result.values[-1],[0,1.,-98,3,4,-95,6,7,-92]))
 
-    def test_multiple_quoted_words(self):
-        expr = pt.c(5).c(6).quote(pt.c(1).add).call
-        result = expr['2019-01-01'].iloc[0,-1]
-        self.assertEqual(result, 7)
-
-    def test_each(self):
-        expr = pt.c(5).c(6).quote(pt.c(1).add).each
-        result = expr['2019-01-01']
+    def test_map(self):
+        result = pt.c(5).c(6).q(pt.c(1).add).map.rows['2019-01-01']
         self.assertEqual(result.iloc[0,-1], 7)
         self.assertEqual(result.iloc[0,-2], 6)
 
-    def test_heach(self):
-        expr = pt.r10.hset('a,b,a,a,b,a,a,b').q.crossing.sum.p.heach.hsort
-        result = expr[-1]
-        self.assertTrue(np.array_equal(result.values[-1],[26.,18,1]))
+    def test_hmap(self):
+        result = pt.c(*range(10)).hset('a,b,a,a,b,a,a,b').q.add[:].p.hmap.hsort.values[-1]
+        self.assertTrue(np.array_equal(result[-1],[26.,18,1]))
 
     def test_ifexists(self):
-        expr = pt.r10.hset('a,b,a,a,b,a,a,b').q.q.mul(100).p.ifexists(3).crossing.sum.p.heach.hsort
-        result = expr[-1]
-        self.assertTrue(np.array_equal(result.values[-1],[818.,909,1]))
+        expr = pt.r10.hset('a,b,a,a,b,a,a,b').q.q.c100.mul.p.ifexists(3).add[:].p.hmap.hsort
+        result = expr.values[-1]
+        self.assertTrue(np.array_equal(result[-1],[818.,909,1]))
+
+    def test_ifexistselse(self):
+        expr = pt.r10.hset('a,b,a,a,b,a,a,b') \
+            .q.q.c100.div.p.q.c100.mul.p.ifexistselse(3).add[:].p.hmap.hsort
+        result = expr.values[-1]
+        self.assertTrue(np.array_equal(result[-1],[818.,909,.01]))
 
     def test_if(self):
-        expr = pt.r10.hset('a,b,a,a,b,a,a,b').q.q.mul(100).p.if_(lambda l: len(l) >= 3).crossing.sum.p.heach.hsort
-        result = expr[-1]
-        self.assertTrue(np.array_equal(result.values[-1],[818.,909,1]))
+        expr = pt.r10.hset('a,b,a,a,b,a,a,b') \
+            .q.q.c100.mul.p.ifheaders(lambda l: len(l) >= 3).add[:].p.hmap.hsort
+        result = expr.values[-1]
+        self.assertTrue(np.array_equal(result[-1],[818.,909,1]))
 
     def test_ifelse(self):
-        expr = pt.r10.hset('a,b,a,a,b,a,a,b').q.q.div(100).p.q.mul(100).p.ifelse(lambda l: len(l) >= 3).crossing.sum.p.heach.hsort
-        result = expr[-1]
-        self.assertTrue(np.array_equal(result.values[-1],[818.,909,.01]))
-
-    def test_each_with_copy(self):
-        expr = pt.c(5).c(6).quote(pt.c(1).add).each(copy=True)
-        result = expr['2019-01-01']
-        self.assertEqual(result.shape[1], 4)
+        expr = pt.r10.hset('a,b,a,a,b,a,a,b') \
+            .q.q.c100.div.p.q.c100.mul.p.ifheaderselse(lambda l: len(l) >= 3).add[:].p.hmap.hsort
+        result = expr.values[-1]
+        self.assertTrue(np.array_equal(result[-1],[818.,909,.01]))
 
     def test_cleave(self):
-        expr = pt.c(4).quote(pt.neg).quote(pt.sqrt).cleave(2)
-        result = expr['2019-01-01']
+        result = pt.c(4).q.neg.p.q.sqrt.p.cleave.rows[0]
         self.assertEqual(result.iloc[0,-1], 2)
         self.assertEqual(result.iloc[0,-2], -4)
 
 class TestHeaders(unittest.TestCase):
     def test_hset(self):
-        expr = pt.pandas(get_test_data()).hset('q','w','e','r')
-        result = expr['2019-01-01']
-        self.assertEqual(result.columns[1], 'w')
+        self.assertEqual(pt.r4.hset('q','w','e','r').columns[1], 'w')
+        self.assertEqual(pt.r6.hset('q','w','e','r').columns[1], 'c')
+
+    def test_halpha(self):
+        self.assertEqual(pt.r10.halpha.columns[1], 'b')
 
     def test_hformat(self):
-        expr = pt.pandas(get_test_data()).quote(pt.hformat('{0}x')).each
-        result = expr['2019-01-01']
-        self.assertEqual(result.columns[1], 'bx')
+        self.assertEqual(pt.r5.halpha.q.hformat('{0}x').p.map.columns[1], 'bx')
 
     def test_happly(self):
-        expr = pt.pandas(get_test_data()).quote(pt.happly(lambda h: h.upper())).each
-        result = expr['2019-01-01']
-
-class TestRolling(unittest.TestCase):
-    def test_sum(self):
-        expr = pt.pandas(get_test_data()).rolling.sum
-        result = expr['2019-01-01':'2019-01-04']
-        self.assertEqual(result.iloc[-1,-1], 18)
-
-class TestCrossing(unittest.TestCase):
-    def test_sum(self):
-        expr = pt.pandas(get_test_data()).crossing.sum
-        result = expr['2019-01-01':'2019-01-04']
-        self.assertEqual(result.iloc[-1,-1], 38)
+        self.assertEqual(pt.r5.halpha.q.happly(lambda h: h.upper()).p.map.columns[1], 'B')
 
 class TestDataCleanup(unittest.TestCase):
+    def test_join(self):
+        result = pt.c1.nan.join('1970-01-10').c3.join('1970-01-15').values[6:11]
+        self.assertTrue(np.array_equal(result.T[0],
+               [1.,np.nan,np.nan,np.nan,3.], equal_nan=True))
+
     def test_fill(self):
-        data = get_test_data().astype('d')
-        data.values[1,2] = np.nan
-        expr = pt.pandas(data).quote(pt.fill(0)).each
-        result = expr[data.index[0]:data.index[-1]]
-        self.assertEqual(result.iloc[1,2], 0)
+        result = pt.c1.nan.join('1970-01-10').c3.join('1970-01-15').fill(2).values[6:11]
+        self.assertTrue(np.array_equal(result.T[0],
+               [1.,2.,2.,2.,3.], equal_nan=True))
 
     def test_ffill(self):
-        data = get_test_data().astype('d')
-        data.values[1,2] = np.nan
-        expr = pt.pandas(data).quote(pt.ffill).each
-        result = expr['2019-01-01':'2019-01-04']
-        self.assertEqual(result.iloc[1,2], 2.)
+        result = pt.c1.nan.join('1970-01-10').c3.join('1970-01-15').ffill.values[6:11]
+        self.assertTrue(np.array_equal(result.T[0],
+               [1.,1.,1.,1.,3.], equal_nan=True))
 
-    def test_join_dates(self):
-        expr = pt.c(5).c(6).join('2019-01-05') 
-        result = expr['2019-01-01':'2019-01-15']
-        self.assertEqual(result.iloc[3,-1], 5)
-        self.assertEqual(result.iloc[4,-1], 6)
+    def test_ffill_leaveend(self):
+        result = pt.c1.nan.join('1970-01-10').c3.join('1970-01-13') \
+            .nan.join('1970-01-15').ffill(leave_end=True).values[6:11]
+        self.assertTrue(np.array_equal(result.T[0],
+               [1.,1.,3.,3.,np.nan], equal_nan=True))
+
+    def test_ffill_lookback(self):
+        df = pt.c1.nan.join('1970-01-10').c3.join('1970-01-13') \
+            .nan.join('1970-01-15').ffill.rows[6:11]
+        result = pt.pandas(df).ffill(leave_end=False).values[7:11]
+        self.assertTrue(np.array_equal(result.T[0], [1.,3.,3.,3.]))
 
 class DbTest(unittest.TestCase):
     @classmethod
@@ -217,79 +242,82 @@ class DbTest(unittest.TestCase):
 
 class FrameTest(DbTest):
     def setUp(self):
-        pt.db['test'] = pd.DataFrame(np.arange(12).astype('int64').reshape(3,4),columns=['a','b','c','d'],
-                            index=pd.date_range('1/1/2019',periods=3,freq='B'))
+        pt.db['test'] = pt.r10.halpha.rows[:5]
 
     def tearDown(self):
         del(pt.db['test'])
-        
-    def test_read(self):
-        f = pt.db['test']
-        self.assertEqual(f.shape[1], 4)
-        self.assertEqual(f.shape[0], 3)
-        self.assertEqual(f.sum().sum(), 66)
 
-    def test_append_row(self):
-        pt.db['test'] = pd.DataFrame(np.arange(4).astype('int64').reshape(1,4),columns=['a','b','c','d'],
-                            index=pd.date_range('1/4/2019',periods=1,freq='B'))
+    def test_read_frame(self):
         f = pt.db['test']
-        self.assertEqual(f.shape[1], 4)
-        self.assertEqual(f.shape[0], 4)
-        self.assertEqual(f.sum().sum(), 72)
+        self.assertEqual(f.shape[1], 10)
+        self.assertEqual(f.shape[0], 5)
+        self.assertEqual(f.sum().sum(), 225)
 
-    def test_append_col(self):
-        pt.db['test'] = pd.DataFrame(np.arange(3).astype('int64').reshape(3,1),columns=['e'],
-                            index=pd.date_range('1/1/2019',periods=3,freq='B'))
+    def test_read_range(self):
+        f = pt.db['test','1970-01-05':'1970-01-13']
+        self.assertEqual(f.shape[0], 6)
+
+    def test_read_column(self):
+        f = pt.db['test#b']
+        self.assertEqual(f.shape[1], 1)
+        self.assertEqual(f.shape[0], 5)
+        self.assertEqual(f.sum().sum(), 5)
+
+    def test_overwrite(self):
+        pt.db['test'] = pt.r10.rev.halpha.rows[:5]
         f = pt.db['test']
-        self.assertEqual(f.shape[1], 5)
-        self.assertEqual(f.shape[0], 3)
-        self.assertEqual(f.sum().sum(), 69)
+        self.assertEqual(f.values[0,0], 9.)
+
+    def test_append_rows(self):
+        pt.db['test'] = pt.r10.halpha.rows[5:10]
+        f = pt.db['test']
+        self.assertEqual(f.shape[1], 10)
+        self.assertEqual(f.shape[0], 10)
+
+    def test_append_cols(self):
+        pt.db['test'] = pt.r2.hset('k,l').rows[5:10]
+        f = pt.db['test']
+        self.assertEqual(f.shape[1], 12)
+        self.assertEqual(f.shape[0], 10)
+
+class IntTest(DbTest):
+    def setUp(self):
+        pt.db['test'] = pt.r10.halpha.rows[:5].astype(np.int64)
+
+    def tearDown(self):
+        del(pt.db['test'])
+
+    def test_read_frame(self):
+        f = pt.db['test']
+        self.assertEqual(f.shape[1], 10)
+        self.assertEqual(f.shape[0], 5)
+        self.assertEqual(f.values.dtype, np.int64)
+
+class BoolTest(DbTest):
+    def setUp(self):
+        pt.db['test'] = pt.r10.halpha.rows[:5].astype(np.bool)
+
+    def tearDown(self):
+        del(pt.db['test'])
+
+    def test_read_frame(self):
+        f = pt.db['test']
+        self.assertEqual(f.shape[1], 10)
+        self.assertEqual(f.shape[0], 5)
+        self.assertEqual(f.values.dtype, np.bool)
 
 class SeriesTest(DbTest):
     def setUp(self):
-        pt.db['test'] = pd.Series(np.arange(3).astype('int64'), index=pd.date_range('1/1/2019',periods=3,freq='B'))
+        pt.db['test'] = pt.r10.halpha.rows[:5].iloc[:,0]
 
     def tearDown(self):
         del(pt.db['test'])
-        
+
     def test_read(self):
-        s = pt.db['test']
-        self.assertEqual(len(s), 3)
-        self.assertEqual(s.sum(), 3)
+        f = pt.db['test']
+        self.assertEqual(f.shape[1], 1)
+        self.assertEqual(f.shape[0], 5)
 
-    def test_read_before(self):
-        s = pt.db.read('test', '2018-12-31')
-        self.assertEqual(len(s), 4)
-        self.assertEqual(s.iloc[0], 0)
-
-    def test_read_after(self):
-        s = pt.db.read('test', stop='2019-01-05')
-        self.assertEqual(len(s), 4)
-        self.assertEqual(s.iloc[-1], 0)
-
-    def test_append(self):
-        pt.db['test'] = pd.Series(np.arange(3).astype('int64'), index=pd.date_range('1/4/2019',periods=3,freq='B'))
-        s = pt.db['test']
-        self.assertEqual(len(s), 6)
-        self.assertEqual(s.sum(), 6)
-
-    def test_append_with_pad(self):
-        pt.db['test'] = pd.Series(np.arange(3).astype('int64'), index=pd.date_range('1/5/2019',periods=3,freq='B'))
-        s = pt.db['test']
-        self.assertEqual(len(s), 7)
-        self.assertEqual(s.sum(), 6)
-
-    def test_replace(self):
-        pt.db['test'] = pd.Series(10, index=pd.date_range('1/2/2019',periods=1,freq='B'))
-        s = pt.db['test']
-        self.assertEqual(len(s), 3)
-        self.assertEqual(s.sum(), 12)
-
-    def test_prepend(self):
-        pt.db['test'] = pd.Series(np.arange(3).astype('int64'), index=pd.date_range('12/31/2018',periods=3,freq='B'))
-        s = pt.db['test']
-        self.assertEqual(len(s), 3)
-        self.assertEqual(s.sum(), 3)
 
 class MultiIndexFrameTest(DbTest):
 
@@ -309,7 +337,6 @@ class MultiIndexFrameTest(DbTest):
         pt.db['test'] = pd.DataFrame(np.arange(75).astype('int64').reshape(25,3),columns=['a','b','c'], index=index)
         f = pt.db['test']
         f.loc['2019-01-07'].shape == (5,3)
- '''
 
 if __name__ == '__main__':
     unittest.main()
