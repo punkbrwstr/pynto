@@ -3,7 +3,6 @@ import re
 import copy
 import warnings
 import numbers
-import uuid
 import string
 import itertools
 import datetime
@@ -11,15 +10,14 @@ import numpy as np
 import numpy.ma as ma
 import pandas as pd
 import traceback
-from . import database as db
 from collections import deque
 from dataclasses import dataclass, field
 from functools import partial,reduce
 from operator import add
 from typing import Callable, Any
 from . import tools
+from . import database as db
 from .periods import Range, Periodicity, datelike
-
 
 
 @dataclass(repr=False)
@@ -197,9 +195,13 @@ class Word:
             for i in selected:
                 if current.copy_selected:
                     stack[i].references[0] += 1
+                    c = copy.copy(stack[i])
+                    c.siblings.append(stack[i])
+                    stack[i].siblings.append(c)
+                    current_stack.append(c)
                 else:
                     to_delete.add(i)
-                current_stack.append(stack[i])
+                    current_stack.append(stack[i])
             if current.discard_excluded:
                 to_delete.update(set(range(len(stack))) - set(selected))
             for i in sorted(to_delete, reverse=True):
@@ -349,7 +351,6 @@ class Rows:
                 rows, cols = len(col.range_), len(col.siblings)
                 shape = (rows, cols) if cols else rows
                 col.values = np.empty(shape, order='F')
-                #col.check_child_ranges()
             if not col.calculated:
                 col.calculate()
                 col.set_calculated()
@@ -495,9 +496,12 @@ class Saved(Word):
 # Quotation / combinator words
 class Quotation(Word):
     def __call__(self, quoted: Word | None = None) -> Word:
-        this = self.copy_expression()
-        this.quoted = quoted
-        return this
+        if quoted is None:
+            return self
+        else:
+            this = self.copy_expression()
+            this.quoted = quoted
+            return this
 
     def __add__(self, other: Word, copy_addend: bool = True) -> Word:
         if not hasattr(self, 'quoted') or self.quoted is None:
@@ -505,7 +509,6 @@ class Quotation(Word):
         return super().__add__(other, copy_addend)
 
     def operate(self, stack: list[Column]) -> None:
-        print(self.quoted)
         raise TypeError('Quotation must be pared with a combinator for evalutation')
 
 class Combinator(Word):
@@ -795,7 +798,7 @@ class ReductionColumn(Column):
     def calculate(self) -> None:
         operands = np.concatenate([col.values for col in self.children]) \
                         .reshape((len(self.range_),len(self.children)),order='F')
-        self.operation.reduce(operands, out=self.values, axis=1)
+        self.operation(operands, out=self.values, axis=1)
 
 class ReductionOperator(Operator):
     def __init__(self, name: str, operation: np.ufunc):
@@ -808,7 +811,36 @@ class ReductionOperator(Operator):
                     operation=self.operation,
                     children=children))
 
-class RollingOperator(Operator):
+@dataclass(kw_only=True)
+class RollingUFuncColumn(Column):
+    operation: np.ufunc
+    window: int
+
+    def set_range(self, range_: Range) -> None:
+        self.range_ = range_
+        child_range = self.range_.expand(int(-self.window * 1.25))
+        for col in self.children:
+            col.set_range(child_range)
+
+    def calculate(self) -> None:
+        operands = np.concatenate([col.values for col in self.children]) \
+                        .reshape((len(self.children[0].range_),len(self.children)),order='F')
+        lookback = int(self.window * 1.25)
+        expanded = self.children[0].values
+        mask = ~np.isnan(expanded)
+        no_nans = expanded[mask]
+        indexes = np.add.accumulate(np.where(mask))[0]
+        if no_nans.shape[-1] - self.window < 0:
+            #warnings.warn('Insufficient non-nan values in lookback.')
+            no_nans = np.hstack([np.full(self.window - len(no_nans),np.nan),no_nans])
+        shape = no_nans.shape[:-1] + (no_nans.shape[-1] - self.window + 1, self.window)
+        strides = no_nans.strides + (no_nans.strides[-1],)
+        windows = np.lib.stride_tricks.as_strided(no_nans, shape=shape, strides=strides)
+        td = np.full((expanded.shape[0],self.window), np.nan)
+        td[indexes[-windows.shape[0]:],:] = windows
+        self.operation(td[lookback:,::-1], out=self.values, axis=1)
+
+class RollingUFuncOperator(Operator):
     def __init__(self, name: str, operation: np.ufunc):
         super().__init__(name, operation, slice(-1,None))
 
@@ -837,7 +869,7 @@ class ScanOperator(Operator):
         siblings = []
         for i, col in enumerate(children):
             siblings.append(UnaryOperatorColumn(col.header,
-                        operation=self.operation.accumulate,
+                        operation=self.operation,
                         children=children,
                         values_cache=values_cache,
                         siblings=siblings,
@@ -845,35 +877,6 @@ class ScanOperator(Operator):
                         reverse=not self.ascending))
         stack.extend(siblings)
 
-
-@dataclass(kw_only=True)
-class RollingColumn(Column):
-    operation: np.ufunc
-    window: int
-
-    def set_range(self, range_: Range) -> None:
-        self.range_ = range_
-        child_range = self.range_.expand(int(-self.window * 1.25))
-        for col in self.children:
-            col.set_range(child_range)
-
-    def calculate(self) -> None:
-        operands = np.concatenate([col.values for col in self.children]) \
-                        .reshape((len(self.children[0].range_),len(self.children)),order='F')
-        lookback = int(self.window * 1.25)
-        expanded = self.children[0].values
-        mask = ~np.isnan(expanded)
-        no_nans = expanded[mask]
-        indexes = np.add.accumulate(np.where(mask))[0]
-        if no_nans.shape[-1] - self.window < 0:
-            #warnings.warn('Insufficient non-nan values in lookback.')
-            no_nans = np.hstack([np.full(self.window - len(no_nans),np.nan),no_nans])
-        shape = no_nans.shape[:-1] + (no_nans.shape[-1] - self.window + 1, self.window)
-        strides = no_nans.strides + (no_nans.strides[-1],)
-        windows = np.lib.stride_tricks.as_strided(no_nans, shape=shape, strides=strides)
-        td = np.full((expanded.shape[0],self.window), np.nan)
-        td[indexes[-windows.shape[0]:],:] = windows
-        self.operation.reduce(td[lookback:,::-1], out=self.values, axis=1)
 
 class UnaryOperator(Operator):
     def __init__(self, name: str,
@@ -982,8 +985,16 @@ class HeaderSet(Word):
     def operate(self, stack: list[Column]) -> None:
         start = len(stack) - len(self.headers)
         for i in range(start,len(stack)):
-            header = self.headers[i - start]
-            stack[i].header = header
+            stack[i].header = self.headers[i - start]
+
+class HeaderSetAll(Word):
+    def __call__(self, *headers: str) -> Word:
+        self.headers = headers[0].split(',') if len(headers) == 1 else headers
+        return super().__call__()
+
+    def operate(self, stack: list[Column]) -> None:
+        for i in np.arange(len(stack)) - len(stack):
+            stack[i].header = self.headers[i % len(self.headers)]
 
 class HeaderFormat(Word):
     def __call__(self, format_spec: str) -> Word:
@@ -1023,7 +1034,6 @@ class HeaderAlphabetize(Word):
         for col in stack:
             col.header = next(gen)
 
-
 def zero_first_op(x: np.ndarray, out: np.ndarray) -> None:
     out[1:] = x
     out[0] = 0.0
@@ -1033,6 +1043,36 @@ def zero_to_na_op(x: np.ndarray, out: np.ndarray) -> None:
 
 def is_na_op(x: np.ndarray, out: np.ndarray) -> None:
     out[:] = np.where(np.isnan(x), 1, 0)
+
+def expanding_mean(x: np.ndarray, out: np.ndarray) -> None:
+    nan_mask: npt.NDArray[np.bool] = np.isnan(x)
+    cumsum: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x))
+    count: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x / x))
+    out[:] = np.where(nan_mask, np.nan, cumsum) / count
+
+def expanding_var(x: np.ndarray, out: np.ndarray) -> None:
+    nan_mask: npt.NDArray[np.bool] = np.isnan(x)
+    cumsum: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x))
+    cumsumOfSquares: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x * x))
+    count: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x / x))
+    out[:] = (cumsumOfSquares - cumsum * cumsum / count) / (count - 1)
+
+def expanding_std(x: np.ndarray, out: np.ndarray) -> None:
+    nan_mask = np.isnan(x)
+    cumsum = np.add.accumulate(np.where(nan_mask, 0, x))
+    cumsumOfSquares = np.add.accumulate(np.where(nan_mask, 0, x * x))
+    count = np.add.accumulate(np.where(nan_mask, 0, x / x))
+    out[:] = np.sqrt((cumsumOfSquares - cumsum * cumsum / count) / (count - 1))
+
+
+def rolling_covariance(data, window_size):
+    mean1 = np.convolve(data[:, 0], np.ones(window_size), 'valid') / window_size
+    mean2 = np.convolve(data[:, 1], np.ones(window_size), 'valid') / window_size
+    cov = np.convolve((data[:, 0] - mean1) * (data[:, 1] - mean2), \
+                      np.ones(window_size), 'valid') / window_size
+    return cov
+
+
 
 vocab: dict[str, tuple[str,str,Callable[[str],Word]]] = {}
 
@@ -1048,7 +1088,8 @@ vocab['pandas'] = (cat,'Pushes columns from Pandas DataFrame or Series _pandas_'
 
 cat = 'Stack Manipulation'
 vocab['pull'] = (cat, 'Brings selected columns to the top', lambda name: Word(name))
-vocab['dup'] = (cat, 'Duplicates columns', lambda name: Word(name, copy_selected=True))
+vocab['dup'] = (cat, 'Duplicates columns',
+                lambda name: Word(name, slice_=slice(-1,None), copy_selected=True))
 vocab['filter'] = (cat, 'Removes non-select columns', lambda name: Word(name, discard_excluded=True))
 vocab['drop'] = (cat, 'Removes selected columns',
              lambda name: Word(name, inverse_selection=True, discard_excluded=True, copy_selected=False))
@@ -1062,11 +1103,12 @@ vocab['q'] = ('Quotation', 'Wraps the following words until *p* as a quotation, 
               + 'wraps _quoted_ expression as a quotation', Quotation)
 
 cat = 'Header manipulation'
-vocab['hset'] = ('cat', 'Set headers to _*headers_ ', HeaderSet)
-vocab['hformat'] = ('cat' 'Apply _format_spec_ to headers', HeaderFormat)
-vocab['hreplace'] = ('cat' 'Replace _old_ with _new_ in headers', HeaderReplace)
-vocab['happly'] = ('cat' 'Apply _header_func_ to headers_', HeaderApply)
-vocab['halpha'] = ('cat' 'Set headers to alphabetical values', HeaderAlphabetize)
+vocab['hset'] = (cat, 'Set headers to _*headers_ ', HeaderSet)
+vocab['hsetall'] = (cat, 'Set headers to _*headers_ repeating, if necessary', HeaderSetAll)
+vocab['hformat'] = (cat, 'Apply _format_spec_ to headers', HeaderFormat)
+vocab['hreplace'] = (cat, 'Replace _old_ with _new_ in headers', HeaderReplace)
+vocab['happly'] = (cat, 'Apply _header_func_ to headers_', HeaderApply)
+vocab['halpha'] = (cat, 'Set headers to alphabetical values', HeaderAlphabetize)
 
 cat = 'Combinators'
 vocab['call'] = (cat, 'Applies quotation',Call)
@@ -1093,7 +1135,7 @@ vocab['zero_to_na'] = (cat, 'Changes zeros to nans',lambda name: UnaryOperator(n
 vocab['resample'] = (cat, 'Adapts periodicity to match range with optional rounding _round_',Resample)
 vocab['per'] = (cat, 'Changes periodicity to _periodicity_', SetPeriodicity)
 
-_binary_ops = [('add',  'Addition', np.add),
+_ufuncs = [('add',  'Addition', np.add),
     ('sub',  'Subtraction', np.subtract), ('mul',  'Multiplication', np.multiply),
     ('div',  'Division', np.divide), ('pow',  'Power', np.power),
     ('mod',  'Modulo', np.mod), ('eq',  'Equals', np.equal),
@@ -1102,11 +1144,23 @@ _binary_ops = [('add',  'Addition', np.add),
     ('le',  'Less than or equal to', np.less_equal), ('land',  'Logical and', np.logical_and),
     ('lor', 'Logical or', np.logical_or), ('lxor',  'Logical xor', np.logical_xor)]
 
-for code, desc, func in _binary_ops:
-    vocab[code] = ('Row-wise Reduction ', desc, lambda name, func=func: ReductionOperator(name, func))
-    vocab[f'w{code}'] = ('Rolling Window', desc, lambda name, func=func: RollingOperator(name, func))
-    vocab[f's{code}'] = ('Scan/Accumulation', desc, lambda name, func=func: ScanOperator(name, func))
-
+for code, desc, func in _ufuncs:
+    vocab[code] = ('Row-wise Reduction', desc,
+                    lambda name, func=func.reduce: ReductionOperator(name, func))
+    vocab[f'w{code}'] = ('Rolling Window', desc,
+                     lambda name, func=func.reduce: RollingUFuncOperator(name, func))
+    vocab[f's{code}'] = ('Scan/Accumulation', desc,
+                     lambda name, func=func.accumulate: ScanOperator(name, func))
+_funcs = [('mean',  'Arithmetic average', np.nanmean, expanding_mean),
+            ('std',  'Standard deviation', np.nanmean, expanding_mean),
+            ('var',  'Variance', np.nanmean, expanding_mean)]
+for code, desc, func, scan_func in _funcs:
+    vocab[code] = ('Row-wise Reduction', desc,
+                    lambda name, func=func: ReductionOperator(name, func))
+    vocab[f'w{code}'] = ('Rolling Window', desc,
+                     lambda name, func=func: RollingUFuncOperator(name, func))
+    vocab[f's{code}'] = ('Scan/Accumulation', desc,
+                     lambda name, func=scan_func: ScanOperator(name, func))
 
 cat = 'Other functions'
 vocab['neg'] = (cat, 'Additive inverse',lambda name: UnaryOperator(name,np.negative))
@@ -1117,10 +1171,12 @@ vocab['log'] = (cat, 'Natural log',lambda name: UnaryOperator(name,np.log))
 vocab['exp'] = (cat, 'Exponential',lambda name: UnaryOperator(name,np.exp))
 vocab['lnot'] = (cat, 'Logical not',lambda name: UnaryOperator(name, np.logical_not))
 vocab['expm1'] = (cat, 'Exponential minus one',lambda name: UnaryOperator(name,np.expm1))
-vocab['log1p'] = (cat, 'Natural log of increment',lambda name: UnaryBinaryOperator(name,np.log1p))
+vocab['log1p'] = (cat, 'Natural log of increment',lambda name: UnaryOperator(name,np.log1p))
 vocab['sign'] = (cat, 'Sign',lambda name: UnaryOperator(name, np.sign))
 vocab['rank'] = (cat, 'Row-wise rank',lambda name: UnaryOperator(name, rank, slice_=slice(None)))
 vocab['ewma'] = (cat, 'Exponentially weighted moving average with half-life of _window_', EWMA)
+
+
 
 def resolve(name: str, throw_exception: bool = True) -> Word | None:
     if re.match(r'c\d[_\d]*',name) is not None:
@@ -1136,3 +1192,4 @@ def resolve(name: str, throw_exception: bool = True) -> Word | None:
             raise NameError(f"name '{name}' is not defined")
         else:
             return 
+

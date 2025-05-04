@@ -7,7 +7,7 @@ _Expressions_ are made by chaining together functions called _words_.  When an _
 ## What does it look like?
 ```
 >>> import pynto as pt 
->>> ma_dev = pt.db('stock_prices') \            # define an expression that appends columns from the build-in database
+>>> ma_dev = pt.saved('stock_prices') \            # define an expression that appends columns from the build-in database
 >>>     .q.dup.rolling(20).mean.sub.p \         # append a quoted expression to the stack
 >>>     .map                                    # use the map combinator to apply the quotation to the previous columns
 >>> df = ma_dev['2021-06-01':]                  # evaluate your expression over a date range to get a DataFrame

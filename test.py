@@ -43,8 +43,11 @@ class TestColumnIndexing(unittest.TestCase):
         self.assertTrue(np.array_equal(a, np.array([[2., 3., 4., 0., 1.]])))
 
     def test_copy(self):
-        a = pt.c(*range(5)).pull[2:4, True].values[0]
-        self.assertTrue(np.array_equal(a, np.array([[0., 1., 2., 3., 4., 2., 3.]])))
+        a = pt.c(*range(5)).pull[2:4, True].halpha.neg.rows[0]
+        self.assertTrue(np.array_equal(a.values, np.array([[0., 1., 2., 3., 4., 2., -3.]])))
+        self.assertEqual(a.columns[-1], 'g')
+        self.assertEqual(a.columns[-2], 'f')
+
 
     def test_discard(self):
         a = pt.c(*range(5)).pull[2:4, False, True].values[0]

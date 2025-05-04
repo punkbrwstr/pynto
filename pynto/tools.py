@@ -2,27 +2,29 @@ from typing import Union
 import numpy as np
 import numpy.typing as npt
 
+
+
 _ary64 = npt.NDArray[np.float64]
 
-def expanding_mean(x: np.ndarray, _: int) -> np.ndarray:
+def expanding_mean(x: np.ndarray, out: np.ndarray) -> None:
     nan_mask: npt.NDArray[np.bool] = np.isnan(x)
     cumsum: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x))
     count: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x / x))
-    return np.where(nan_mask, np.nan, cumsum) / count
+    out[:] = np.where(nan_mask, np.nan, cumsum) / count
 
-def expanding_var(x: np.ndarray, _: int) -> np.ndarray:
+def expanding_var(x: np.ndarray, out: np.ndarray) -> None:
     nan_mask: npt.NDArray[np.bool] = np.isnan(x)
     cumsum: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x))
     cumsumOfSquares: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x * x))
     count: _ary64 = np.add.accumulate(np.where(nan_mask, 0, x / x))
-    return (cumsumOfSquares - cumsum * cumsum / count) / (count - 1)
+    out[:] = (cumsumOfSquares - cumsum * cumsum / count) / (count - 1)
 
-def expanding_std(x: np.ndarray, _: int) -> np.ndarray:
+def expanding_std(x: np.ndarray, out: np.ndarray) -> None:
     nan_mask = np.isnan(x)
     cumsum = np.add.accumulate(np.where(nan_mask, 0, x))
     cumsumOfSquares = np.add.accumulate(np.where(nan_mask, 0, x * x))
     count = np.add.accumulate(np.where(nan_mask, 0, x / x))
-    return np.sqrt((cumsumOfSquares - cumsum * cumsum / count) / (count - 1))
+    out[:] = np.sqrt((cumsumOfSquares - cumsum * cumsum / count) / (count - 1))
 
 def ewma(data: np.ndarray, alpha: float) -> np.ndarray:
 
