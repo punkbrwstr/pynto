@@ -7,6 +7,7 @@ import string
 import itertools
 import datetime
 import numpy as np
+import bottleneck as bn
 import numpy.ma as ma
 import pandas as pd
 import traceback
@@ -29,7 +30,7 @@ class Column:
     children: list[Column] = field(default_factory=list)
     siblings: list[Column] = field(default_factory=list)
     sibling_ordinal: int = 0
-    calculated: bool = False
+    #calculated: set[Range] = field(default_factory=set)
 
     def calculate(self) -> None:
         pass
@@ -51,19 +52,35 @@ class Column:
         for col in self.children:
             col.set_range(range_)
 
-    def set_calculated(self) -> None:
-        self.calculated = True
-        for col in self.siblings:
-            col.calculated = True
+    @property
+    def calculated(self) -> bool:
+        self.range_ in self.values_cache
 
+    #def set_calculated(self) -> None:
+        #self.calculated.add(self.range_)
+        #for col in self.siblings:
+            #col.calculated = True
 
     def get_bounds(self) -> tuple[datetime.date,datetime.date,Periodicity] | None:
         return None
 
     def check_child_ranges(self) -> None:
         pass
-       # for col in self.children:
-       #     assert col.range_ == self.range_, 'Mismatching child range'
+
+    def __copy__(self):
+        print(f'copy {str(id(self))[-4:]}[{self.references[0]}]')
+        self.references[0] += 1
+        copied = copy.copy(super())
+        print(f'copy {str(id(self))[-4:]}[{self.references[0]}] to {str(id(copied))[-4:]}')
+        copied.siblings = []
+        copied.siblings.extend(self.siblings)
+        copied.siblings.append(self)
+        self.siblings.append(copied)
+        copied.children = []
+        for child in self.children:
+            print(f'copy child {str(id(child))[-4:]}')
+            copied.children.append(copy.copy(child))
+        return copied
 
 
 class Word:
@@ -194,10 +211,7 @@ class Word:
             to_delete = set()
             for i in selected:
                 if current.copy_selected:
-                    stack[i].references[0] += 1
                     c = copy.copy(stack[i])
-                    c.siblings.append(stack[i])
-                    stack[i].siblings.append(c)
                     current_stack.append(c)
                 else:
                     to_delete.add(i)
@@ -290,6 +304,18 @@ class Word:
         s = 'pt.' + s
         return s
 
+def pc(c, n):
+    print(f'{' '*n}{str(id(c))[-4:]}-{str(id(c.values_cache))[-4:]}-{c.references}')
+def ps(stack):   
+    for c in stack:
+        pc(c, 4)
+        print((' ' * 8) + 'childs')
+        for c2 in c.children:
+            pc(c2, 8)
+        print((' ' * 8) + 'sibs')
+        for c2 in c.siblings:
+            pc(c2, 8)
+
 class Rows:
     def __init__(self, word: Word, values_only: bool = False):
         self.word = word
@@ -301,6 +327,8 @@ class Rows:
         min_, max_, per = None, None, None
         working = stack[:]
         flat = []
+        print('stack')
+        ps(stack)
         while working:
             col = working.pop()
             bounds = col.get_bounds()
@@ -313,6 +341,8 @@ class Rows:
             flat.append(col)
             working.extend(col.children)
         flat.reverse()
+        print('flat')
+        ps(flat)
         p = Periodicity[key.step] if hasattr(key, 'step') and key.step \
             else per if per else Periodicity.B
         if isinstance(key, Range):
@@ -344,6 +374,7 @@ class Rows:
                 if col.values is None and child.references[0] == 0 \
                     and col.range_ == child.range_ \
                     and len(col.siblings) == 0:
+                    print(f'reassign {str(id(child.values_cache))[-4:]} to {str(id(col.values_cache))[-4:]}') 
                     col.values = child.values
             if not col.range_: # unused col
                 continue
@@ -351,9 +382,11 @@ class Rows:
                 rows, cols = len(col.range_), len(col.siblings)
                 shape = (rows, cols) if cols else rows
                 col.values = np.empty(shape, order='F')
+                print(f'assign {str(id(col.values_cache))[-4:]}') 
+                print(col.values_cache)
             if not col.calculated:
                 col.calculate()
-                col.set_calculated()
+                #col.set_calculated()
             col.children.clear()
         for i, col in enumerate(stack):
             assert col.range_ == range_, \
@@ -786,23 +819,20 @@ class Join(Word):
         stack.append(JoinColumn(stack[-2].header, date=self.date,
                                 children=[stack.pop(-2),stack.pop()]))
 
-class Operator(Word):
-    def __init__(self, name: str, operation: np.ufunc, slice_: slice):
-        self.operation = operation
-        super().__init__(name, slice_)
-
 @dataclass(kw_only=True)
 class ReductionColumn(Column):
-    operation: np.ufunc
+    operation: Callable[[np.ndarray], np.ndarray]
 
     def calculate(self) -> None:
         operands = np.concatenate([col.values for col in self.children]) \
                         .reshape((len(self.range_),len(self.children)),order='F')
-        self.operation(operands, out=self.values, axis=1)
+        # axis=1
+        self.values = self.operation(operands)
 
-class ReductionOperator(Operator):
-    def __init__(self, name: str, operation: np.ufunc):
-        super().__init__(name, operation, slice(-2, None))
+class Reduction(Word):
+    def __init__(self, name: str, operation: Callable[[np.ndarray, np.ndarray], None]):
+        self.operation = operation
+        super().__init__(name, slice(-2, None))
 
     def operate(self, stack: list[Column]) -> None:
         children = [*stack]
@@ -811,6 +841,46 @@ class ReductionOperator(Operator):
                     operation=self.operation,
                     children=children))
 
+@dataclass(kw_only=True)
+class RollingColumn(Column):
+    operation: Callable[[np.ndarray, int], np.ndarray]
+    window: int
+
+    def set_range(self, range_: Range) -> None:
+        self.range_ = range_
+        child_range = self.range_.expand(int(-self.window * 1.25))
+        for col in self.children:
+            col.set_range(child_range)
+
+    def calculate(self) -> None:
+        data = self.children[0].values
+        print(data)
+        print(self.values)
+        lookback = int(self.window * 1.25)
+        mask = ~np.isnan(data)
+        idx = np.where(mask)[0]
+        start = np.where(idx >= lookback)[0][0]
+        self.values[(idx - lookback)[start:]] = self.operation(data[mask], self.window)[start:]
+        idx_nan = np.where(~mask)[0]
+        nan_start = np.where(idx_nan >= lookback)[0][0]
+        self.values[(idx_nan - lookback)[nan_start:]] = np.nan
+
+class Rolling(Word):
+    def __init__(self, name: str, operation: np.ufunc):
+        self.operation = operation
+        super().__init__(name, slice_=slice(-1,None))
+
+    def __call__(self, window: int = 2) -> Word:
+        return super().__call__(locals())
+
+    def operate(self, stack: list[Column]) -> None:
+        children = [*stack]
+        stack.clear()
+        for col in children:
+            stack.append(RollingColumn(col.header, operation=self.operation,
+                        children=[col], window=self.window))
+
+'''
 @dataclass(kw_only=True)
 class RollingUFuncColumn(Column):
     operation: np.ufunc
@@ -823,15 +893,12 @@ class RollingUFuncColumn(Column):
             col.set_range(child_range)
 
     def calculate(self) -> None:
-        operands = np.concatenate([col.values for col in self.children]) \
-                        .reshape((len(self.children[0].range_),len(self.children)),order='F')
         lookback = int(self.window * 1.25)
         expanded = self.children[0].values
         mask = ~np.isnan(expanded)
         no_nans = expanded[mask]
         indexes = np.add.accumulate(np.where(mask))[0]
         if no_nans.shape[-1] - self.window < 0:
-            #warnings.warn('Insufficient non-nan values in lookback.')
             no_nans = np.hstack([np.full(self.window - len(no_nans),np.nan),no_nans])
         shape = no_nans.shape[:-1] + (no_nans.shape[-1] - self.window + 1, self.window)
         strides = no_nans.strides + (no_nans.strides[-1],)
@@ -839,72 +906,38 @@ class RollingUFuncColumn(Column):
         td = np.full((expanded.shape[0],self.window), np.nan)
         td[indexes[-windows.shape[0]:],:] = windows
         self.operation(td[lookback:,::-1], out=self.values, axis=1)
+        '''
 
-class RollingUFuncOperator(Operator):
-    def __init__(self, name: str, operation: np.ufunc):
-        super().__init__(name, operation, slice(-1,None))
-
-    def __call__(self, window: int = 2) -> Word:
-        return super().__call__(locals())
-
-    def operate(self, stack: list[Column]) -> None:
-        children = [*stack]
-        stack.clear()
-        for col in children:
-            stack.append(RollingColumn(col.header,
-                    operation=self.operation, children=[col],
-                    window=self.window))
-
-class ScanOperator(Operator):
-    def __init__(self, name: str, operation: np.ufunc):
-        super().__init__(name, operation, slice(-1,None))
+class NonReduceFunction(Word):
+    def __init__(self, name: str,
+                    operation: Callable[[np.ndarray,np.ndarray],None],
+                    slice_ = slice(-1, None), ascending: bool = True):
+        self.ascending = ascending
+        self.operation = operation
+        super().__init__(name, slice_)
 
     def __call__(self, ascending: bool = True) -> Word:
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
-        children = [*stack]
-        stack.clear()
-        values_cache = {}
-        siblings = []
-        for i, col in enumerate(children):
-            siblings.append(UnaryOperatorColumn(col.header,
-                        operation=self.operation,
-                        children=children,
-                        values_cache=values_cache,
-                        siblings=siblings,
-                        sibling_ordinal=i,
-                        reverse=not self.ascending))
-        stack.extend(siblings)
-
-
-class UnaryOperator(Operator):
-    def __init__(self, name: str,
-                    operation: np.ufunc | Callable[[np.ndarray,np.ndarray],None],
-                    slice_ = slice(-1, None),
-                    reverse: bool = False):
-        self.reverse = reverse
-        super().__init__(name, operation, slice_)
-
-    def operate(self, stack: list[Column]) -> None:
         values_cache = {}
         siblings = []
         children = [*stack]
         stack.clear()
         for i, col in enumerate(children):
-            siblings.append(UnaryOperatorColumn(col.header,
+            siblings.append(NonReduceFunctionColumn(col.header,
                         operation=self.operation,
                         children=children,
                         values_cache=values_cache,
                         siblings=siblings,
                         sibling_ordinal=i,
-                        reverse=self.reverse))
+                        ascending=self.ascending))
         stack.extend(siblings)
 
 @dataclass(kw_only=True)
-class UnaryOperatorColumn(Column):
-    operation: np.ufunc | Callable[[np.ndarray,np.ndarray],None]
-    reverse: bool = False
+class NonReduceFunctionColumn(Column):
+    operation: Callable[[np.ndarray,np.ndarray],None]
+    ascending: bool = True
 
     def calculate(self) -> None:
         if len(self.children) > 1:
@@ -912,10 +945,9 @@ class UnaryOperatorColumn(Column):
                         .reshape((len(self.range_),len(self.children)),order='F')
         else:
             operands = self.children[0].values[:,np.newaxis]
-        if not self.reverse:
-            self.operation(operands, out=self.values_cache[self.range_])
-        else:
-            self.operation(operands[::-1], out=self.values_cache[self.range_])
+        if not self.ascending:
+            operands = operands[::-1]
+        self.operation(operands, out=self.values_cache[self.range_])
 
 
 def rank(inputs: np.ndarray, out: np.ndarray) -> None:
@@ -939,7 +971,7 @@ class EWMA(Word):
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
-        stack.append(UnaryOperatorColumn(self.name,
+        stack.append(NonReduceFunctionColumn(self.name,
                         operation=partial(ewma_calc, window=self.window),
                         fill_nans=self.fill_nans, children=[stack.pop()]))
 
@@ -1064,14 +1096,35 @@ def expanding_std(x: np.ndarray, out: np.ndarray) -> None:
     count = np.add.accumulate(np.where(nan_mask, 0, x / x))
     out[:] = np.sqrt((cumsumOfSquares - cumsum * cumsum / count) / (count - 1))
 
+def rolling_covariance(window_size, data, out):
+    # Calculate the rolling mean for each column, ignoring NaN values
+    mean1 = np.convolve(np.nan_to_num(data[:, 0]), np.ones(window_size), 'valid') / window_size
+    mean2 = np.convolve(np.nan_to_num(data[:, 1]), np.ones(window_size), 'valid') / window_size
 
-def rolling_covariance(data, window_size):
-    mean1 = np.convolve(data[:, 0], np.ones(window_size), 'valid') / window_size
-    mean2 = np.convolve(data[:, 1], np.ones(window_size), 'valid') / window_size
-    cov = np.convolve((data[:, 0] - mean1) * (data[:, 1] - mean2), \
+    # Calculate the covariance for each window, ignoring NaN values
+    cov = np.convolve(np.nan_to_num((data[:, 0] - mean1) * (data[:, 1] - mean2)),
                       np.ones(window_size), 'valid') / window_size
+
+    # Adjust for NaN values in the original data
+    valid_counts = np.convolve(~np.isnan(data[:, 0]) & ~np.isnan(data[:, 1]),
+                               np.ones(window_size), 'valid')
+    cov /= valid_counts
     return cov
 
+'''
+class RollingCovariance(Word):
+    def __init__(self, name):
+        super().__init__(name, slice(-2,None))
+
+    def __call__(self, window: int = 10) -> Word:
+        return super().__call__(locals())
+
+    def operate(self, stack: list[Column]) -> None:
+        col0, col1 = stack.pop(), stack.pop()
+        stack.append(RollingFunctionColumn(col0.header + '-' + col1.header,
+                    operation=rolling_covariance, children=[col0,col1],
+                    window=self.window))
+                    '''
 
 
 vocab: dict[str, tuple[str,str,Callable[[str],Word]]] = {}
@@ -1130,12 +1183,20 @@ vocab['fill'] = (cat, 'Fills nans with _value_ ',Fill)
 vocab['ffill'] = (cat, 'Fills nans with previous values, looking back _lookback_ before range ' \
                   + 'and leaving trailing nans unless not _leave_end_', FFill)
 vocab['join'] = (cat, 'Joins two columns at _date_',Join)
-vocab['zero_first'] = (cat, 'Changes first value to zero',lambda name: UnaryOperator(name, zero_first_op))
-vocab['zero_to_na'] = (cat, 'Changes zeros to nans',lambda name: UnaryOperator(name, zero_to_na_op))
+vocab['zero_first'] = (cat, 'Changes first value to zero',lambda name: NonReduceFunction(name, zero_first_op))
+vocab['zero_to_na'] = (cat, 'Changes zeros to nans',lambda name: NonReduceFunction(name, zero_to_na_op))
 vocab['resample'] = (cat, 'Adapts periodicity to match range with optional rounding _round_',Resample)
 vocab['per'] = (cat, 'Changes periodicity to _periodicity_', SetPeriodicity)
 
-_ufuncs = [('add',  'Addition', np.add),
+_funcs = [('add',  'Addition', partial(bn.nansum, axis=1), bn.move_sum),
+           ]
+for code, desc, red, roll in _funcs:
+    vocab[code] = ('Row-wise Reduction', desc,
+                    lambda name, func=red: Reduction(name, func))
+    vocab[f'w{code}'] = ('Rolling Window', desc,
+                     lambda name, func=roll: Rolling(name, func))
+
+'''
     ('sub',  'Subtraction', np.subtract), ('mul',  'Multiplication', np.multiply),
     ('div',  'Division', np.divide), ('pow',  'Power', np.power),
     ('mod',  'Modulo', np.mod), ('eq',  'Equals', np.equal),
@@ -1144,11 +1205,6 @@ _ufuncs = [('add',  'Addition', np.add),
     ('le',  'Less than or equal to', np.less_equal), ('land',  'Logical and', np.logical_and),
     ('lor', 'Logical or', np.logical_or), ('lxor',  'Logical xor', np.logical_xor)]
 
-for code, desc, func in _ufuncs:
-    vocab[code] = ('Row-wise Reduction', desc,
-                    lambda name, func=func.reduce: ReductionOperator(name, func))
-    vocab[f'w{code}'] = ('Rolling Window', desc,
-                     lambda name, func=func.reduce: RollingUFuncOperator(name, func))
     vocab[f's{code}'] = ('Scan/Accumulation', desc,
                      lambda name, func=func.accumulate: ScanOperator(name, func))
 _funcs = [('mean',  'Arithmetic average', np.nanmean, expanding_mean),
@@ -1162,18 +1218,21 @@ for code, desc, func, scan_func in _funcs:
     vocab[f's{code}'] = ('Scan/Accumulation', desc,
                      lambda name, func=scan_func: ScanOperator(name, func))
 
+vocab[f'wcov'] = ('Rolling Window', desc, RollingCovariance)
+
+'''
 cat = 'Other functions'
-vocab['neg'] = (cat, 'Additive inverse',lambda name: UnaryOperator(name,np.negative))
-vocab['inv'] = (cat, 'Multiplicative inverse',lambda name: UnaryOperator(name,np.reciprocal))
-vocab['abs'] = (cat, 'Absolute value',lambda name: UnaryOperator(name,np.abs))
-vocab['sqrt'] = (cat, 'Square root',lambda name: UnaryOperator(name,np.sqrt))
-vocab['log'] = (cat, 'Natural log',lambda name: UnaryOperator(name,np.log))
-vocab['exp'] = (cat, 'Exponential',lambda name: UnaryOperator(name,np.exp))
-vocab['lnot'] = (cat, 'Logical not',lambda name: UnaryOperator(name, np.logical_not))
-vocab['expm1'] = (cat, 'Exponential minus one',lambda name: UnaryOperator(name,np.expm1))
-vocab['log1p'] = (cat, 'Natural log of increment',lambda name: UnaryOperator(name,np.log1p))
-vocab['sign'] = (cat, 'Sign',lambda name: UnaryOperator(name, np.sign))
-vocab['rank'] = (cat, 'Row-wise rank',lambda name: UnaryOperator(name, rank, slice_=slice(None)))
+vocab['neg'] = (cat, 'Additive inverse',lambda name: NonReduceFunction(name,np.negative))
+vocab['inv'] = (cat, 'Multiplicative inverse',lambda name: NonReduceFunction(name,np.reciprocal))
+vocab['abs'] = (cat, 'Absolute value',lambda name: NonReduceFunction(name,np.abs))
+vocab['sqrt'] = (cat, 'Square root',lambda name: NonReduceFunction(name,np.sqrt))
+vocab['log'] = (cat, 'Natural log',lambda name: NonReduceFunction(name,np.log))
+vocab['exp'] = (cat, 'Exponential',lambda name: NonReduceFunction(name,np.exp))
+vocab['lnot'] = (cat, 'Logical not',lambda name: NonReduceFunction(name, np.logical_not))
+vocab['expm1'] = (cat, 'Exponential minus one',lambda name: NonReduceFunction(name,np.expm1))
+vocab['log1p'] = (cat, 'Natural log of increment',lambda name: NonReduceFunction(name,np.log1p))
+vocab['sign'] = (cat, 'Sign',lambda name: NonReduceFunction(name, np.sign))
+vocab['rank'] = (cat, 'Row-wise rank',lambda name: NonReduceFunction(name, rank, slice_=slice(None)))
 vocab['ewma'] = (cat, 'Exponentially weighted moving average with half-life of _window_', EWMA)
 
 
