@@ -1,6 +1,6 @@
 import re
 import sys
-from .vocabulary import Word, Column, resolve
+from .vocabulary import Word, Column, resolve, set_debug
 from .periods import Range, Periodicity
 from .database import get_client
 

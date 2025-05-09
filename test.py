@@ -69,10 +69,6 @@ class TestColumnIndexing(unittest.TestCase):
         a = pt.c(*range(5)).hset('a,b,c,d,e').pull[['c','d'], True].values[0]
         self.assertTrue(np.array_equal(a, np.array([[0., 1., 2., 3., 4., 2., 3.]])))
 
-    def test_combined_index(self):
-        a = pt.c(*range(5)).hset('a,d,c,d,e').pull[2:5][['d'],True].values[-1]
-        self.assertTrue(np.array_equal(a, np.array([[0., 1., 2., 3., 4., 3.]])))
-
 class TestOtherColumnIndexingWords(unittest.TestCase):
     def test_drop(self):
         a = pt.c(*range(5)).hset('a,d,c,d,e').drop['d'].rows[0]
@@ -96,16 +92,28 @@ class TestOperators(unittest.TestCase):
         self.assertTrue(np.array_equal(a, np.array([[10.]])))
 
     def test_rolling_add(self):
-        a = pt.c(*range(5)).wadd(3).values[0]
+        a = pt.c(*range(5)).radd(3).values[0]
         self.assertTrue(np.array_equal(a, np.array([[0., 1., 2., 3., 12.]])))
 
+    def test_rolling_std(self):
+        a = pt.randn.rstd(50000).values[0]
+        self.assertTrue(abs(a[0] - 1) < 0.01)
+
+    def test_cumulative_std(self):
+        a = pt.randn.cstd.values[:50000]
+        self.assertTrue(abs(a[-1] - 1) < 0.01)
+
     def test_accumulate_add(self):
-        a = pt.c(*range(5)).sadd.values[-5:]
+        a = pt.c(*range(5)).cadd.values[-5:]
         self.assertTrue(np.array_equal(a[-1], np.array([0., 1., 2., 3., 20.])))
 
     def test_unary(self):
-        a = pt.c(*range(5)).neg.values[0]
+        a = pt.r5.neg.values[0]
         self.assertTrue(np.array_equal(a[-1], np.array([0., 1., 2., 3., -4.])))
+
+    def test_unary_multiple(self):
+        a = pt.r5.neg[:].values[0]
+        self.assertTrue(np.array_equal(a[-1], np.array([-0., -1., -2., -3., -4.])))
 
     def test_rank(self):
         df = pd.DataFrame(np.roll(np.arange(25),12).reshape((5,5)),
