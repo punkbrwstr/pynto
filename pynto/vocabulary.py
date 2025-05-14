@@ -117,6 +117,7 @@ class SiblingColumn(Column):
     siblings: set[SiblingColumn]
     ordinal: int | None = None
     input_column: Column | None = None
+    allow_sibling_drops: bool = True
 
     def set_range(self, range_: Range) -> None:
         self.setup_siblings()
@@ -138,13 +139,9 @@ class SiblingColumn(Column):
         return self.cache[self.range_][:, [self.ordinal]]
 
     def drop(self):
-        self.siblings.remove(self)
+        if self.allow_sibling_drops:
+            self.siblings.remove(self)
         super().drop()
-
-@dataclass(eq=False)
-class MandatorySiblingColumn(SiblingColumn):
-    def drop(self):
-        pass
 
 class Word:
     def __init__(self, name: str, slice_: slice = slice(None),
@@ -1012,7 +1009,6 @@ class AccumulatorColumn(Column):
 
     def calculate(self) -> None:
         data = self.input_stack[0].values
-        logger.debug(f'data {data}')
 
         mask = ~np.isnan(data)
         mask = ~np.any(np.isnan(data), axis=1)
@@ -1041,9 +1037,11 @@ class Accumulator(Word):
 class OneForOneFunction(Word):
     def __init__(self, name: str,
                     operation: Callable[[np.ndarray,np.ndarray],None],
-                    slice_ = slice(-1, None), ascending: bool = True):
+                    slice_ = slice(-1, None), ascending: bool = True,
+                    allow_sibling_drops: bool = True):
         self.ascending = ascending
         self.operation = operation
+        self.allow_sibling_drops = allow_sibling_drops
         super().__init__(name, slice_)
 
     def __call__(self, ascending: bool = True) -> Word:
@@ -1063,7 +1061,9 @@ class OneForOneFunction(Word):
                         operation=self.operation,
                         cache=cache,
                         input_column=col,
-                        ascending=self.ascending)
+                        ascending=self.ascending,
+                        allow_sibling_drops=self.allow_sibling_drops
+                        )
             siblings.add(sib)
             stack.append(sib)
 
@@ -1278,7 +1278,8 @@ vocab['dup'] = (cat, 'Duplicates columns',
 vocab['filter'] = (cat, 'Removes non-selected columns',
                 lambda name: Word(name, discard_excluded=True))
 vocab['drop'] = (cat, 'Removes selected columns',
-             lambda name: Word(name, inverse_selection=True, discard_excluded=True, copy_selected=False))
+             lambda name: Word(name, inverse_selection=True,
+                            discard_excluded=True, copy_selected=False, slice_=slice(-1,None)))
 vocab['nip'] = (cat, 'Removes non-selected columns, defaulting selection to top',
                 lambda name: Word(name, discard_excluded=True, slice_=slice(-1,None)))
 vocab['roll'] = (cat, 'Permutes selected columns', Roll)
@@ -1393,7 +1394,9 @@ vocab['lnot'] = (cat, 'Logical not',lambda name: OneForOneFunction(name, np.logi
 vocab['expm1'] = (cat, 'Exponential minus one',lambda name: OneForOneFunction(name,np.expm1))
 vocab['log1p'] = (cat, 'Natural log of increment',lambda name: OneForOneFunction(name,np.log1p))
 vocab['sign'] = (cat, 'Sign',lambda name: OneForOneFunction(name, np.sign))
-vocab['rank'] = (cat, 'Row-wise rank',lambda name: OneForOneFunction(name, rank, slice_=slice(None)))
+vocab['rank'] = (cat, 'Row-wise rank',
+                 lambda name: OneForOneFunction(name, rank,
+                                    slice_=slice(None), allow_sibling_drops=False))
 
 def resolve(name: str, throw_exception: bool = True) -> Word | None:
     if re.match(r'c\d[_\d]*',name) is not None:

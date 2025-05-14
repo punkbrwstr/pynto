@@ -244,6 +244,11 @@ class TestCornerCases(unittest.TestCase):
         result = pt.c1.c2.neg[:].hset('a,b').radd.roll.cadd.start('2025-01-01').values['2025-05-14']
         self.assertTrue(np.array_equal(result[-1], [-4.,-96.], equal_nan=True))
 
+    def test_siblings_no_drop(self):
+        result = pt.c1.c2.neg[:].hset('a,b').radd.roll.cadd.start('2025-01-01') \
+                .rank.drop.values['2025-05-14']
+        self.assertEqual(result[0,0], 1.)
+
 
 class DbTest(unittest.TestCase):
     @classmethod
