@@ -14,11 +14,10 @@ import numpy.ma as ma
 import pandas as pd
 import traceback
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, KW_ONLY
 from functools import partial,reduce
 from operator import add
 from typing import Callable, Any
-from . import tools
 from . import database as db
 from .periods import Range, Periodicity, datelike
 
@@ -33,55 +32,119 @@ def set_debug():
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
+class ColumnIDGenerator:
+    def __init__(self):
+        self.current = 0
 
-@dataclass(repr=False)
+    def get_next(self):
+        self.current += 1
+        return self.current
+
+    def reset(self):
+        self.current = 0
+
+_IDs = ColumnIDGenerator()
+
+@dataclass(eq=False)
 class Column:
-    header: str
+    header: str = ''
     range_: Range | None = None
-    references: list[int] = field(default_factory=lambda: [1])
-    values_cache: dict[Range,np.ndarray] = field(default_factory=dict)
-    children: list[Column] = field(default_factory=list)
-    siblings: list[Column] = field(default_factory=list)
-    sibling_ordinal: int = 0
+    output_columns: int = 1
+    input_stack: list[Column] = field(default_factory=list)
+    cache: dict[Range,None | np.ndarray] = field(default_factory=dict)
+    id_: int = field(default_factory=_IDs.get_next)
 
     def calculate(self) -> None:
         pass
 
     @property
     def values(self) -> np.ndarray:
-        v = self.values_cache.get(self.range_)
-        if v is None or len(self.siblings) == 0:
-            return v
-        else:
-            return v[:,self.sibling_ordinal]
+        return self.cache[self.range_]
 
     @values.setter
-    def values(self, values: np.ndarray) -> None:
-        self.values_cache[self.range_] = values
+    def values(self, values: np.ndarray) -> np.ndarray:
+        self.cache[self.range_] = values
+
+    @property
+    def input_matrix(self) -> np.ndarray:
+        shape = (len(self.input_stack[0].range_),len(self.input_stack))
+        return np.concatenate([col.values for col in self.input_stack]) \
+                        .reshape(shape,order='F')
 
     def set_range(self, range_: Range) -> None:
         self.range_ = range_
-        for col in self.children:
-            col.set_range(range_)
+        if range_ not in self.cache:
+            if len(self.cache) != 0:
+                inputs = self.input_stack[:]
+                self.input_stack = [copy.copy(i) for i in inputs]
+            self.set_input_range()
+            self.cache[range_] = None
+        else:
+            self.input_stack = []
+
+    def set_input_range(self) -> None:
+        for col in self.input_stack:
+            col.set_range(self.range_)
 
     @property
     def calculated(self) -> bool:
-        return self.range_ in self.values_cache
+        return self.cache.get(self.range_) is not None
 
     def get_bounds(self) -> tuple[datetime.date,datetime.date,Periodicity] | None:
         return None
 
-    def check_child_ranges(self) -> None:
+    def drop(self):
         pass
 
     def __copy__(self):
-        self.references[0] += 1
+        logger.debug('copying '+ debug_col_repr(self, 4))
         copied = copy.copy(super())
-        copied.children = []
-        for child in self.children:
-            copied.children.append(copy.copy(child))
+        copied.id_ = _IDs.get_next()
+        logger.debug('  copy '+ debug_col_repr(copied, 4))
         return copied
 
+    def __hash__(self):
+        return hash(self.id_)
+
+    def __eq__(self, other: Column):
+        return self.id_ == other.id_
+
+    def __del__(self):
+        logger.debug('destroying '+ debug_col_repr(self, 4))
+
+@dataclass(kw_only=True,eq=False)
+class SiblingColumn(Column):
+    siblings: set[SiblingColumn]
+    ordinal: int | None = None
+    input_column: Column | None = None
+
+    def set_range(self, range_: Range) -> None:
+        self.setup_siblings()
+        super().set_range(range_)
+
+    def setup_siblings(self) -> None:
+        if self.ordinal is None:
+            output_columns = len(self.siblings)
+            for i, sib in enumerate(self.siblings):
+                sib.ordinal = i
+                sib.output_columns = output_columns
+                if sib.input_column:
+                    self.input_stack.append(sib.input_column)
+                    sib.input_column = None
+            self.siblings.clear()
+
+    @property
+    def values(self) -> np.ndarray:
+        return self.cache[self.range_][:, [self.ordinal]]
+
+    def drop(self):
+        self.siblings.remove(self)
+        super().drop()
+
+@dataclass(eq=False)
+class MandatorySiblingColumn(SiblingColumn):
+    def drop(self):
+        pass
 
 class Word:
     def __init__(self, name: str, slice_: slice = slice(None),
@@ -159,7 +222,10 @@ class Word:
                 self.discard_excluded = key[2]
             key = key[0]
         if isinstance(key, int):
-            self.slice_ = slice(key, key + 1)
+            if key == -1:
+                self.slice_ = slice(key,None)
+            else:
+                self.slice_ = slice(key, key + 1)
         elif isinstance(key, slice):
             self.slice_ = key
         elif isinstance(key, str):
@@ -193,9 +259,11 @@ class Word:
         assert self.open_quotes == 0, 'Unclosed quotation.  Cannot evaluate'
         assert not isinstance(self, Quotation), 'Cannot evaluate quotation'
         current = self._head()
+        logger.debug('Build stack')
         while current is not None:
             if not current.called: # need to set defaults (if any)
                 current()
+            logger.debug(f'   current word {current} slice {current.slice_}')
             selected = list(range(len(stack))[current.slice_])
             if current.filters:
                 filtered = []
@@ -205,8 +273,10 @@ class Word:
                         if bool(pattern.match(stack[i].header)):
                             filtered.append(i)
                 selected = filtered
+            logger.debug(f'      selected {selected}')
             if current.inverse_selection:
                 selected = list(set(range(len(stack))) - set(selected))
+            logger.debug(f'      selected {selected}')
             current_stack = []
             to_delete = set()
             for i in selected:
@@ -216,16 +286,18 @@ class Word:
                 else:
                     to_delete.add(i)
                     current_stack.append(stack[i])
+
             if current.discard_excluded:
-                to_delete.update(set(range(len(stack))) - set(selected))
+                excluded = set(range(len(stack))) - set(selected)
+                for i in excluded:
+                    logger.debug(f'      dropping {debug_col_repr(stack[i],4)}')
+                    stack[i].drop() # no longer needed as siblings   
+                to_delete.update(excluded)
             for i in sorted(to_delete, reverse=True):
-                stack[i].references[0] -= 1
                 del(stack[i])
             current.operate(current_stack)
             stack.extend(current_stack)
             current = current.next_
-        for col in stack:
-            col.references[0] += 1 # top level columns can't be overwritten
 
     @property
     def stack(self) -> list[Column]:
@@ -304,19 +376,24 @@ class Word:
         s = 'pt.' + s
         return s
 
-debug_col_repr = lambda c, n: f'{' '*n}{str(id(c))[-4:]}-{c.__class__.__name__}' \
-        + f'({str(id(c.values_cache))[-4:]}) r={c.references[0]}'
+debug_col_repr = lambda c, n: f'{' '*n}{c.id_}-{c.__class__.__name__}' \
+        + f' "{c.header}"' \
+        + f' range {c.range_}' \
+        + f' cache #{str(id(c.cache))[-4:]})'
 def debug_stack(stack):   
     for c in stack:
         logger.debug(debug_col_repr(c,4))
-        if c.children:
-            logger.debug((' ' * 8) + 'childs')
-        for c2 in c.children:
+        if c.input_stack:
+            logger.debug((' ' * 8) + 'inputs')
+        for c2 in c.input_stack:
             logger.debug(debug_col_repr(c2,10))
-        if c.siblings:
+        if hasattr(c,'siblings'):
             logger.debug((' ' * 8) + 'sibs')
-        for c2 in c.siblings:
-            logger.debug(debug_col_repr(c2,10))
+            for c2 in c.siblings:
+                logger.debug(debug_col_repr(c2,10))
+                logger.debug((' ' * 10) + 'input')
+                if c2.input_column:
+                    logger.debug(debug_col_repr(c2.input_column,12))
 
 class Evaluator:
     def __init__(self, word: Word, values_only: bool = False):
@@ -324,24 +401,23 @@ class Evaluator:
         self.values_only = values_only
 
     def __getitem__(self, key: slice | int | str | Range) -> pd.DataFrame:
+        _IDs.reset()
         stack = []
         self.word.build_stack(stack)
         min_, max_, per = None, None, None
         working = stack[:]
         flat = []
-        logger.debug('Stack')
+        logger.debug('Stack before')
         debug_stack(stack)
         while working:
             col = working.pop()
             bounds = col.get_bounds()
             if bounds:
-                min_ = bounds[0] if not min_ \
-                    else max(min_, bounds[0])
-                max_ = bounds[1] if not max_ \
-                    else min(max_, bounds[1])
+                min_ = bounds[0] if not min_ else max(min_, bounds[0])
+                max_ = bounds[1] if not max_ else min(max_, bounds[1])
                 per = bounds[2]
             flat.append(col)
-            working.extend(col.children)
+            working.extend(col.input_stack)
         flat.reverse()
         p = Periodicity[key.step] if hasattr(key, 'step') and key.step \
             else per if per else Periodicity.B
@@ -354,41 +430,43 @@ class Evaluator:
                 key = slice(key, key + 1)
             range_ = p[key.start or min_:key.stop or max_]
         for col in stack:
+            logger.debug('setting range'+ debug_col_repr(col, 4))
             col.set_range(range_)
-        saveds: list[SavedColumn] = []
-        for col in flat:
-            if isinstance(col, SavedColumn):
-                saveds.append(col)
+        logger.debug('Stack after')
+        debug_stack(stack)
+        working = stack[:]
+        flat = deque()
+        while working:
+            col = working.pop()
+            flat.append(col)
+            working.extend(col.input_stack)
+        flat.reverse()
+        logger.debug('Flat')
+        debug_stack(flat)
+        saveds = [col for col in flat if isinstance(col, SavedColumn)]
         if saveds:
             p = db.get_client().connection.pipeline()
-            offsets = [db.get_client()._req(col.md, col.range_.start,
-                        col.range_.stop, p) for col in saveds]
-            for col, offset, bytes_ in zip(saveds, offsets, p.execute()):
-                col.values = np.full(len(col.range_), np.nan, order='F')
+            offsets, needed_saveds = [], []
+            for col in saveds:
+                if not col.calculated:
+                    col.cache[col.range_] = np.full(len(col.range_), np.nan, order='F')
+                    offsets.append(db.get_client()._req(
+                        col.md, col.range_.start, col.range_.stop, p))
+                    needed_saveds.append(col)
+            for col, offset, bytes_ in zip(needed_saveds, offsets, p.execute()):
                 if len(bytes_) > 0:
                     data = np.frombuffer(bytes_, col.md.type_.dtype)
                     col.values[offset:offset + len(data)] = data
         logger.debug('Processing flat')
-        for col in flat:
+        while flat:
+            col = flat.popleft()
             if col.calculated or not col.range_:
                 logger.debug(f'    skip' + debug_col_repr(col,1)) 
                 continue
             logger.debug(f'    calc' + debug_col_repr(col,1)) 
-            for child in col.children:
-                child.references[0] -= 1
-                if col.values is None and child.references[0] < 1 \
-                    and col.range_ == child.range_ \
-                    and len(col.siblings) == len(child.siblings):
-                    logger.debug(f'        reallocate {str(id(child.values_cache))[-4:]}' \
-                            + ' to {str(id(col.values_cache))[-4:]}') 
-                    col.values = child.values
-            if col.values is None:
-                rows, cols = len(col.range_), len(col.siblings) 
-                shape = (rows, cols) if cols else rows
-                col.values = np.empty(shape, order='F')
-                logger.debug(f'        allocate {shape} for {str(id(col.values_cache))[-4:]}') 
+            col.cache[col.range_] = np.empty((len(col.range_), col.output_columns), order='F')
             col.calculate()
-            col.children.clear()
+            col.input_stack = []
         for i, col in enumerate(stack):
             assert col.range_ == range_, \
                 f'Mismatching range needs resample for col {i - len(stack)}: {col.header}'
@@ -405,9 +483,9 @@ class NullaryWord(Word):
         super().__init__(name, slice(-1,0))
 
     def operate(self, stack: list[Column]) -> None:
-        stack.append(NullaryColumn(self.name, generator=self.generator))
+        stack.append(NullaryColumn(header=self.name, generator=self.generator))
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, eq=False)
 class NullaryColumn(Column):
     generator: Callable[[Range, np.ndarray],None]
 
@@ -417,7 +495,7 @@ class NullaryColumn(Column):
 class RandomNormal(NullaryWord):
     @staticmethod
     def generate(range_: Range, values: np.ndarray):
-        values[:] = np.random.randn(len(range_))
+        values[:] = np.random.randn(len(range_))[:,None]
 
     def __init__(self, name: str):
         super().__init__(name,  self.generate)
@@ -434,7 +512,7 @@ class Timestamp(NullaryWord):
 class Daycount(NullaryWord):
     @staticmethod
     def generate(range_: Range, values: np.ndarray):
-        values[:] = np.array(range_.day_counts(), dtype=np.float64)
+        values[:] = np.array(range_.day_counts(), dtype=np.float64)[:,None]
 
     def __init__(self, name: str):
         super().__init__(name, self.generate)
@@ -453,15 +531,16 @@ class Constant(NullaryWord):
 
     def operate(self, stack: list[Column]) -> None:
         for constant in self.constants:
-            stack.append(NullaryColumn(self.name,
-                generator=partial(self.generate, constant)))
+            stack.append(NullaryColumn(
+                            header=self.name,
+                            generator=partial(self.generate, constant)))
 
 class ConstantRange(Constant):
     def __call__(self, n: int) -> Word:
         return super().__call__(*range(n))
 
-@dataclass(kw_only=True)
-class PandasColumn(Column):
+@dataclass(kw_only=True, eq=False)
+class PandasColumn(SiblingColumn):
     pandas: pd.DataFrame
     round_: bool
     pandas_range: Range| None = None
@@ -475,10 +554,10 @@ class PandasColumn(Column):
                 self.pandas_range.periodicity)
 
     def calculate(self) -> None:
-        self.values_cache[self.range_][:] = np.nan
-        idx, idx_child = self.pandas_range \
+        self.cache[self.range_][:] = np.nan
+        idx, idx_input = self.pandas_range \
                             .resample_indicies(self.range_, self.round_)
-        self.values_cache[self.range_][idx,:] = self.pandas.values[idx_child,:]
+        self.cache[self.range_][idx,:] = self.pandas.values[idx_input,:]
 
 class FromPandas(Word):
     def __call__(self, pandas: pd.DataFrame | pd.Series, round_: bool = False) -> Word:
@@ -494,19 +573,22 @@ class FromPandas(Word):
     def operate(self, stack):
         if self.pandas.index.freq is None:
             self.pandas.index.freq = pd.infer_freq(self.pandas.index)
-        siblings = []
-        values_cache = {}
+        siblings = set()
+        input_stack = []
+        cache = {}
         for i, (header, col) in enumerate(self.pandas.items()):
-            siblings.append(PandasColumn(header,
+            sib = PandasColumn(
+                        header,
                         round_=self.round_,
                         pandas=self.pandas,
-                        values_cache=values_cache,
-                        siblings=siblings,
-                        references=[self.pandas.shape[1]],
-                        sibling_ordinal=i))
-        stack.extend(siblings)
+                        input_stack=input_stack,
+                        cache=cache,
+                        siblings=siblings
+                        )
+            siblings.add(sib)
+            stack.append(sib)
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, eq=False)
 class SavedColumn(Column):
     md: db.Metadata
 
@@ -525,7 +607,8 @@ class Saved(Word):
 
     def operate(self, stack: list[Column]) -> None:
         for md in db.get_client().get_metadata(self.key):
-            stack.append(SavedColumn(md.col_header + md.row_header, (0, 1), md=md))
+            logger.debug(f'md {md.col_header}')
+            stack.append(SavedColumn(md.col_header + md.row_header, md=md))
 
 
 # Quotation / combinator words
@@ -681,39 +764,35 @@ class Compose(Quotation, Combinator):
     def operate(self, stack: list[Column]) -> None:
         self.quoted = reduce(add, [quote.quoted for quote in self.quotations])
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, eq=False)
 class ResampleColumn(Column):
     round_: bool
 
-    def check_child_ranges(self) -> None:
-        pass
-
     def calculate(self) -> None:
         self.values[:] = np.nan
-        idx, idx_child = self.children[0].range_ \
+        idx, idx_input = self.input_stack[0].range_ \
                             .resample_indicies(self.range_, self.round_)
-        self.values[idx] = self.children[0].values[idx_child]
+        self.values[idx] = self.input_stack[0].values[idx_input]
 
 class Resample(Word):
     def __call__(self, round_: bool = False):
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
-        children = stack[:]
+        inputs = stack[:]
         stack.clear()
-        for col in children:
+        for col in inputs:
             stack.append(ResampleColumn(col.header, 
-                        round_=self.round_, children=[col]))
+                        round_=self.round_, inputs=[col]))
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, eq=False)
 class PeriodicityColumn(ResampleColumn):
     periodicity: Periodicity
 
-    def set_range(self, range_: Range) -> None:
-        self.range_ = range_
-        child_range = range_.change_periodicity(self.periodicity)
-        for col in self.children:
-            col.set_range(child_range)
+    def set_input_range(self) -> None:
+        input_range = self.range_.change_periodicity(self.periodicity)
+        for col in self.input_stack:
+            col.set_range(input_range)
 
 class SetPeriodicity(Word):
     def __call__(self, periodicity: str | Periodicity, \
@@ -726,21 +805,21 @@ class SetPeriodicity(Word):
         return super().__call__()
 
     def operate(self, stack: list[Column]) -> None:
-        children = stack[:]
+        inputs = stack[:]
         stack.clear()
-        for col in children:
+        for col in inputs:
             stack.append(PeriodicityColumn(col.header, round_=self.round_,
-                               periodicity=self.periodicity, children=[col]))
+                               periodicity=self.periodicity, input_stack=[col]))
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, eq=False)
 class StartColumn(ResampleColumn):
     start: datelike
 
-    def set_range(self, range_: Range) -> None:
-        self.range_ = range_
-        child_range = Range(range_.periodicity[self.start].start, range_.stop, range_.periodicity)
-        for col in self.children:
-            col.set_range(child_range)
+    def set_input_range(self) -> None:
+        input_range = Range(self.range_.periodicity[self.start].start,
+                            self.range_.stop, self.range_.periodicity)
+        for col in self.input_stack:
+            col.set_range(input_range)
 
 class SetStart(Word):
     def __call__(self, start: datelike, \
@@ -748,18 +827,18 @@ class SetStart(Word):
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
-        children = stack[:]
+        inputs = stack[:]
         stack.clear()
-        for col in children:
+        for col in inputs:
             stack.append(StartColumn(col.header, round_=self.round_,
-                               start=self.start, children=[col]))
+                               start=self.start, input_stack=[col]))
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, eq=False)
 class FillColumn(Column):
     value: float
 
     def calculate(self) -> None:
-        self.values[:] = self.children[0].values
+        self.values[:] = self.input_stack[0].values
         self.values[np.isnan(self.values)] = self.value
 
 class Fill(Word):
@@ -767,27 +846,26 @@ class Fill(Word):
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
-        children = stack[:]
+        inputs = stack[:]
         stack.clear()
-        for col in children:
-            stack.append(FillColumn(col.header, value=self.value, children=[col]))
+        for col in inputs:
+            stack.append(FillColumn(col.header, value=self.value, input_stack=[col]))
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, eq=False)
 class FFillColumn(Column):
     lookback: int
     leave_end: bool
 
-    def set_range(self, range_: Range) -> None:
-        self.range_ = range_
-        child_range = self.range_.expand(int(-self.lookback))
-        for col in self.children:
-            col.set_range(child_range)
+    def set_input_range(self) -> None:
+        input_range = self.range_.expand(int(-self.lookback))
+        for col in self.input_stack:
+            col.set_range(input_range)
 
     def calculate(self) -> None:
-        x = self.children[0].values
+        x = self.input_stack[0].values.ravel()
         idx = np.where(~np.isnan(x),np.arange(len(x)),0)
         np.maximum.accumulate(idx,out=idx)
-        self.values[:] = x[idx][self.lookback:]
+        self.values[:] = x[idx][self.lookback:][:,None]
         if self.leave_end:
             if len(x) > idx.max() + 1:
                 at_end = len(x) - idx.max() - 1
@@ -798,37 +876,37 @@ class FFill(Word):
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
-        children = stack[:]
+        inputs = stack[:]
         stack.clear()
-        for col in children:
+        for col in inputs:
             stack.append(FFillColumn(col.header, lookback=self.lookback,
-                                     leave_end=self.leave_end, children=[col]))
+                                     leave_end=self.leave_end, input_stack=[col]))
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, eq=False)
 class JoinColumn(Column):
     date: datelike
 
-    def set_range(self, range_: Range) -> None:
-        self.range_ = range_
+    def set_input_range(self) -> None:
+        range_ = self.range_
         cutover_index = range_.periodicity[self.date].start
         if range_.stop < cutover_index:
-            self.children.pop()
-            self.children[0].set_range(range_)
+            self.input_stack.pop()
+            self.input_stack[0].set_range(range_)
         elif range_.start >= cutover_index:
-            self.children.pop(-2)
-            self.children[0].set_range(range_)
+            self.input_stack.pop(-2)
+            self.input_stack[0].set_range(range_)
         else:
             r_first = copy.copy(range_)
             r_first.stop = cutover_index
-            self.children[0].set_range(r_first)
+            self.input_stack[0].set_range(r_first)
             r_second = copy.copy(range_)
             r_second.start = cutover_index
-            self.children[1].set_range(r_second)
+            self.input_stack[1].set_range(r_second)
 
     def calculate(self) -> None:
         i = 0
-        for child in self.children:
-            v = child.values
+        for input_ in self.input_stack:
+            v = input_.values
             self.values[i:i+len(v)] = v
             i += len(v)
 
@@ -842,17 +920,14 @@ class Join(Word):
 
     def operate(self, stack: list[Column]) -> None:
         stack.append(JoinColumn(stack[-2].header, date=self.date,
-                                children=[stack.pop(-2),stack.pop()]))
+                                input_stack=[stack.pop(-2),stack.pop()]))
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, eq=False)
 class ReductionColumn(Column):
     operation: Callable[[np.ndarray], np.ndarray]
 
     def calculate(self) -> None:
-        operands = np.concatenate([col.values for col in self.children]) \
-                        .reshape((len(self.range_),len(self.children)),order='F')
-        # axis=1
-        self.values = self.operation(operands)
+        self.values[:] = self.operation(self.input_matrix)[:, None]
 
 class Reduction(Word):
     def __init__(self, name: str, operation: Callable[[np.ndarray, np.ndarray], None]):
@@ -860,62 +935,31 @@ class Reduction(Word):
         super().__init__(name, slice(-2, None))
 
     def operate(self, stack: list[Column]) -> None:
-        children = [*stack]
+        inputs = [*stack]
         stack.clear()
-        stack.append(ReductionColumn(children[0].header,
+        stack.append(ReductionColumn(inputs[0].header,
                     operation=self.operation,
-                    children=children))
+                    input_stack=inputs))
 
-@dataclass(kw_only=True)
-class ReductionColumn(Column):
-    operation: Callable[[np.ndarray], np.ndarray]
-
-    def calculate(self) -> None:
-        operands = np.concatenate([col.values for col in self.children]) \
-                        .reshape((len(self.range_),len(self.children)),order='F')
-        # axis=1
-        self.values = self.operation(operands)
-
-class Reduction(Word):
-    def __init__(self, name: str, operation: Callable[[np.ndarray, np.ndarray], None]):
-        self.operation = operation
-        super().__init__(name, slice(-2, None))
-
-    def operate(self, stack: list[Column]) -> None:
-        children = [*stack]
-        stack.clear()
-        stack.append(ReductionColumn(children[0].header,
-                    operation=self.operation,
-                    children=children))
-
-@dataclass(kw_only=True)
-class RollingColumn(Column):
+@dataclass(kw_only=True, eq=False)
+class RollingColumn(SiblingColumn):
     operation: Callable[[np.ndarray, int], np.ndarray]
     window: int
     reduction: bool = False
 
-    def set_range(self, range_: Range) -> None:
-        self.range_ = range_
-        child_range = self.range_.expand(int(-self.window * 1.25))
-        for col in self.children:
-            col.set_range(child_range)
+    def set_input_range(self) -> None:
+        input_range = self.range_.expand(int(-self.window * 1.25))
+        for col in self.input_stack:
+            col.set_range(input_range)
 
     def calculate(self) -> None:
         lookback = int(self.window * 1.25)
-        if len(self.children) > 1:
-            data = np.concatenate([col.values for col in self.children]) \
-                        .reshape((len(self.range_) + lookback,len(self.children)),order='F')
-        else:
-            data = self.children[0].values[:,np.newaxis]
+        data = self.input_matrix
         mask = ~np.any(np.isnan(data), axis=1)
         idx = np.where(mask)[0]
         start = np.where(idx >= lookback)[0][0]
-        out = self.values_cache[self.range_]
-        if len(out.shape) == 1 and not self.reduction:
-            out[(idx - lookback)[start:]] = \
-                    self.operation(data[mask], self.window)[start:, 0]
-        else:
-            out[(idx - lookback)[start:]] = self.operation(data[mask], self.window)[start:]
+        out = self.cache[self.range_]
+        out[(idx - lookback)[start:]] = self.operation(data[mask], self.window)[start:]
         if not np.all(mask):
             idx = np.where(~mask)[0]
             if np.any(idx >= lookback):
@@ -932,44 +976,51 @@ class Rolling(Word):
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
-        values_cache = {}
-        siblings = []
-        children = [*stack]
+        cache = {}
+        inputs = [*stack]
         stack.clear()
-        for i, col in enumerate(children):
-            siblings.append(RollingColumn(col.header,
+        siblings = set()
+        input_stack = []
+        cache = {}
+        for i, col in enumerate(inputs):
+            sib = RollingColumn(
+                        col.header,
                         operation=self.operation,
                         window=self.window,                           
-                        children=children,
-                        values_cache=values_cache,
-                        siblings=siblings,
-                        sibling_ordinal=i,
-                        references=[len(children)]))
-        stack.extend(siblings)
+                        input_stack=input_stack,
+                        input_column=col,
+                        cache=cache,
+                        siblings=siblings
+                        )
+            siblings.add(sib)
+            stack.append(sib)
 
 class RollingReduction(Rolling):    
     def operate(self, stack: list[Column]) -> None:
-        children = [*stack]
+        inputs = [*stack]
         stack.clear()
-        stack.append(RollingColumn(children[0].header,
+        stack.append(RollingColumn(inputs[0].header,
                     window=self.window,
                     operation=self.operation,
                     reduction=True,
-                    children=children))
+                    input_stack=inputs))
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, eq=False)
 class AccumulatorColumn(Column):
     func: Callable[[np.ndarray, int], np.ndarray]
     ascending: bool = True
 
     def calculate(self) -> None:
-        data = self.children[0].values
+        data = self.input_stack[0].values
+        logger.debug(f'data {data}')
+
         mask = ~np.isnan(data)
+        mask = ~np.any(np.isnan(data), axis=1)
         idx = np.where(mask)[0]
         if not self.ascending:
-            self.values[idx] = self.func(data[mask][::-1])[::-1] 
+            self.values[idx] = self.func(data[mask][::-1])[::-1]
         else:
-            self.values[idx] = self.func(data[mask]) 
+            self.values[idx] = self.func(data[mask])
         if not np.all(mask):
             self.values[~mask] = np.nan
 
@@ -981,13 +1032,13 @@ class Accumulator(Word):
         super().__init__(name, slice_=slice(-1,None))
 
     def operate(self, stack: list[Column]) -> None:
-        children = [*stack]
+        inputs = [*stack]
         stack.clear()
-        for col in children:
+        for col in inputs:
             stack.append(AccumulatorColumn(col.header, func=self.func, 
-                                           ascending=self.ascending, children=[col]))
+                                           ascending=self.ascending, input_stack=[col]))
 
-class NonReduceFunction(Word):
+class OneForOneFunction(Word):
     def __init__(self, name: str,
                     operation: Callable[[np.ndarray,np.ndarray],None],
                     slice_ = slice(-1, None), ascending: bool = True):
@@ -999,35 +1050,33 @@ class NonReduceFunction(Word):
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
-        values_cache = {}
-        siblings = []
-        children = [*stack]
+        inputs = [*stack]
         stack.clear()
-        for i, col in enumerate(children):
-            siblings.append(NonReduceFunctionColumn(col.header,
-                        operation=self.operation,
-                        children=children,
-                        values_cache=values_cache,
+        siblings = set()
+        input_stack = []
+        cache = {}
+        for i, col in enumerate(inputs):
+            sib = OneForOneFunctionColumn(
+                        col.header,
                         siblings=siblings,
-                        sibling_ordinal=i,
-                        references=[len(children)],
-                        ascending=self.ascending))
-        stack.extend(siblings)
+                        input_stack=input_stack,
+                        operation=self.operation,
+                        cache=cache,
+                        input_column=col,
+                        ascending=self.ascending)
+            siblings.add(sib)
+            stack.append(sib)
 
-@dataclass(kw_only=True)
-class NonReduceFunctionColumn(Column):
+@dataclass(kw_only=True, eq=False)
+class OneForOneFunctionColumn(SiblingColumn):
     operation: Callable[[np.ndarray,np.ndarray],None]
     ascending: bool = True
 
     def calculate(self) -> None:
-        if len(self.children) > 1:
-            operands = np.concatenate([col.values for col in self.children]) \
-                        .reshape((len(self.range_),len(self.children)),order='F')
-        else:
-            operands = self.children[0].values[:,np.newaxis]
+        data = self.input_matrix
         if not self.ascending:
-            operands = operands[::-1]
-        self.operation(operands, out=self.values_cache[self.range_])
+            data = data[::-1]
+        self.operation(data, out=self.cache[self.range_])
 
 def rank(inputs: np.ndarray, out: np.ndarray) -> None:
     out[:] = inputs.argsort(axis=1).argsort(axis=1)
@@ -1191,23 +1240,19 @@ def rolling_ewma(data: np.ndarray, window: int) -> np.ndarray:
     scale = np.power(1 - alpha, np.arange(data.shape[0] + 1))
     adj_scale = (alpha * scale[-2]) / scale[:-1]
     if len(data.shape) == 2:
-        print('g')
         adj_scale = adj_scale[:, None]
         scale = scale[:, None]
     offset = data[0] * scale[1:]
     return np.add.accumulate(data * adj_scale) / scale[-2::-1] + offset
 
 def rolling_ewv(data: np.ndarray, window: int) -> np.ndarray:
-    print(data[-10:])
     mean = rolling_ewma(data, window)
-    print(mean[-10:])
     delta = data - mean
 
     alpha = 2 / (window + 1.0)
     ws = (1 - alpha) ** np.arange(window)
     w_sum = ws.sum()
     bias = (w_sum ** 2) / ((w_sum ** 2) - (ws ** 2).sum())
-    print(bias)
     return rolling_ewma(delta ** 2, window) 
 
 def rolling_ews(data: np.ndarray, window: int) -> np.ndarray:
@@ -1274,9 +1319,9 @@ vocab['ffill'] = (cat, 'Fills nans with previous values, looking back _lookback_
                   + 'and leaving trailing nans unless not _leave_end_', FFill)
 vocab['join'] = (cat, 'Joins two columns at _date_', Join)
 vocab['zero_first'] = (cat, 'Changes first value to zero',
-                    lambda name: NonReduceFunction(name, zero_first_op))
+                    lambda name: OneForOneFunction(name, zero_first_op))
 vocab['zero_to_na'] = (cat, 'Changes zeros to nans',
-                    lambda name: NonReduceFunction(name, zero_to_na_op))
+                    lambda name: OneForOneFunction(name, zero_to_na_op))
 vocab['resample'] = (cat, 'Adapts periodicity to match range with optional rounding _round_',
                     Resample)
 vocab['per'] = (cat, 'Changes column periodicity to _periodicity_, then resamples', SetPeriodicity)
@@ -1338,17 +1383,17 @@ vocab['rewm'] = ('Rolling Window', 'Exponentially-weighted average',
 
 
 cat = 'Other functions'
-vocab['neg'] = (cat, 'Additive inverse',lambda name: NonReduceFunction(name,np.negative))
-vocab['inv'] = (cat, 'Multiplicative inverse',lambda name: NonReduceFunction(name,np.reciprocal))
-vocab['abs'] = (cat, 'Absolute value',lambda name: NonReduceFunction(name,np.abs))
-vocab['sqrt'] = (cat, 'Square root',lambda name: NonReduceFunction(name,np.sqrt))
-vocab['log'] = (cat, 'Natural log',lambda name: NonReduceFunction(name,np.log))
-vocab['exp'] = (cat, 'Exponential',lambda name: NonReduceFunction(name,np.exp))
-vocab['lnot'] = (cat, 'Logical not',lambda name: NonReduceFunction(name, np.logical_not))
-vocab['expm1'] = (cat, 'Exponential minus one',lambda name: NonReduceFunction(name,np.expm1))
-vocab['log1p'] = (cat, 'Natural log of increment',lambda name: NonReduceFunction(name,np.log1p))
-vocab['sign'] = (cat, 'Sign',lambda name: NonReduceFunction(name, np.sign))
-vocab['rank'] = (cat, 'Row-wise rank',lambda name: NonReduceFunction(name, rank, slice_=slice(None)))
+vocab['neg'] = (cat, 'Additive inverse',lambda name: OneForOneFunction(name,np.negative))
+vocab['inv'] = (cat, 'Multiplicative inverse',lambda name: OneForOneFunction(name,np.reciprocal))
+vocab['abs'] = (cat, 'Absolute value',lambda name: OneForOneFunction(name,np.abs))
+vocab['sqrt'] = (cat, 'Square root',lambda name: OneForOneFunction(name,np.sqrt))
+vocab['log'] = (cat, 'Natural log',lambda name: OneForOneFunction(name,np.log))
+vocab['exp'] = (cat, 'Exponential',lambda name: OneForOneFunction(name,np.exp))
+vocab['lnot'] = (cat, 'Logical not',lambda name: OneForOneFunction(name, np.logical_not))
+vocab['expm1'] = (cat, 'Exponential minus one',lambda name: OneForOneFunction(name,np.expm1))
+vocab['log1p'] = (cat, 'Natural log of increment',lambda name: OneForOneFunction(name,np.log1p))
+vocab['sign'] = (cat, 'Sign',lambda name: OneForOneFunction(name, np.sign))
+vocab['rank'] = (cat, 'Row-wise rank',lambda name: OneForOneFunction(name, rank, slice_=slice(None)))
 
 def resolve(name: str, throw_exception: bool = True) -> Word | None:
     if re.match(r'c\d[_\d]*',name) is not None:

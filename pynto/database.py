@@ -147,8 +147,10 @@ class Db:
 
     def get_metadata(self, key: str) -> list[Metadata]:
         key = self.make_key(key)
-        return [Metadata.unpack(p) for p in
+        mds = [Metadata.unpack(p) for p in
                     self.connection.zrangebylex(INDEX, f'[{key}', f'[{key}\xff')]
+        mds.sort(key=attrgetter('ordinal'))
+        return mds
 
     def __setitem__(self, key: str, pandas: pd.Series | pd.DataFrame):
         saved: dict[tuple[str,str],Metadata] = {}

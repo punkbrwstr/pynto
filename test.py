@@ -239,6 +239,12 @@ class TestDataCleanup(unittest.TestCase):
         result = pt.pandas(df).ffill(leave_end=False).values[7:11]
         self.assertTrue(np.array_equal(result.T[0], [1.,3.,3.,3.]))
 
+class TestCornerCases(unittest.TestCase):
+    def test_siblings_different_ranges(self):
+        result = pt.c1.c2.neg[:].hset('a,b').radd.roll.cadd.start('2025-01-01').values['2025-05-14']
+        self.assertTrue(np.array_equal(result[-1], [-4.,-96.], equal_nan=True))
+
+
 class DbTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
