@@ -82,6 +82,7 @@ METADATA_FORMAT = f'<256s128s128sLllccdd16s'
 @dataclass
 class Metadata(Range):
     type_: DataType
+    key: str
     ordinal: int
     col_header: str
     row_header: str
@@ -95,11 +96,11 @@ class Metadata(Range):
     def data_key(self):
         return DATA_PREFIX + self.id_.bytes
 
-    def pack(self, key: str, keep_timestamp: bool = False) -> bytes:
+    def pack(self, keep_timestamp: bool = False) -> bytes:
         update = self.update_timestamp.timestamp() if keep_timestamp else \
                     datetime.datetime.now(datetime.UTC).timestamp()
         return struct.pack(METADATA_FORMAT,
-                    key.encode(),
+                    self.key.encode(),
                     self.col_header.encode(),
                     self.row_header.encode(),
                     self.ordinal,
@@ -117,6 +118,7 @@ class Metadata(Range):
         typ,create, update, id_ = struct.unpack(METADATA_FORMAT, bytes_)
         return cls(start, stop, Periodicity[per.decode()],
                 DataType[typ.decode()],
+                key.decode().strip('\x00'),
                 ordinal,
                 col_header.decode().strip('\x00'),
                 row_header.decode().strip('\x00'),
@@ -135,9 +137,11 @@ class Db:
     def connection(self):
         return redis.Redis(connection_pool=self._pool)
 
-    def make_key(self, key: str) -> str:
+    def split_key(self, key: str) -> str:
         pattern = r'([^#]+)(?:#([^$]*))?(?:\$(.*))?'
-        frame, column, row =  re.match(pattern, key).groups()
+        return  re.match(pattern, key).groups()
+
+    def make_safe(self, frame: str, column: str, row: str) -> str:
         key = struct.pack('<256s', frame.encode())
         if column:
             key += struct.pack('<128s', column.encode())
@@ -146,21 +150,35 @@ class Db:
         return key.decode()
 
     def get_metadata(self, key: str) -> list[Metadata]:
-        key = self.make_key(key)
+        key = self.make_safe(*self.split_key(key))
         mds = [Metadata.unpack(p) for p in
                     self.connection.zrangebylex(INDEX, f'[{key}', f'[{key}\xff')]
         mds.sort(key=attrgetter('ordinal'))
         return mds
 
+    def all_keys(self) -> list[Metadata]:
+        mds = [Metadata.unpack(p) for p in
+                    self.connection.zrange(INDEX, 0, -1)]
+        mds.sort(key=attrgetter('ordinal'))
+        keys = {}
+        for md in mds:
+            if md.key not in keys:
+                keys[md.key] = []
+            keys[md.key].append((md.col_header, md.row_header))
+        return keys
+
     def __setitem__(self, key: str, pandas: pd.Series | pd.DataFrame):
         saved: dict[tuple[str,str],Metadata] = {}
         series: list[tuple[str,str,np.ndarray]] = []
-        safe_key = self.make_key(key)
+        frame, column, row = self.split_key(key)
+        assert column is None or isinstance(pandas, pd.Series) or pandas.shape[1] == 1, \
+                'Can only assign one column to a specific column key'
+        safe_key = self.make_safe(frame, column, row)
         for p in self.connection.zrangebylex(INDEX, f'[{safe_key}', f'[{safe_key}\xff'):
             md = Metadata.unpack(p)
             saved[(md.col_header, md.row_header)] = (md, p)
         if isinstance(pandas, pd.Series):
-            series.append((pandas.name or '', '', pandas))
+            series.append((column or pandas.name or '', row or '', pandas))
         else:
             columns = _check_dups(pandas.columns.values)
             if isinstance(pandas.index, pd.MultiIndex):
@@ -173,7 +191,7 @@ class Db:
                     series.append((str(col), str(row),
                                     pd.Series(flat[:,i],index=index)))
             else:
-                series.extend([(h,'',s) for h,s in pandas.items()])
+                series.extend([(column or h,'',s) for h,s in pandas.items()])
         p = self.connection.pipeline()
         toadd, todel = [],[]
         for col, row, s in series:
@@ -186,7 +204,7 @@ class Db:
             if not md_tuple:
                 data_offset = 0
                 series_md = Metadata(range_.start, range_.stop, range_.periodicity,
-                                        type_, len(saved), col, row)
+                                        type_, frame, len(saved), col, row)
                 saved[(col, row)] = series_md
                 toadd.append(series_md)
             else:
@@ -213,11 +231,11 @@ class Db:
             p.setrange(series_md.data_key, data_offset * type_.length, data.tobytes())
         if todel:
             p.zrem(INDEX, *todel)
-        p.zadd(INDEX, {m.pack(key): 0.0 for m in toadd})
+        p.zadd(INDEX, {m.pack(): 0.0 for m in toadd})
         p.execute()
 
     def __delitem__(self, key: str):
-        key = self.make_key(key)
+        key = self.make_safe(*self.split_key(key))
         p = self.connection.pipeline()
         for packed in self.connection.zrangebylex(INDEX, f'[{key}', f'[{key}\xff'):
             p.delete(Metadata.unpack(packed).data_key)
@@ -231,9 +249,9 @@ class Db:
         else:
             key = args[0]
             start, stop = args[1].start, args[1].stop
-        key = self.make_key(key)
+        safe_key = self.make_safe(*self.split_key(key))
         mds = [Metadata.unpack(d) for d in \
-                self.connection.zrangebylex(INDEX, f'[{key}', f'[{key}\xff')]
+                self.connection.zrangebylex(INDEX, f'[{safe_key}', f'[{safe_key}\xff')]
         if not mds:
             raise KeyError(f'Key "{key}" not found')
         mds.sort(key=attrgetter('ordinal'))

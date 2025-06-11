@@ -604,7 +604,6 @@ class Saved(Word):
 
     def operate(self, stack: list[Column]) -> None:
         for md in db.get_client().get_metadata(self.key):
-            logger.debug(f'md {md.col_header}')
             stack.append(SavedColumn(md.col_header + md.row_header, md=md))
 
 

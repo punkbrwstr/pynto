@@ -285,6 +285,11 @@ class FrameTest(DbTest):
         self.assertEqual(f.shape[0], 5)
         self.assertEqual(f.sum().sum(), 5)
 
+    def test_write_column(self):
+        pt.db['test#e'] = pt.c99.rows[:5]
+        f = pt.db['test']
+        self.assertTrue(np.array_equal(f.values[-1], np.array([0.,1.,2.,3.,99.,5.,6.,7.,8.,9.])))
+
     def test_overwrite(self):
         pt.db['test'] = pt.r10.rev.halpha.rows[:5]
         f = pt.db['test']

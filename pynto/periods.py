@@ -108,21 +108,22 @@ class PeriodicityMixin:
     epoque: datetime.date
     annualization_factor: int
     offset_code: str
+    bbg_code: str | None
     _round: Callable[[datetime.date], datetime.date]
     _count: Callable[[datetime.date, datetime.date], int]
     _offset: Callable[[datetime.date, int], datetime.date]
 
 
 class Periodicity(PeriodicityMixin,Enum):
-    B = 'B',datetime.date(1970,1,1), 260, 'B', _round_b, _count_b, _offset_b
-    N = 'N',datetime.date(1969,12,29), 52, 'W-MON', _get_round_w(0), _count_w, _offset_w
-    T = 'T',datetime.date(1969,12,30), 52, 'W-TUE', _get_round_w(1), _count_w, _offset_w
-    W = 'W',datetime.date(1969,12,31), 52, 'W-WED', _get_round_w(2), _count_w, _offset_w
-    H = 'H',datetime.date(1969,1,1), 52, 'W-THU', _get_round_w(3), _count_w, _offset_w
-    F = 'F',datetime.date(1970,1,2), 52, 'W-FRI', _get_round_w(4), _count_w, _offset_w
-    M = 'M',datetime.date(1970,1,30), 12, 'BME', _round_m, _count_m, _offset_m
-    Q = 'Q',datetime.date(1970,3,31), 4, 'BQE-DEC', _round_q, _count_q, _offset_q
-    Y = 'Y',datetime.date(1970,12,31), 1, 'BYE-DEC', _round_y, _count_y, _offset_y
+    B = 'B',datetime.date(1970, 1,1), 260, 'B',     'DAILY', _round_b, _count_b, _offset_b
+    N = 'N',datetime.date(1969,12,29), 52, 'W-MON', None, _get_round_w(0), _count_w, _offset_w
+    T = 'T',datetime.date(1969,12,30), 52, 'W-TUE', None, _get_round_w(1), _count_w, _offset_w
+    W = 'W',datetime.date(1969,12,31), 52, 'W-WED', None, _get_round_w(2), _count_w, _offset_w
+    H = 'H',datetime.date(1969, 1, 1), 52, 'W-THU', None, _get_round_w(3), _count_w, _offset_w
+    F = 'F',datetime.date(1970, 1, 2), 52, 'W-FRI', 'WEEKLY', _get_round_w(4), _count_w, _offset_w
+    M = 'M',datetime.date(1970, 1,30), 12, 'BME',   'MONTHLY', _round_m, _count_m, _offset_m
+    Q = 'Q',datetime.date(1970, 3,31),  4, 'BQE-DEC', 'QUARTERLY', _round_q, _count_q, _offset_q
+    Y = 'Y',datetime.date(1970,12,31),  1, 'BYE-DEC', 'YEARLY', _round_y, _count_y, _offset_y
 
     def __getitem__(self, index: datelike | int | slice) -> Range:
         if isinstance(index, datelike):
