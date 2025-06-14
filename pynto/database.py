@@ -167,6 +167,13 @@ class Db:
             keys[md.key].append((md.col_header, md.row_header))
         return keys
 
+    def delete_all(self) -> list[Metadata]:
+        p = self.connection.pipeline()
+        for packed in self.connection.zrange(INDEX, 0, -1):
+            p.delete(Metadata.unpack(packed).data_key)
+            p.zrem(INDEX, packed)
+        p.execute()
+
     def __setitem__(self, key: str, pandas: pd.Series | pd.DataFrame):
         saved: dict[tuple[str,str],Metadata] = {}
         series: list[tuple[str,str,np.ndarray]] = []

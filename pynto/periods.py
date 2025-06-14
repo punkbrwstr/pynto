@@ -86,10 +86,10 @@ def _round_q(date: datetime.date) -> datetime.date:
     date = datetime.date(year, month, 28)
     return _round_m(date)
 
-def _count_q(self, d1: datetime.date, d2: datetime.date) -> int:
+def _count_q(d1: datetime.date, d2: datetime.date) -> int:
     return ((d2.year - d1.year) * 12 + d2.month - d1.month) // 3
 
-def _offset_q(self, d: datetime.date, i: int) -> datetime.date:
+def _offset_q(d: datetime.date, i: int) -> datetime.date:
     return _offset_m(d, i * 3)
 
 
