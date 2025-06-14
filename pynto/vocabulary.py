@@ -446,14 +446,14 @@ class Evaluator:
             offsets, needed_saveds = [], []
             for col in saveds:
                 if not col.calculated:
-                    col.cache[col.range_] = np.full(len(col.range_), np.nan, order='F')
+                    col.cache[col.range_] = np.full((len(col.range_),1), np.nan, order='F')
                     offsets.append(db.get_client()._req(
                         col.md, col.range_.start, col.range_.stop, p))
                     needed_saveds.append(col)
             for col, offset, bytes_ in zip(needed_saveds, offsets, p.execute()):
                 if len(bytes_) > 0:
                     data = np.frombuffer(bytes_, col.md.type_.dtype)
-                    col.values[offset:offset + len(data)] = data
+                    col.values[offset:offset + len(data),0] = data
         logger.debug('Processing flat')
         while flat:
             col = flat.popleft()

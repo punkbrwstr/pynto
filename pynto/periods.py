@@ -132,17 +132,6 @@ class Periodicity(PeriodicityMixin,Enum):
         elif isinstance(index, int):
             return Range(index, index + 1, self)
         elif isinstance(index, slice):
-            if isinstance(index.start, datelike):
-                date = parse_date(index.start)
-                start = self._count(self.epoque, self._round(date))
-            elif isinstance(index.start, int):
-                start = index.start
-                if start < 0:
-                    start += self.now().ordinal
-            elif index.start is None:
-                start = 0
-            else: 
-                raise TypeError(f'Unsupported indexer')
             if isinstance(index.stop, datelike):
                 date = parse_date(index.stop)
                 stop = self._count(self.epoque, self._round(date))
@@ -152,6 +141,17 @@ class Periodicity(PeriodicityMixin,Enum):
                     stop += self.now().ordinal
             elif index.stop is None:
                 stop = self.now().ordinal
+            else: 
+                raise TypeError(f'Unsupported indexer')
+            if isinstance(index.start, datelike):
+                date = parse_date(index.start)
+                start = self._count(self.epoque, self._round(date))
+            elif isinstance(index.start, int):
+                start = index.start
+                if start < 0:
+                    start += stop #self.now().ordinal
+            elif index.start is None:
+                start = 0
             else: 
                 raise TypeError(f'Unsupported indexer')
             return Range(start, stop, self)
