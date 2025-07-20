@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pynto"
+version = "0.3"
+description = "Data analysis using a concatenative paradigm"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Peter Graf", email = "peter@pynto.tech"}
+]
+keywords = ["data analysis", "quantitative", "tabular", "concatenative", "functional"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11", 
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy",
+    "pandas",
+    "python-dateutil",
+    "bottleneck",
+    "redis",
+]
+
+[project.urls]
+Homepage = "https://github.com/punkbrwstr/pynto"
+Repository = "https://github.com/punkbrwstr/pynto"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pynto*"]
