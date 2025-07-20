@@ -15,12 +15,13 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
     keywords='data analysis quantitative tabular concatenative functional',
-    python_requires='>=3.6',
-    install_requires=['numpy','pandas','python-dateutil', 'timestamps'],
+    python_requires='>=3.10',
+    install_requires=['numpy','pandas','python-dateutil', 'bottleneck', 'redis'],
 )

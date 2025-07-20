@@ -1,21 +1,24 @@
 from __future__ import annotations
+
+import datetime
+import math
 import os
 import re
-import uuid
-import math
-import datetime
-import redis
 import struct
+import uuid
 import warnings
-import numpy as np
-import pandas as pd
+from collections import namedtuple
+from dataclasses import asdict, astuple, dataclass, field
 from enum import Enum
 from operator import attrgetter
-from dataclasses import dataclass, asdict, astuple, field
-from collections import namedtuple
-from typing import Union, Dict, NamedTuple, Iterable, Any
+from typing import Any, Dict, Iterable, NamedTuple, Union
+
+import numpy as np
+import pandas as pd
+import redis
 from redis.connection import UnixDomainSocketConnection
-from .periods import Periodicity, Period, Range, datelike
+
+from .periods import Period, Periodicity, Range, datelike
 
 INDEX = 'p2m'
 DATA_PREFIX = 'p2d:'.encode()

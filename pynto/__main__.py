@@ -1,5 +1,6 @@
 from . import vocabulary
 
+
 def print_vocab():
     header = 'Word | Default Selector | Parameters | Description\n' \
                 + ':---|:---|:---|:---\n'

@@ -1,13 +1,15 @@
 from __future__ import annotations
+
 import calendar
 import datetime
 import zoneinfo
-import pandas as pd
-from enum import Enum
-from dataclasses import dataclass, field
-from typing import Callable
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Callable
+
+import pandas as pd
 
 datelike = str | datetime.date | datetime.datetime | pd.Timestamp
 
@@ -130,6 +132,8 @@ class Periodicity(PeriodicityMixin,Enum):
             ordinal = self._count(self.epoque, self._round(parse_date(index)))
             return Range(ordinal, ordinal + 1, self)
         elif isinstance(index, int):
+            if index < 0:
+                index += self.now().ordinal
             return Range(index, index + 1, self)
         elif isinstance(index, slice):
             if isinstance(index.stop, datelike):
@@ -149,7 +153,7 @@ class Periodicity(PeriodicityMixin,Enum):
             elif isinstance(index.start, int):
                 start = index.start
                 if start < 0:
-                    start += stop #self.now().ordinal
+                    start += self.now().ordinal
             elif index.start is None:
                 start = 0
             else: 

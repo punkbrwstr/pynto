@@ -1,23 +1,25 @@
 from __future__ import annotations
-import re
-import sys
+
 import copy
-import warnings
-import numbers
-import string
-import logging
-import itertools
 import datetime
-import numpy as np
-import bottleneck as bn
-import numpy.ma as ma
-import pandas as pd
+import itertools
+import logging
+import numbers
+import re
+import string
+import sys
 import traceback
 from collections import deque
 from dataclasses import dataclass, field, KW_ONLY
-from functools import partial,reduce
+from functools import partial, reduce
 from operator import add
-from typing import Callable, Any
+from typing import Any, Callable
+
+import bottleneck as bn
+import numpy as np
+import numpy.ma as ma
+import pandas as pd
+
 from . import database as db
 from .periods import Range, Periodicity, datelike
 
@@ -420,12 +422,16 @@ class Evaluator:
             else per if per else Periodicity.B
         if isinstance(key, Range):
             range_ = key
-        elif isinstance(key, str):
+        elif isinstance(key, datelike) or isinstance(key, int):
             range_ = p[key]
-        else:
-            if isinstance(key, int):
-                key = slice(key, key + 1)
+        elif isinstance(key, slice):
+            if isinstance(key.start, int) and key.start < 0 and max_ is not None:
+                key.start += max_
+            if isinstance(key.stop, int) and key.stop < 0 and max_ is not None:
+                key.stop += max_
             range_ = p[key.start or min_:key.stop or max_]
+        else: 
+            raise TypeError(f'Unsupported indexer')
         for col in stack:
             logger.debug('setting range'+ debug_col_repr(col, 4))
             col.set_range(range_)
