@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pynto"
-version = "0.3"
+version = "0.4"
 description = "Data analysis using a concatenative paradigm"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,5 +34,5 @@ Homepage = "https://github.com/punkbrwstr/pynto"
 Repository = "https://github.com/punkbrwstr/pynto"
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["pynto*"]
