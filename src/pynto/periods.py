@@ -206,6 +206,9 @@ class Period:
     def __add__(self, by: int) -> Period:
         return Period(self.ordinal + by, self.periodicity)
 
+    def __sub__(self, by: int) -> Period:
+        return Period(self.ordinal + by, self.periodicity)
+
     def expand(self, by: int = 1) -> Range:
         if by >= 0:
             return Range(self.ordinal, self.ordinal + by, self.periodicity)
