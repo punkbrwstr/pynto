@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import copy
 import datetime
-import itertools
 import logging
 import numbers
 import re
-import string
 import sys
 import traceback
 from collections import deque
@@ -25,7 +23,11 @@ from .periods import Range, Periodicity, datelike
 
 logger = logging.getLogger(__name__)
 
+_DEBUG = False
+
 def set_debug():
+    global _DEBUG
+    _DEBUG = True
     logger.setLevel(logging.DEBUG)
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(logging.DEBUG)
@@ -178,16 +180,6 @@ class Word:
         else:
             addend_tail = addend
         addend_head = addend_tail._head()
-        if isinstance(addend_head, Combinator):
-            current = this
-            while addend_head.num_quotations != 0 \
-                    and current is not None and isinstance(current, Quotation):
-                addend_head.quotations.append(current)
-                addend_head.num_quotations -= 1
-                current = current.prev
-            assert addend_head.num_quotations <= 0, \
-                'Missing quotation for combinator'
-            this = current
         if this is not None:
             this.next_ = addend_head
             addend_head.prev = this
@@ -254,15 +246,19 @@ class Word:
         return sorted(set(vocab.keys()))
 
 
-    def build_stack(self, stack: list[Column]) -> None:
+    def build_stack(self, stack: list[Column] | None = None) -> list[Column]:
         assert self.open_quotes == 0, 'Unclosed quotation.  Cannot evaluate'
-        assert not isinstance(self, Quotation), 'Cannot evaluate quotation'
+        if stack is None:
+            stack = []
+            prefix = 0
+        else:
+            prefix = 8      
         current = self._head()
-        logger.debug('Build stack')
+        logger.debug(f'{" " * prefix}Build stack')
         while current is not None:
             if not current.called: # need to set defaults (if any)
                 current()
-            logger.debug(f'   current word {current} slice {current.slice_}')
+            logger.debug(f'{" " * prefix}   current word {current} slice {current.slice_}')
             selected = list(range(len(stack))[current.slice_])
             if current.filters:
                 filtered = []
@@ -272,10 +268,9 @@ class Word:
                         if bool(pattern.match(stack[i].header)):
                             filtered.append(i)
                 selected = filtered
-            logger.debug(f'      selected {selected}')
             if current.inverse_selection:
                 selected = list(set(range(len(stack))) - set(selected))
-            logger.debug(f'      selected {selected}')
+            logger.debug(f'{" " * prefix}      selected {selected}')
             current_stack = []
             to_delete = set()
             for i in selected:
@@ -289,7 +284,7 @@ class Word:
             if current.discard_excluded:
                 excluded = set(range(len(stack))) - set(selected)
                 for i in excluded:
-                    logger.debug(f'      dropping {debug_col_repr(stack[i],4)}')
+                    logger.debug(f'{" " * prefix}      dropping {debug_col_repr(stack[i],4)}')
                     stack[i].drop() # no longer needed as siblings   
                 to_delete.update(excluded)
             for i in sorted(to_delete, reverse=True):
@@ -297,16 +292,24 @@ class Word:
             current.operate(current_stack)
             stack.extend(current_stack)
             current = current.next_
+            #debug_stack(stack, offset=prefix + 4)
+        return stack
 
     @property
     def stack(self) -> list[Column]:
-        s = []
-        self.build_stack(s)
-        return s
+        return self.build_stack()
 
     @property
     def columns(self) -> list[str]:
         return [col.header for col in self.stack]
+
+    @property
+    def first(self) -> Evaluator:
+        return Evaluator(self)[0]
+
+    @property
+    def last(self) -> Evaluator:
+        return Evaluator(self)[-1]
 
     @property
     def rows(self) -> Evaluator:
@@ -346,20 +349,28 @@ class Word:
 
     @property
     def local(self) -> Word:
-        return Quotation('q')(self).call(0)
+        return Quotation('q')(self).call[-1:0]
 
     def __str__(self) -> str:
-        s = self.name
+        ignore = 'prev next_ closed called generator slice_ filters copy_selected' \
+                    + ' discard_excluded inverse_selection operation open_quotes' \
+                    + ' name allow_sibling_drops ascending'
         str_args = []
         for k,v in self.__dict__.items():
-            if k != self and k not in ['prev','next_','closed', 'called']:
+            if k != self and k not in ignore.split():
                 if isinstance(v, str):
                     str_args.append(f"{k}='{v[:2000]}'")
                     if len(v) > 2000:
                         str_args[-1] += '...'
                 else:
                     str_args.append(f"{k}={str(v)}")
-        s += '(' + ', '.join(str_args) + ')'
+        s = self.name
+        if str_args:
+            s += f'({", ".join(str_args)})'
+        if self.filters:
+            s += f'[{self.filters}]' 
+        else:
+            s += f'[{self.slice_.start or ""}:{self.slice_.stop or ""}:{self.slice_.step or ""}]'
         return s
 
     def __repr__(self) -> str:
@@ -370,29 +381,29 @@ class Word:
             if current.prev is None:
                 break
             else:
-                s = '.' + s
+                s = '\n    .' + s
                 current = current.prev
         s = 'pt.' + s
         return s
 
-debug_col_repr = lambda c, n: f'{' '*n}{c.id_}-{c.__class__.__name__}' \
+def debug_col_repr(c: Column, n: int) -> str:
+    if not _DEBUG:
+        return ''
+    return lambda c, n: f'{' '*n}{c.id_}-{c.__class__.__name__}' \
         + f' "{c.header}"' \
         + f' range {c.range_}' \
         + f' cache #{str(id(c.cache))[-4:]})'
-def debug_stack(stack):   
+
+def debug_stack(stack,title='stack', offset=4):   
+    if not _DEBUG:
+        return
+    logger.debug((' ' * offset) + title)
     for c in stack:
-        logger.debug(debug_col_repr(c,4))
+        logger.debug(debug_col_repr(c,offset+4))
         if c.input_stack:
-            logger.debug((' ' * 8) + 'inputs')
-        for c2 in c.input_stack:
-            logger.debug(debug_col_repr(c2,10))
+            debug_stack(c.input_stack,'inputs',offset+4+4)
         if hasattr(c,'siblings'):
-            logger.debug((' ' * 8) + 'sibs')
-            for c2 in c.siblings:
-                logger.debug(debug_col_repr(c2,10))
-                logger.debug((' ' * 10) + 'input')
-                if c2.input_column:
-                    logger.debug(debug_col_repr(c2.input_column,12))
+            debug_stack(c.siblings,'sibs',offset+4)
 
 class Evaluator:
     def __init__(self, word: Word, values_only: bool = False):
@@ -401,19 +412,16 @@ class Evaluator:
 
     def __getitem__(self, key: slice | int | str | Range) -> pd.DataFrame:
         _IDs.reset()
-        stack = []
-        self.word.build_stack(stack)
+        stack = self.word.build_stack()
         min_, max_, per = None, None, None
         working = stack[:]
         flat = []
-        logger.debug('Stack before')
-        debug_stack(stack)
         while working:
             col = working.pop()
             bounds = col.get_bounds()
             if bounds:
-                min_ = bounds[0] if not min_ else max(min_, bounds[0])
-                max_ = bounds[1] if not max_ else min(max_, bounds[1])
+                min_ = bounds[0] if not min_ else min(min_, bounds[0])
+                max_ = bounds[1] if not max_ else max(max_, bounds[1])
                 per = bounds[2]
             flat.append(col)
             working.extend(col.input_stack)
@@ -435,7 +443,7 @@ class Evaluator:
         for col in stack:
             logger.debug('setting range'+ debug_col_repr(col, 4))
             col.set_range(range_)
-        logger.debug('Stack after')
+        logger.debug('Stack')
         debug_stack(stack)
         working = stack[:]
         flat = deque()
@@ -506,11 +514,18 @@ class RandomNormal(NullaryWord):
 class Timestamp(NullaryWord):
     @staticmethod
     def generate(range_: Range, values: np.ndarray):
-        values[:] = range_.to_index().view('int').astype(np.float64)
+        values[:] = range_.to_index().view('int').astype(np.float64)[:,None]
 
     def __init__(self, name: str):
         super().__init__(name, self.generate)
 
+class PeriodOrdinal(NullaryWord):
+    @staticmethod
+    def generate(range_: Range, values: np.ndarray):
+        values[:] = np.arange(range_.start,range_.stop).astype(np.float64)[:,None]
+
+    def __init__(self, name: str):
+        super().__init__(name, self.generate)
 
 class Daycount(NullaryWord):
     @staticmethod
@@ -615,6 +630,9 @@ class Saved(Word):
 
 # Quotation / combinator words
 class Quotation(Word):
+    def __init__(self, name: str, slice_=slice(-1,0)):
+        super().__init__(name, slice_)
+
     def __call__(self, quoted: Word | None = None) -> Word:
         if quoted is None:
             return self
@@ -628,21 +646,25 @@ class Quotation(Word):
             self.open_quotes += 1
         return super().__add__(other, copy_addend)
 
-    def operate(self, stack: list[Column]) -> None:
-        raise TypeError('Quotation must be pared with a combinator for evalutation')
-
 class Combinator(Word):
     def __init__(self, name: str, slice_: slice = slice(None), num_quotations: int = 1):
         self.num_quotations = num_quotations
-        self.quotations = []
         super().__init__(name, slice_)
 
-    def operate(self, stack: list[Column]) -> None:
-        pass
+    def get_quotations(self) -> list[Word]:
+        quotations = []
+        current = self.prev
+        needed = self.num_quotations 
+        while needed != 0 and current and isinstance(current, Quotation):
+            quotations.append(current.quoted)
+            needed -=1
+            current = current.prev
+        assert needed <= 0, 'Missing quotation for combinator'
+        return quotations
 
 class Call(Combinator):
     def operate(self, stack: list[Column]) -> None:
-        self.quotations[0].quoted.build_stack(stack)
+        self.get_quotations()[0].build_stack(stack)
 
 class IfExists(Combinator):
     def __call__(self, count: int = 1) -> Word:
@@ -650,7 +672,7 @@ class IfExists(Combinator):
 
     def operate(self, stack: list[Column]) -> None:
         if len(stack) >= self.count:
-            self.quotations[0].quoted.build_stack(stack)
+            self.get_quotations()[0].build_stack(stack)
 
 class IfExistsElse(Combinator):
     def __init__(self, name: str):
@@ -661,9 +683,9 @@ class IfExistsElse(Combinator):
 
     def operate(self, stack: list[Column]) -> None:
         if len(stack) >= self.count:
-            self.quotations[0].quoted.build_stack(stack)
+            self.get_quotations()[0].build_stack(stack)
         else:
-            self.quotations[1].quoted.build_stack(stack)
+            self.get_quotations()[1].build_stack(stack)
 
 class IfHeaders(Combinator):
     def __call__(self, predicate: Callable[[list[str]],bool]) -> Word:
@@ -671,7 +693,7 @@ class IfHeaders(Combinator):
 
     def operate(self, stack: list[Column]) -> None:
         if self.predicate([col.header for col in stack]):
-            self.quotations[0].quoted.build_stack(stack)
+            self.get_quotations()[0].build_stack(stack)
 
 class IfHeadersElse(Combinator):
     def __init__(self, name: str):
@@ -682,9 +704,9 @@ class IfHeadersElse(Combinator):
 
     def operate(self, stack: list[Column]) -> None:
         if self.predicate([col.header for col in stack]):
-            self.quotations[0].quoted.build_stack(stack)
+            self.get_quotations()[0].build_stack(stack)
         else:
-            self.quotations[1].quoted.build_stack(stack)
+            self.get_quotations()[1].build_stack(stack)
 
 class Map(Combinator):
     def __call__(self, every: int = 1):
@@ -696,9 +718,10 @@ class Map(Combinator):
            f'Stack length {len(stack)} not evenly divisible by every {self.every}'
         copied = stack[:]
         stack.clear()
+        quoted = self.get_quotations()[0]
         for t in zip(*[iter(copied)]*self.every):
             this_stack = list(t)
-            self.quotations[0].quoted.build_stack(this_stack)
+            quoted.build_stack(this_stack)
             stack += this_stack
 
 class Repeat(Combinator):
@@ -708,10 +731,11 @@ class Repeat(Combinator):
 
     def operate(self, stack: list[Column]) -> None:
         for _ in range(self.times):
-            self.quotations[0].quoted.build_stack(stack)
+            self.get_quotations()[0].build_stack(stack)
 
 class HMap(Combinator):
     def operate(self, stack: list[Column]) -> None:
+        quoted = self.get_quotations()[0]
         new_stack = []
         for header in set([c.header for c in stack]):
             to_del, filtered_stack = [], []
@@ -719,7 +743,7 @@ class HMap(Combinator):
                 if header == col.header:
                     filtered_stack.append(stack[i])
                     to_del.append(i)
-            self.quotations[0].quoted.build_stack(filtered_stack)
+            quoted.build_stack(filtered_stack)
             new_stack += filtered_stack
             to_del.sort(reverse=True)
             for i in to_del:
@@ -733,27 +757,32 @@ class Cleave(Combinator):
 
     def operate(self, stack: list[Column]) -> None:
         output = []
-        for quote in reversed(self.quotations):
+        for quote in reversed(self.get_quotations()):
             this_stack = [copy.copy(col) for col in stack]
-            quote.quoted.build_stack(this_stack)
+            quote.build_stack(this_stack)
             output += this_stack
         stack.clear()
         stack.extend(output)
 
 class BoundWord(Word):
-    def __init__(self):
-        super().__init__('bound')
-
     def __init__(self, bound: list[Column]):
         self.bound = bound
-        super().__init__()
+        super().__init__('bound')
 
     def operate(self, stack: list[Column]) -> None:
-        stack.extend(self.bound)
+        bound_copy = [copy.copy(c) for c in self.bound]
+        stack.extend(bound_copy)
 
 class Partial(Quotation, Combinator):
+    def __init__(self, name: str):
+        super().__init__(name, slice(-1,None))
+        
+    def __add__(self, other: Word, copy_addend: bool = True) -> Word:
+        return Word.__add__(self, other, copy_addend)
+
     def operate(self, stack: list[Column]) -> None:
-        self.quoted = BoundWord(stack) + self.quoted
+        self.quoted = BoundWord(stack[:]) + self.get_quotations()[0]
+        stack.clear()
 
 class Compose(Quotation, Combinator):
     def __init__(self, name: str):
@@ -763,8 +792,15 @@ class Compose(Quotation, Combinator):
         self.num_quotations = num_quotations
         return super().__call__()
 
+    def __add__(self, other: Word, copy_addend: bool = True) -> Word:
+        return Word.__add__(self, other, copy_addend)
+
     def operate(self, stack: list[Column]) -> None:
-        self.quoted = reduce(add, [quote.quoted for quote in self.quotations])
+        for i, quoted in enumerate(reversed(self.get_quotations())):
+            if i == 0:
+                self.quoted = quoted
+            else:
+                self.quoted += quoted
 
 @dataclass(kw_only=True, eq=False)
 class ResampleColumn(Column):
@@ -785,7 +821,7 @@ class Resample(Word):
         stack.clear()
         for col in inputs:
             stack.append(ResampleColumn(col.header, 
-                        round_=self.round_, inputs=[col]))
+                        round_=self.round_, input_stack=[col]))
 
 @dataclass(kw_only=True, eq=False)
 class PeriodicityColumn(ResampleColumn):
@@ -1149,7 +1185,7 @@ class HeaderFormat(Word):
             col.header = self.format_spec.format(col.header)
 
 class HeaderReplace(Word):
-    def __call__(self, old: str, new: str) -> Word:
+    def __call__(self, old: str, new: str = '') -> Word:
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
@@ -1165,12 +1201,17 @@ class HeaderApply(Word):
             col.header = self.header_func(col.header)
 
 def alphabet_generator():
-    letters = string.ascii_lowercase
-    length = 1
+    n = 0
     while True:
-        for combination in itertools.product(letters, repeat=length):
-            yield ''.join(combination)
-            length += 1
+        result = ''
+        num = n
+        while True:
+            result = chr(97 + (num % 26)) + result
+            num = num // 26 - 1
+            if num < 0:
+                break
+        yield result
+        n += 1
 
 class HeaderAlphabetize(Word):
     def operate(self, stack: list[Column]) -> None:
@@ -1210,6 +1251,9 @@ def rolling_lag(x: np.ndarray, window: int) -> np.ndarray:
         return np.concat([np.full(window, np.nan), x[:-window]])
     else:
         return np.concat([np.full((window,x.shape[1]), np.nan), x[:-window]])
+
+def expanding_lag(x: np.ndarray) -> np.ndarray:
+    return np.full(x.shape,x[0])
 
 def rolling_diff(x: np.ndarray, window: int) -> np.ndarray:
     window -= 1
@@ -1272,6 +1316,7 @@ vocab['r'] = (cat, 'Pushes constant columns for each whole number from 0 to _n_ 
 vocab['nan'] = (cat, 'Pushes a constant nan-valued column', lambda name: Constant(name)(np.nan))
 vocab['randn'] = (cat, 'Pushes a column with values from a random normal distribution', RandomNormal)
 vocab['ts'] = (cat, 'Pushes a column with the timestamp of the end of the period', Timestamp)
+vocab['po'] = (cat, 'Pushes a column with the period ordinal', PeriodOrdinal)
 vocab['dc'] = (cat, 'Pushes a column with the number of days in the period', Daycount)
 vocab['saved'] = (cat, 'Pushes columns saved to internal DB as _key_', Saved)
 vocab['pandas'] = (cat,'Pushes columns from Pandas DataFrame or Series _pandas_', FromPandas)
@@ -1360,7 +1405,7 @@ _funcs = [
                 partial(bn.move_max, axis=0), np.maximum.accumulate),
     ('med',  'Median', partial(bn.nanmedian, axis=1),
                 partial(bn.move_median, axis=1), None),
-    ('lag',  'Lag', None, rolling_lag, None),
+    ('lag',  'Lag', None, rolling_lag, expanding_lag),
     ('dif',  'Lagged difference', None, rolling_diff, expanding_diff),
     ('ret',  'Lagged return', None, rolling_ret, expanding_ret),
     ('ewm',  'Exponentially-weighted moving average', None, rolling_ewma, None),

@@ -197,6 +197,15 @@ class TestCombinators(unittest.TestCase):
         self.assertEqual(result.iloc[0,-1], 2)
         self.assertEqual(result.iloc[0,-2], -4)
 
+    def test_partial(self):
+        result = pt.r5.q.mul.p.partial.map.last.values
+        self.assertTrue(np.array_equal(result[-1],[0.,4.,8.,12.]))
+
+    def test_compose(self):
+        result = pt.r5.q.c1.add.p.q.inv.p.compose.map.last.values
+        self.assertTrue(np.array_equal(result[-1],[1,0.5,1/3,1/4,1/5]))
+
+
 class TestHeaders(unittest.TestCase):
     def test_hset(self):
         self.assertEqual(pt.r4.hset('q','w','e','r').columns[1], 'w')

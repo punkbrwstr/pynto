@@ -45,8 +45,8 @@ def get_client() -> Db:
 def _trim_values(series: pd.Series) -> pd.Series:
     if series.values.dtype.kind == 'f':
         nz = (~np.isnan(series.to_numpy())).nonzero()[0]
-        if len(nz) == 0: # just save one nan if all nans
-            series = series.iloc[0:1]
+        if len(nz) == 0: # don't save if all nans
+            series = None
         else:
             series = series.iloc[nz.min():nz.max()+1]
     return series
@@ -208,6 +208,8 @@ class Db:
             assert not isinstance(s.dtype,  pd.api.extensions.ExtensionDtype)
             type_ = DataType.from_dtype(s.dtype.str)
             s = _trim_values(s)
+            if s is None:
+                continue
             range_ = Range.from_index(s.index)
             data = s.to_numpy()
             md_tuple = saved.get((col,row))
@@ -241,7 +243,8 @@ class Db:
             p.setrange(series_md.data_key, data_offset * type_.length, data.tobytes())
         if todel:
             p.zrem(INDEX, *todel)
-        p.zadd(INDEX, {m.pack(): 0.0 for m in toadd})
+        if toadd:
+            p.zadd(INDEX, {m.pack(): 0.0 for m in toadd})
         p.execute()
 
     def __delitem__(self, key: str):

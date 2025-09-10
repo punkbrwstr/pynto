@@ -1,75 +1,122 @@
-## pynto: Time series analysis in Python using the concatenative paradigm
+## pynto: Data analysis in Python using stack-based programming
 
-pynto is a Python package that lets you manipulate evenly spaced time series with the expressiveness and code reusability of [concatenative](https://en.wikipedia.org/wiki/Concatenative_programming_language) (or [stack-oriented](https://en.wikipedia.org/wiki/Stack-oriented_programming)) programming.  With pynto you define an _expression_ that formally specifies how to calculate one or more time series.  This _expression_ can then be evaluated over any range of time.
+pynto is a Python package that lets you manipulate a data frame as a stack of columns, using the the expressiveness of the [concatenative](https://en.wikipedia.org/wiki/Concatenative_programming_language)/[stack-oriented](https://en.wikipedia.org/wiki/Stack-oriented_programming)) paradigm.  
 
-_Expressions_ are made by chaining together functions called _words_.  When an _expression_ is evaluated, each of its _words_ is called in left-to-right order.  The _words_ operate on a _stack_ that contains time series columns or other "_quoted_" _expressions_.  _Words_ can add, remove or modify columns.  When all its _words_ have operated, the _expression_ returns a pandas DataFrame, with the top of the _stack_ becoming the rightmost column of the frame.
+## How does it work?
+
+With pynto you chain together functions called _words_ to formally specify how to calculate each column of your data frame.  The composed _words_ can be lazily evaluated over any range of rows to create your data frame.
+
+_Words_ add, remove or modify columns.  They can operate on the entire stack or be limited to a certain columns using a _column indexer_.  Composed _words_ will operate in left-to-right order, with operators following their operands in _postfix_ (Reverse Polish Notation) style.  More complex operations can be specified using _quotations_, anonymous blocks of _words_ that do not operate immediately, and _combinators_, higher-order words that control the execution of _quotations_.
+
 
 ## What does it look like?
+Here's a program to calculate deviations from moving average for each column in a table using the _combinator_/_quotation_ pattern.
 ```
 >>> import pynto as pt 
->>> ma_dev = pt.saved('stock_prices') \            # define an expression that appends columns from the build-in database
->>>     .q.dup.rolling(20).mean.sub.p \         # append a quoted expression to the stack
->>>     .map                                    # use the map combinator to apply the quotation to the previous columns
->>> df = ma_dev['2021-06-01':]                  # evaluate your expression over a date range to get a DataFrame
->>> pt.db['stocks_ma_dev'] = df                 # save the results back to the database   
+>>> ma_dev = pt.saved('stock_prices') \     # append columns to stack from the build-in database
+>>>     .q                            \     # start a quotation 
+>>>         .dup                      \     # push a copy of the top (leftmost) column of the stack
+>>>         .ravg(20)                 \     # calculate 20-period moving average
+>>>         .sub                      \     # subtract top column from second column 
+>>>     .p                            \     # close the quotation
+>>>     .map                          \     # use the map combinator to apply the quotation
+>>>                                         # to each column in the stack
+>>>
+>>> df = ma_dev.rows['2021-06-01':]         # evaluate over a range of rows to get a DataFrame
+>>> pt.db['stocks_ma_dev'] = df             # save the results back to the database   
 ```
 
 ## Why pynto?
  - Expressive: Pythonic syntax; Combinatory logic for modular, reusable code 
  - Performant: Column-wise caching to eliminate duplicate operations
  - Batteries included:  Built-in Redis-based time series database
- - Interoperable: Seemlessly integration with Pandas
+ - Interoperable: Seemlessly integration with Pandas/numpy
 
 ## Get pynto
 ```
 pip install pynto
 ```
+
 ## Reference
 
 ### The Basics
 
-Create expressions by chaining built-in words together using a fluent interface.  When evaluated, words will operate in left-to-right order, with operators following their operands in _postfix_ (Reverse Polish) style.  Add constant-value columns to the stack using literals.  For floating-point literals start with `f`, followed by a number with `-` and `.` characters replaced by `_`.
+## Constant literals
+Add constant-value columns to the stack using literals that start with `c`, followed by a number with `-` and `.` characters replaced by `_`.  `r`_n_ adds whole number-value constant columns up to _n - 1_.
 ```
->>> ten_squared = pt.f10_0.dup.mul         # Add a constant column of 10.0 to the stack, then duplicate the top column, then multiplies top two columns together
+>>> # Compose _words_ that add a column of 10s to the stack, duplicate the column, 
+>>> # and then multiply the columns together
+>>> ten_squared = pt.c10_0.dup.mul         
 ```
-To evaluate your expression, specify a date range using the `[`_start_`:`_stop (exclusive)_`:`_periodicity_`]` syntax.  (Instances of `pt.Range` in the local namespace also work.)
+
+## Row indexers
+To evaluate your expression, you use a row indexer.  Specify rows by date range using the `.rows[`_start_`:`_stop (exclusive)_`:`_periodicity_`]` syntax. None slicing arguments default to the widest range available.  _int_ indices also work with the `.rows` indexer. `.first`, and `.last` are included for convenience.
 ```
->>> ten_squared['2021-06-01':'2021-06-03','B']                   # evaluate over a two business day date range                                                   
+>>> ten_squared.rows['2021-06-01':'2021-06-03','B']                   # evaluate over a two business day date range                                                   
                  c
 2021-06-01     100.0
 2021-06-02     100.0
 ```
-Words in the local namespace can be added using the  `+` operator.  
-```
->>> squared = pt.dup.mul
->>> ten_squared2 = pt.f10_0 + squared    # same thing
-```
-Each column has a string header.  `hset` sets the header to a new value.  Headers are useful for filtering or arranging columns.
-```
->>> ten_squared += pt.hset('ten squared')
->>> ten_squared['2021-06-01':'2021-06-03','B']  
-               ten squared
-2021-06-01        100.0
-2021-06-02        100.0
-```
+
+## Quotations and Combinators
 Combinators are higher-order functions that allow pynto to do more complicated things like branching and looping.  Combinators operate on quotations, expressions that are pushed to the stack instead of operating on the stack.  To push a quotation to the stack, put words in between `q` and `p` (or put an expression in the local namespace within the parentheses of `pt.q(_expression_)`).  THe `map` combinator evaluated a quotation at the top of the stack over each column below in the stack.
 ```
->>> expr = pt.f9_0.f10_0.q.dup.mul.p.map
->>> expr['2021-06-01':'2021-06-02']
+>>> pt.c9.c10.q.dup.mul.p.map.last
                  c         c
-2021-06-01      81.0     100.0
+2021-06-02      81.0     100.0
 ```
+
+## Headers
+Each column has a string header.  `hset` sets the header to a new value.  Headers are useful for filtering or arranging columns.
+```
+>>> pt.c9.c10.q.dup.mul.p.map.hset('a','b').last
+                 a         b
+2021-06-02      81.0     100.0
+```
+
+## Column indexers
+Column indexers specify the columns on which a _word_ operates, overiding the _word's_ default.  Postive _int_ indices start from the bottom (left) of the stack and negative indices start from the top.
+
+By default `add` has a column indexer of [-2:]
+```
+>>> pt.r5.add.last
+              c    c    c    c
+2021-06-02  0.0  1.0  2.0  7.0
+```
+Change the column indexer of `add` to [:] to sum all columns
+```
+>>> pt.r5.add[:].last
+               c
+2025-06-02  10.0
+```
+You can also index columns by header, using regular expressions
+```
+>>> pt.r3.hset('a,b,c').add['(a|c)'].last
+              b    a
+2025-06-02  1.0  2.0
+```
+
+## Defining words
+_Words_ in the local namespace can be composed using the  `+` operator.  
+```
+>>> squared = pt.dup.mul
+>>> ten_squared2 = pt.c10_0 + squared    # same thing
+```
+
+_Words_ can also be defined globally in the pynto vocabulary.
+```
+>>> pt.define['squared'] = pt.dup.mul
+>>> ten_squared3 = pt.c10_0.squared    # same thing
+```
+
 
 ### The Database
 
-pynto has built-in time series database functionality that lets you save pandas DataFrames and Series to a Redis database.  The database uses only String key/values, saving the underlying numpy data in native byte format for zero-copy retrieval.   Each DataFrame column is saved as an independent key and can be retrieved on its own.  The database also supports three-dimensional frames that have a two-level MultiIndex.  Saved data can be accessed through pynto expressions or standard methods
+pynto has built-in database functionality that lets you save DataFrames and Series to a Redis database.  The database saves the underlying numpy data in native byte format for zero-copy retrieval.   Each DataFrame column is saved as an independent key and can be retrieved or updated on its own.  The database also supports three-dimensional frames that have a two-level MultiIndex.
 
 ```
->>> pt.db['my_df'] = expr['2021-06-01':'2021-06-03']
->>> pt.db('my_df')['2021-06-01':'2021-06-02']
-              constant  constant
-2021-06-01      81.0     100.0
->>> pt.db.read('my_df')
+>>> pt.db['my_df'] = expr.rows['2021-06-01':'2021-06-03']
+>>> pt.saved('my_df').rows[:]
               constant  constant
 2021-06-01      81.0     100.0
 2021-06-02      81.0     100.0
@@ -77,91 +124,163 @@ pynto has built-in time series database functionality that lets you save pandas 
 
 ## pynto built-in vocabulary
 
-### Words for adding columns
-Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
-:---|:---|:---|:---
-c|value| -- c|Adds a constant-_value_ column.
-csv|csv_file, index_col=0, header='infer'| -- c (c)|Adds columns from _csv_file_.
-pandas|frame_or_series| -- c (c)|Adds columns from a pandas data structure.
-c_range|value| -- c (c)|Add constant int columns from 0 to _value_.
 
-### Combinators
-Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
-:---|:---|:---|:---
-call|depth=None, copy=False| a q -- c| Apply quotation to stack, up to _depth_ if specified.  Optionally leaves stack in place with _copy_.
-each|start=0, stop=None, every=1, copy=False| a b q -- c d| Apply quotation stack elements from _start_ to _end_ in groups of _every_.  Optionally leaves stack in place with _copy_.
-repeat|times| a b q -- c d| Apply quotation to the stack _times_ times.
-cleave|num_quotations, depth=None, copy=False| a q q -- c d| Apply _num_quotations_ quotations to copies of stack elements up to _depth_.  Optionally leaves stack in place with _copy_.
+## Column Creation
 
-### Words to manipulate columns
-Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
-:---|:---|:---|:---
-dup|| a -- a a| Duplicate top column.
-roll|| a b c -- c a b| Permute columns.
-swap|| a b -- b a| Swap top two columns.
-drop|| a b c -- a b| Drop top column.
-clear|| a b c -- | Clear columns.
-interleave|count=None, split_into=2|a b c d -- a c b d|Divide columns into _split into_ groups and interleave group elements.
-pull|start,end=None,clear=False|a b c -- b c a|Bring columns _start_ (to _end_) to the top.
-hpull|\*headers, clear=False|a b c -- b c a|Bring columns with headers matching regex _headers_ to the top.  Optionally clear remainder of stack
-hfilter|\*headers, clear=False|a b c -- a|Shortcut for hpull with _clear_=True
+| Word | Description | Parameters | Column Indexer |
+|------|-------------|------------|----------------|
+| c | Pushes constant columns for each of _values_ | values: list[float] | [-1:0] |
+| dc | Pushes a column with the number of days in the period |  | [-1:0] |
+| nan | Pushes a constant nan-valued column | values: list[float] | [-1:0] |
+| pandas | Pushes columns from Pandas DataFrame or Series _pandas_ | pandas: pd.DataFrame \| pd.Series, round_: bool = False | [:] |
+| po | Pushes a column with the period ordinal |  | [-1:0] |
+| r | Pushes constant columns for each whole number from 0 to _n_ - 1 | n: int | [-1:0] |
+| randn | Pushes a column with values from a random normal distribution |  | [-1:0] |
+| saved | Pushes columns saved to internal DB as _key_ | key: str | [-1:0] |
+| ts | Pushes a column with the timestamp of the end of the period |  | [-1:0] |
 
-### Words to manipulate headers
-Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
-:---|:---|:---|:---
-hset|\*headers| a b -- a b|Set top columns' headers to _headers_.
-hformat|format_string| a -- a|Apply _format_string_ to existing headers.
-happly|header_function| a -- a|Apply _header_function_ to existing header.
+## Combinators
 
-### Words for arithmetic or logical operators
-Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
-:---|:---|:---|:---
-add||a b -- c|a + b
-sub||a b -- c|a - b
-mul||a b -- c|a * b
-div||a b -- c|a / b
-mod||a b -- c|a % b
-pow||a b -- c|a ** b
-eq||a b -- c|a == b
-ne||a b -- c|a != b
-ge||a b -- c|a >= b
-gt||a b -- c|a > b
-le||a b -- c|a <= b
-lt||a b -- c|a < b
-neg||a -- c|a * -1
-abs||a -- c|abs(a)
-sqrt||a -- c|a ** 0.5
-zeroToNa|| a -- c|Replaces zeros with np.nan
+| Word | Description | Parameters | Column Indexer |
+|------|-------------|------------|----------------|
+| call | Applies quotation |  | [:] |
+| cleave | Applies all preceding quotations |  | [:] |
+| compose | Combines quotations | num_quotations: int = 2 | [:] |
+| hmap | Applies quotation to stacks created grouping columns by header |  | [:] |
+| ifexists | Applies quotation if stack has at least _count_ columns | count: int = 1 | [:] |
+| ifexistselse | Applies top quotation if stack has at least _count_ columns, otherwise applies second quotation | count: int = 1 | [:] |
+| ifheaders | Applies top quotation if list of column headers fulfills _predicate_ | predicate: Callable[[list[str]], bool] | [:] |
+| ifheaderselse | Applies quotation if list of column headers fulfills _predicate_, otherwise applies second quotation | predicate: Callable[[list[str]], bool] | [:] |
+| map | Applies quotation in groups of _every_ | every: int = 1 | [:] |
+| partial | Pushes stack columns to the front of quotation | quoted: Word \| None = None | [-1:] |
+| repeat | Applies quotation _times_ times | times: int = 2 | [:] |
 
-### Words for creating window columns
-Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
-:---|:---|:---|:---
-rolling|window=2, exclude_nans=True, lookback_multiplier=2|a -- w|Create window column with values from most recent _window_ rows.  Exclude nan-valued rows from count unless _exclude_nans_.  Extend history up to _lookback_multiplier_ to look for non-nan rows.  
-crossing||a b c -- w|Create window column with cross-sectional values from the same rows of all columns. 
+## Cumulative
 
-### Words for calculating statistics on window columns
-Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
-:---|:---|:---|:---
-sum||w -- c|Sums of windows.
-mean||w -- c|Means of windows.
-var||w -- c|Variances of windows.
-std||w -- c|Standard deviations of windows.
-change||w -- c|Changes between first and last rows of windows.
-pct_change||w -- c|Percent changes between first and last rows of windows.
-log_change||w -- c|Differences of logs of first and last rows of windows.
-first||w -- c|First rows of windows.
-last||w -- c|Last rows of windows.
-zscore||w -- c|Z-score of most recent rows within windows.
+| Word | Description | Parameters | Column Indexer |
+|------|-------------|------------|----------------|
+| cadd | Addition |  | [-1:] |
+| cavg | Arithmetic average |  | [-1:] |
+| cdif | Lagged difference |  | [-1:] |
+| clag | Lag |  | [-1:] |
+| cmax | Maximum |  | [-1:] |
+| cmin | Minimum |  | [-1:] |
+| cmul | Multiplication |  | [-1:] |
+| cret | Lagged return |  | [-1:] |
+| cstd | Standard deviation |  | [-1:] |
+| csub | Subtraction |  | [-1:] |
+| cvar | Variance |  | [-1:] |
 
-### Words for cleaning up data
-Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
-:---|:---|:---|:---
-fill|value|a -- a|Fill nans with _value_.
-ffill||a -- a|Last observation carry-forward.
-join|date|a b -- c|Join top two columns, switching from second to first on _date_ index.
+## Data cleanup
 
-### Other words
-Name | Parameters |Stack effect<br>_before_&nbsp;--&nbsp;_after_|Description
-:---|:---|:---|:---
-ewma|window, fill_nans=True|a -- c|Calculates exponentially-weighted moving average with half-life _window_. 
-wlag|number|w -- c|Lag _number_ rows.
+| Word | Description | Parameters | Column Indexer |
+|------|-------------|------------|----------------|
+| ffill | Fills nans with previous values, looking back _lookback_ before range and leaving trailing nans unless not _leave_end_ | lookback: int = 10, leave_end: bool = True | [:] |
+| fill | Fills nans with _value_  | value: float | [:] |
+| join | Joins two columns at _date_ | date: datelike | [-2:] |
+| per | Changes column periodicity to _periodicity_, then resamples | periodicity: str \| Periodicity, round_: bool = False | [:] |
+| resample | Adapts periodicity to match range with optional rounding _round_ | round_: bool = False | [:] |
+| start | Changes period start to _start_, then resamples | start: datelike, round_: bool = False | [:] |
+| zero_first | Changes first value to zero | ascending: bool = True | [-1:] |
+| zero_to_na | Changes zeros to nans | ascending: bool = True | [-1:] |
+
+## Header manipulation
+
+| Word | Description | Parameters | Column Indexer |
+|------|-------------|------------|----------------|
+| halpha | Set headers to alphabetical values |  | [:] |
+| happly | Apply _header_func_ to headers_ | header_func: Callable[[str], str] | [:] |
+| hformat | Apply _format_spec_ to headers | format_spec: str | [:] |
+| hreplace | Replace _old_ with _new_ in headers | old: str, new: str = '' | [:] |
+| hset | Set headers to _*headers_  | headers: str | [:] |
+| hsetall | Set headers to _*headers_ repeating, if necessary | headers: str | [:] |
+
+## Other functions
+
+| Word | Description | Parameters | Column Indexer |
+|------|-------------|------------|----------------|
+| abs | Absolute value | ascending: bool = True | [-1:] |
+| exp | Exponential | ascending: bool = True | [-1:] |
+| expm1 | Exponential minus one | ascending: bool = True | [-1:] |
+| inv | Multiplicative inverse | ascending: bool = True | [-1:] |
+| lnot | Logical not | ascending: bool = True | [-1:] |
+| log | Natural log | ascending: bool = True | [-1:] |
+| log1p | Natural log of increment | ascending: bool = True | [-1:] |
+| neg | Additive inverse | ascending: bool = True | [-1:] |
+| rank | Row-wise rank | ascending: bool = True | [:] |
+| sign | Sign | ascending: bool = True | [-1:] |
+| sqrt | Square root | ascending: bool = True | [-1:] |
+
+## Quotation
+
+| Word | Description | Parameters | Column Indexer |
+|------|-------------|------------|----------------|
+| q | Wraps the following words until *p* as a quotation, or wraps _quoted_ expression as a quotation | quoted: Word \| None = None | [-1:0] |
+
+## Reverse Cumulative
+
+| Word | Description | Parameters | Column Indexer |
+|------|-------------|------------|----------------|
+| rcadd | Addition |  | [-1:] |
+| rcavg | Arithmetic average |  | [-1:] |
+| rcdif | Lagged difference |  | [-1:] |
+| rclag | Lag |  | [-1:] |
+| rcmax | Maximum |  | [-1:] |
+| rcmin | Minimum |  | [-1:] |
+| rcmul | Multiplication |  | [-1:] |
+| rcret | Lagged return |  | [-1:] |
+| rcstd | Standard deviation |  | [-1:] |
+| rcsub | Subtraction |  | [-1:] |
+| rcvar | Variance |  | [-1:] |
+
+## Rolling Window
+
+| Word | Description | Parameters | Column Indexer |
+|------|-------------|------------|----------------|
+| radd | Addition | window: int = 2 | [-1:] |
+| ravg | Arithmetic average | window: int = 2 | [-1:] |
+| rcor | Correlation | window: int = 2 | [-2:] |
+| rcov | Covariance | window: int = 2 | [-2:] |
+| rdif | Lagged difference | window: int = 2 | [-1:] |
+| rewm | Exponentially-weighted average | window: int = 2 | [-1:] |
+| rews | Exponentially-weighted standard deviation | window: int = 2 | [-1:] |
+| rewv | Exponentially-weighted variance | window: int = 2 | [-1:] |
+| rlag | Lag | window: int = 2 | [-1:] |
+| rmax | Maximum | window: int = 2 | [-1:] |
+| rmed | Median | window: int = 2 | [-1:] |
+| rmin | Minimum | window: int = 2 | [-1:] |
+| rret | Lagged return | window: int = 2 | [-1:] |
+| rstd | Standard deviation | window: int = 2 | [-1:] |
+| rvar | Variance | window: int = 2 | [-1:] |
+
+## Row-wise Reduction
+
+| Word | Description | Parameters | Column Indexer |
+|------|-------------|------------|----------------|
+| add | Addition |  | [-2:] |
+| avg | Arithmetic average |  | [-2:] |
+| div | Division |  | [-2:] |
+| max | Maximum |  | [-2:] |
+| med | Median |  | [-2:] |
+| min | Minimum |  | [-2:] |
+| mod | Modulo |  | [-2:] |
+| mul | Multiplication |  | [-2:] |
+| pow | Power |  | [-2:] |
+| std | Standard deviation |  | [-2:] |
+| sub | Subtraction |  | [-2:] |
+| var | Variance |  | [-2:] |
+
+## Stack Manipulation
+
+| Word | Description | Parameters | Column Indexer |
+|------|-------------|------------|----------------|
+| drop | Removes selected columns |  | [-1:] |
+| dup | Duplicates columns |  | [-1:] |
+| filter | Removes non-selected columns |  | [:] |
+| hsort | Sorts columns by header |  | [:] |
+| interleave | Divides columns in _parts_ groups and interleaves the groups | parts: int = 2 | [:] |
+| nip | Removes non-selected columns, defaulting selection to top |  | [-1:] |
+| pull | Brings selected columns to the top |  | [:] |
+| rev | Reverses the order of selected columns |  | [:] |
+| roll | Permutes selected columns |  | [:] |
+| swap | Swaps top and bottom selected columns |  | [-2:] |

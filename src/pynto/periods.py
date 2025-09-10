@@ -57,9 +57,10 @@ def _offset_w(date: datetime.date, by: int) -> datetime.date:
 def _get_round_w(weekday: int) -> Callable[[datetime.date], datetime.date]:
     def _round_w(date: datetime.date) -> datetime.date:
         days_ahead = weekday - date.weekday()
-        if days_ahead <= 0:  # Target day already happened this week
+        if days_ahead < 0:  # Target day already happened this week
             days_ahead += 7
         return date + datetime.timedelta(days_ahead)
+    return _round_w
 
 def _round_m(date: datetime.date) -> datetime.date:
     next_month = date.replace(day=28) + datetime.timedelta(days=4) 
@@ -162,15 +163,18 @@ class Periodicity(PeriodicityMixin,Enum):
         else:
             raise TypeError(f'Unsupported indexer')
 
-    def now(self, add: int = 0) -> Period:
+    def now(self) -> Period:
         ny = datetime.datetime.now(datetime.UTC).astimezone(zoneinfo.ZoneInfo(key='US/Eastern'))
         ny_date = ny.date()
         if ny.hour >= 17:
             ny_date += datetime.timedelta(days=1)
-        return Period(self._count(self.epoque, self._round(ny_date)) + 1 + add, self)
+        return self[ny_date][0]
 
     def __hash__(self):
         return hash(self.code)
+
+    def __repr__(self):
+        return f'Periodicity.{self.code}' 
 
     @classmethod
     def from_offset_code(cls, code: str) -> Periodicity:
@@ -207,7 +211,7 @@ class Period:
         return Period(self.ordinal + by, self.periodicity)
 
     def __sub__(self, by: int) -> Period:
-        return Period(self.ordinal + by, self.periodicity)
+        return Period(self.ordinal - by, self.periodicity)
 
     def expand(self, by: int = 1) -> Range:
         if by >= 0:
@@ -227,6 +231,10 @@ class Range:
     start: int #inclusive
     stop: int #exclusive
     periodicity: Periodicity
+
+    def __post_init__(self):
+        assert self.start <= self.stop, \
+            f'Range stop less than start ({self.start}-{self.stop})'
 
     @classmethod
     def from_index(cls, date_range: pd.DatetimeIndex) -> Range:
