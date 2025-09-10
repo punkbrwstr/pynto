@@ -1,4 +1,6 @@
 import random
+import inspect
+from pynto.vocabulary import vocab
 
 class SkipListNode:
     """Node in a skip list with multiple forward references."""
@@ -396,3 +398,83 @@ class SortedSet:
     def lexrevrange(self, max_lex, min_lex, start=0, count=None):
         """Convenience method for range_by_lex with descending order."""
         return self.range_by_lex(min_lex, max_lex, start, count, reverse=True)
+
+def print_vocab_tables():
+    """
+    Prints markdown tables showing all entries in vocab dict from vocabulary.py.
+    Creates separate tables for each category (first element in value tuples).
+    """
+    # Group vocab entries by category
+    categories = {}
+    for word, (category, description, callable_obj) in vocab.items():
+        if category not in categories:
+            categories[category] = []
+        categories[category].append((word, description, callable_obj))
+    
+    # Print each category as a separate table
+    for category, entries in sorted(categories.items()):
+        print(f"\n## {category}\n")
+        print("| Word | Description | Parameters | Column Indexer |")
+        print("|------|-------------|------------|----------------|")
+        
+        for word, description, callable_obj in sorted(entries):
+            # Get parameter information
+            try:
+                # Create an instance to examine the __call__ method
+                word_instance = callable_obj(word)
+                call_method = getattr(word_instance, '__call__')
+                sig = inspect.signature(call_method)
+                
+                # Extract parameters with defaults and type hints
+                params = []
+                for param_name, param in sig.parameters.items():
+                    if param_name in ['self', 'kwargs']:
+                        continue
+                    
+                    # Build parameter string with type hint
+                    param_str = param_name
+                    if param.annotation != param.empty:
+                        # Format type annotation
+                        if hasattr(param.annotation, '__name__'):
+                            type_hint = param.annotation.__name__
+                        else:
+                            type_hint = str(param.annotation)
+                        # Escape pipe characters for markdown table compatibility
+                        type_hint = type_hint.replace('|', '\\|')
+                        param_str += f": {type_hint}"
+                    
+                    # Add default value if present
+                    if param.default != param.empty:
+                        if isinstance(param.default, str):
+                            param_str += f" = '{param.default}'"
+                        else:
+                            param_str += f" = {param.default}"
+                    
+                    params.append(param_str)
+                
+                param_str = ", ".join(params) if params else ""
+                
+                # Get slice information
+                slice_obj = getattr(word_instance, 'slice_', slice(None))
+                if slice_obj == slice(None):
+                    slice_str = "[:]"
+                elif slice_obj.start is None and slice_obj.stop is None:
+                    slice_str = f"[::{slice_obj.step}]" if slice_obj.step else "[:]"
+                elif slice_obj.start is None:
+                    slice_str = f"[:{slice_obj.stop}:{slice_obj.step}]" if slice_obj.step else f"[:{slice_obj.stop}]"
+                elif slice_obj.stop is None:
+                    slice_str = f"[{slice_obj.start}::{slice_obj.step}]" if slice_obj.step else f"[{slice_obj.start}:]"
+                else:
+                    slice_str = f"[{slice_obj.start}:{slice_obj.stop}:{slice_obj.step}]" if slice_obj.step else f"[{slice_obj.start}:{slice_obj.stop}]"
+                
+            except Exception as e:
+                param_str = ""
+                slice_str = "Error extracting slice"
+            
+            # Clean up the slice string to remove None values properly
+            slice_str = slice_str.replace("None", "")
+            
+            print(f"| {word} | {description} | {param_str} | {slice_str} |")
+
+if __name__ == '__main__':
+    print_vocab_tables()
