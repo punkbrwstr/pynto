@@ -1229,6 +1229,9 @@ def zero_to_na_op(x: np.ndarray, out: np.ndarray) -> None:
 def is_na_op(x: np.ndarray, out: np.ndarray) -> None:
     out[:] = np.where(np.isnan(x), 1, 0)
 
+def inc_op(x: np.ndarray, out: np.ndarray) -> None:
+    out[:] = x + 1
+
 def expanding_mean(x: np.ndarray) -> np.ndarray:
     if len(x.shape) == 1:
         return np.add.accumulate(x) / (np.arange(len(x)) + 1)
@@ -1433,7 +1436,7 @@ vocab['rewm'] = ('Rolling Window', 'Exponentially-weighted average',
                  lambda name: Rolling(name, rolling_ewma))
 
 
-cat = 'Other functions'
+cat = 'One-for-one functions'
 vocab['neg'] = (cat, 'Additive inverse',lambda name: OneForOneFunction(name,np.negative))
 vocab['inv'] = (cat, 'Multiplicative inverse',lambda name: OneForOneFunction(name,np.reciprocal))
 vocab['abs'] = (cat, 'Absolute value',lambda name: OneForOneFunction(name,np.abs))
@@ -1447,6 +1450,7 @@ vocab['sign'] = (cat, 'Sign',lambda name: OneForOneFunction(name, np.sign))
 vocab['rank'] = (cat, 'Row-wise rank',
                  lambda name: OneForOneFunction(name, rank,
                                     slice_=slice(None), allow_sibling_drops=False))
+vocab['inc'] = (cat, 'Increment',lambda name: OneForOneFunction(name, inc_op))
 
 def resolve(name: str, throw_exception: bool = True) -> Word | None:
     if re.match(r'c\d[_\d]*',name) is not None:

@@ -195,13 +195,14 @@ pynto has built-in database functionality that lets you save DataFrames and Seri
 | hset | Set headers to _*headers_  | headers: str | [:] |
 | hsetall | Set headers to _*headers_ repeating, if necessary | headers: str | [:] |
 
-## Other functions
+## One-for-one functions
 
 | Word | Description | Parameters | Column Indexer |
 |------|-------------|------------|----------------|
 | abs | Absolute value | ascending: bool = True | [-1:] |
 | exp | Exponential | ascending: bool = True | [-1:] |
 | expm1 | Exponential minus one | ascending: bool = True | [-1:] |
+| inc | Increment | ascending: bool = True | [-1:] |
 | inv | Multiplicative inverse | ascending: bool = True | [-1:] |
 | lnot | Logical not | ascending: bool = True | [-1:] |
 | log | Natural log | ascending: bool = True | [-1:] |
