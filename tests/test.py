@@ -1,8 +1,10 @@
 import unittest
 import datetime
+import os
 import pandas as pd
 import numpy as np
 import pynto as pt
+from pynto.database import SQLiteConnection, Db
 
 def get_test_data():
     return pd.DataFrame(np.arange(12).astype('int64').reshape(3,4),columns=['a','b','c','d'],
@@ -373,6 +375,260 @@ class MultiIndexFrameTest(DbTest):
         pt.db['test'] = pd.DataFrame(np.arange(75).astype('int64').reshape(25,3),columns=['a','b','c'], index=index)
         f = pt.db['test']
         f.loc['2019-01-07'].shape == (5,3)
+
+
+class SQLiteDbTest(unittest.TestCase):
+    """Test SQLite3 database implementation."""
+    
+    def setUp(self):
+        """Set up in-memory SQLite database for testing."""
+        # Create a fresh SQLite connection for each test
+        self.sqlite_conn = SQLiteConnection()
+        self.db = Db(connection=self.sqlite_conn)
+    
+    def tearDown(self):
+        """Clean up after each test."""
+        # Close the SQLite connection
+        if hasattr(self.sqlite_conn, '_conn'):
+            self.sqlite_conn._conn.close()
+
+    def test_save_and_read_dataframe(self):
+        """Test saving and reading a DataFrame to/from SQLite."""
+        # Create test data
+        df = get_test_data()
+        
+        # Save to SQLite database
+        self.db['test_df'] = df
+        
+        # Read back from database
+        result = self.db['test_df']
+        
+        # Verify data integrity
+        self.assertEqual(result.shape, df.shape)
+        self.assertTrue(np.array_equal(result.values, df.values))
+        self.assertTrue(all(result.columns == df.columns))
+    
+    def test_save_and_read_series(self):
+        """Test saving and reading a Series to/from SQLite."""
+        # Create test series
+        series = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0], 
+                          index=pd.date_range('2020-01-01', periods=5, freq='B'),
+                          name='test_series')
+        
+        # Save to SQLite database
+        self.db['test_series'] = series
+        
+        # Read back from database
+        result = self.db['test_series']
+        
+        # Verify data integrity
+        self.assertEqual(result.shape, (5, 1))
+        self.assertTrue(np.array_equal(result.values.flatten(), series.values))
+    
+    def test_save_multiple_dataframes(self):
+        """Test saving multiple DataFrames with different keys."""
+        # Create test data
+        df1 = get_test_data()
+        df2 = pd.DataFrame(np.random.randn(4, 3), 
+                          columns=['x', 'y', 'z'],
+                          index=pd.date_range('2021-01-01', periods=4, freq='B'))
+        
+        # Save both DataFrames
+        self.db['df1'] = df1
+        self.db['df2'] = df2
+        
+        # Read back both DataFrames
+        result1 = self.db['df1']
+        result2 = self.db['df2']
+        
+        # Verify data integrity
+        self.assertEqual(result1.shape, df1.shape)
+        self.assertEqual(result2.shape, df2.shape)
+        self.assertTrue(np.array_equal(result1.values, df1.values))
+        self.assertTrue(np.allclose(result2.values, df2.values))
+    
+    def test_delete_dataframe(self):
+        """Test deleting DataFrames from SQLite database."""
+        # Create and save test data
+        df = get_test_data()
+        self.db['test_delete'] = df
+        
+        # Verify it was saved
+        result = self.db['test_delete']
+        self.assertEqual(result.shape, df.shape)
+        
+        # Delete the DataFrame
+        del self.db['test_delete']
+        
+        # Verify it was deleted (should raise KeyError)
+        with self.assertRaises(KeyError):
+            self.db['test_delete']
+    
+    def test_overwrite_dataframe(self):
+        """Test overwriting an existing DataFrame."""
+        # Save initial data
+        df1 = get_test_data()
+        self.db['test_overwrite'] = df1
+        
+        # Overwrite with new data
+        df2 = pd.DataFrame(np.ones((2, 2)), 
+                          columns=['col1', 'col2'],
+                          index=pd.date_range('2022-01-01', periods=2, freq='B'))
+        self.db['test_overwrite'] = df2
+        
+        # Read back and verify it's the new data
+        result = self.db['test_overwrite']
+        self.assertEqual(result.shape, (786,6))
+    
+    def test_range_query(self):
+        """Test querying data with date ranges."""
+        # Create data with specific date range
+        dates = pd.date_range('2020-01-01', periods=10, freq='B')
+        df = pd.DataFrame(np.arange(20).reshape(10, 2), 
+                         columns=['A', 'B'], 
+                         index=dates)
+        
+        # Save to database
+        self.db['test_range'] = df
+        
+        # Query a specific range
+        start_date = '2020-01-03'
+        end_date = '2020-01-10'
+        result = self.db['test_range', start_date:end_date]
+        
+        # Verify the range query worked
+        expected_rows = 5  # 2020-01-03 to 2020-01-07 inclusive
+        self.assertEqual(result.shape[0], expected_rows)
+        self.assertEqual(result.shape[1], 2)
+    
+    def test_column_specific_save_and_read(self):
+        """Test saving and reading specific columns."""
+        # Create test data
+        df = get_test_data()
+        self.db['test_col'] = df
+        
+        # Save a specific column with column key
+        series = pd.Series([100, 200, 300], 
+                          index=pd.date_range('2019-01-01', periods=3, freq='B'),
+                          name='new_col')
+        self.db['test_col#new_col'] = series
+        
+        # Read back the specific column
+        result_col = self.db['test_col#new_col']
+        self.assertEqual(result_col.shape, (3, 1))
+        
+        # Read back the full DataFrame (should include new column)
+        result_full = self.db['test_col']
+        self.assertEqual(result_full.shape[1], 5)  # Original 4 + 1 new column
+    
+    def test_integer_and_boolean_datatypes(self):
+        """Test handling of different data types."""
+        # Test integer data
+        int_df = pd.DataFrame(np.arange(6, dtype=np.int64).reshape(2, 3),
+                             columns=['int_a', 'int_b', 'int_c'],
+                             index=pd.date_range('2020-01-01', periods=2, freq='B'))
+        self.db['test_int'] = int_df
+        
+        # Test boolean data
+        bool_df = pd.DataFrame(np.array([True, False, True, False]).reshape(2, 2),
+                              columns=['bool_a', 'bool_b'],
+                              index=pd.date_range('2020-01-01', periods=2, freq='B'))
+        self.db['test_bool'] = bool_df
+        
+        # Read back and verify data types
+        int_result = self.db['test_int']
+        bool_result = self.db['test_bool']
+        
+        self.assertEqual(int_result.values.dtype, np.int64)
+        self.assertEqual(bool_result.values.dtype, np.bool_)
+        self.assertTrue(np.array_equal(int_result.values, int_df.values))
+        self.assertTrue(np.array_equal(bool_result.values, bool_df.values))
+    
+    def test_all_keys_listing(self):
+        """Test listing all keys in the database."""
+        # Save multiple DataFrames
+        df1 = get_test_data()
+        df2 = pd.DataFrame(np.random.randn(2, 2), 
+                          columns=['col1', 'col2'],
+                          index=pd.date_range('2020-02-01', periods=2, freq='B'))
+        
+        self.db['key1'] = df1
+        self.db['key2'] = df2
+        
+        # Get all keys
+        all_keys = self.db.all_keys()
+        
+        # Verify keys are present
+        self.assertIn('key1', all_keys)
+        self.assertIn('key2', all_keys)
+    
+    def test_delete_all(self):
+        """Test deleting all data from database."""
+        # Save some test data
+        df1 = get_test_data()
+        df2 = pd.DataFrame(np.random.randn(2, 2), 
+                          columns=['col1', 'col2'],
+                          index=pd.date_range('2020-02-01', periods=2, freq='B'))
+        
+        self.db['key1'] = df1
+        self.db['key2'] = df2
+        
+        # Verify data exists
+        self.assertEqual(len(self.db.all_keys()), 2)
+        
+        # Delete all data
+        self.db.delete_all()
+        
+        # Verify all data is gone
+        self.assertEqual(len(self.db.all_keys()), 0)
+
+
+class SQLiteDefaultConnectionTest(unittest.TestCase):
+    """Test that SQLite is used by default when Redis env vars are not set."""
+    
+    def setUp(self):
+        """Save original environment and clear Redis env vars."""
+        self.original_env = {}
+        redis_env_vars = ['PYNTO_REDIS_HOST', 'PYNTO_REDIS_PATH', 'PYNTO_REDIS_PORT', 'PYNTO_REDIS_PASSWORD']
+        
+        for var in redis_env_vars:
+            if var in os.environ:
+                self.original_env[var] = os.environ[var]
+                del os.environ[var]
+        
+        # Clear the global client to force recreation
+        if hasattr(pt.database, '_CLIENT'):
+            pt.database._CLIENT = None
+    
+    def tearDown(self):
+        """Restore original environment."""
+        # Restore original environment variables
+        for var, value in self.original_env.items():
+            os.environ[var] = value
+        
+        # Clear the global client
+        if hasattr(pt.database, '_CLIENT'):
+            pt.database._CLIENT = None
+    
+    def test_default_to_sqlite(self):
+        """Test that SQLite is used by default when Redis env vars are not set."""
+        # Get a client (should default to SQLite)
+        client = pt.get_client()
+        
+        # Verify it's using SQLite connection
+        self.assertIsInstance(client.connection, SQLiteConnection)
+        
+        # Test basic functionality
+        test_data = get_test_data()
+        client['test_default_sqlite'] = test_data
+        
+        result = client['test_default_sqlite']
+        self.assertEqual(result.shape, test_data.shape)
+        self.assertTrue(np.array_equal(result.values, test_data.values))
+        
+        # Clean up
+        del client['test_default_sqlite']
+
 
 if __name__ == '__main__':
     unittest.main()

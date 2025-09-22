@@ -1,3 +1,5 @@
+![pynto logo](resources/pynto.png)
+
 ## pynto: Data analysis in Python using stack-based programming
 
 pynto is a Python package that lets you manipulate a data frame as a stack of columns, using the the expressiveness of the [concatenative](https://en.wikipedia.org/wiki/Concatenative_programming_language)/[stack-oriented](https://en.wikipedia.org/wiki/Stack-oriented_programming)) paradigm.  
@@ -112,7 +114,7 @@ _Words_ can also be defined globally in the pynto vocabulary.
 
 ### The Database
 
-pynto has built-in database functionality that lets you save DataFrames and Series to a Redis database.  The database saves the underlying numpy data in native byte format for zero-copy retrieval.   Each DataFrame column is saved as an independent key and can be retrieved or updated on its own.  The database also supports three-dimensional frames that have a two-level MultiIndex.
+pynto has built-in database functionality that lets you save DataFrames and Series to a Redis or SQLite database.  The database saves the underlying numpy data in native byte format for zero-copy retrieval.   Each DataFrame column is saved as an independent key and can be retrieved or updated on its own.  The database also supports three-dimensional frames that have a two-level MultiIndex.
 
 ```
 >>> pt.db['my_df'] = expr.rows['2021-06-01':'2021-06-03']
@@ -195,13 +197,14 @@ pynto has built-in database functionality that lets you save DataFrames and Seri
 | hset | Set headers to _*headers_  | headers: str | [:] |
 | hsetall | Set headers to _*headers_ repeating, if necessary | headers: str | [:] |
 
-## Other functions
+## One-for-one functions
 
 | Word | Description | Parameters | Column Indexer |
 |------|-------------|------------|----------------|
 | abs | Absolute value | ascending: bool = True | [-1:] |
 | exp | Exponential | ascending: bool = True | [-1:] |
 | expm1 | Exponential minus one | ascending: bool = True | [-1:] |
+| inc | Increment | ascending: bool = True | [-1:] |
 | inv | Multiplicative inverse | ascending: bool = True | [-1:] |
 | lnot | Logical not | ascending: bool = True | [-1:] |
 | log | Natural log | ascending: bool = True | [-1:] |

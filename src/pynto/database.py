@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import atexit
 import datetime
 import math
 import os
 import re
+import sqlite3
 import struct
 import uuid
 import warnings
+from abc import ABC, abstractmethod
 from collections import namedtuple
 from dataclasses import asdict, astuple, dataclass, field
 from enum import Enum
@@ -27,19 +30,30 @@ _CLIENT: Db | None = None
 
 def get_client() -> Db:
     global _CLIENT
-    #if not '_CLIENT' in globals():
     if _CLIENT is None:
-        args = {}
-        if 'PYNTO_REDIS_PASSWORD' in os.environ:
-            args['password'] = os.environ['PYNTO_REDIS_PASSWORD']
-        if 'PYNTO_REDIS_PATH' in os.environ:
-            args['path'] = os.environ['PYNTO_REDIS_PATH']
+        # Check if Redis environment variables are set
+        redis_configured = ('PYNTO_REDIS_HOST' in os.environ or 
+                          'PYNTO_REDIS_PATH' in os.environ)
+        
+        if redis_configured:
+            # Use Redis connection
+            args = {}
+            if 'PYNTO_REDIS_PASSWORD' in os.environ:
+                args['password'] = os.environ['PYNTO_REDIS_PASSWORD']
+            if 'PYNTO_REDIS_PATH' in os.environ:
+                args['path'] = os.environ['PYNTO_REDIS_PATH']
+            else:
+                if 'PYNTO_REDIS_HOST' in os.environ:
+                    args['host'] = os.environ['PYNTO_REDIS_HOST']
+                if 'PYNTO_REDIS_PORT' in os.environ:
+                    args['port'] = os.environ['PYNTO_REDIS_PORT']
+            connection = RedisConnection(**args)
         else:
-            if 'PYNTO_REDIS_HOST' in os.environ:
-                args['host'] = os.environ['PYNTO_REDIS_HOST']
-            if 'PYNTO_REDIS_PORT' in os.environ:
-                args['port'] = os.environ['PYNTO_REDIS_PORT']
-        _CLIENT = Db(**args)
+            # Default to SQLite connection
+            db_file = os.environ.get('PYNTO_DB_FILE')
+            connection = SQLiteConnection(db_file)
+        
+        _CLIENT = Db(connection=connection)
     return _CLIENT
 
 def _trim_values(series: pd.Series) -> pd.Series:
@@ -129,16 +143,362 @@ class Metadata(Range):
                 datetime.datetime.fromtimestamp(create),
                 datetime.datetime.fromtimestamp(update))
 
-class Db:
+class DatabaseConnection(ABC):
+    """Abstract base class for database connections used by pynto."""
+    
+    @abstractmethod
+    def create_pipeline(self):
+        """Create a pipeline for batching operations."""
+        pass
+    
+    @abstractmethod
+    def get_index_range_by_lex(self, key: str, min_lex: str, max_lex: str) -> list[bytes]:
+        """Get items from sorted set within lexicographical range."""
+        pass
+    
+    @abstractmethod
+    def get_all_index_members(self, key: str) -> list[bytes]:
+        """Get all members from sorted set."""
+        pass
+    
+    @abstractmethod
+    def delete_key(self, key: bytes) -> None:
+        """Delete a key from the database."""
+        pass
+    
+    @abstractmethod
+    def remove_from_index(self, key: bytes, *members: bytes) -> None:
+        """Remove members from a sorted set."""
+        pass
+    
+    @abstractmethod
+    def add_to_index(self, key: bytes, mapping: dict[bytes, float]) -> None:
+        """Add members with scores to a sorted set."""
+        pass
+    
+    @abstractmethod
+    def set_data(self, key: bytes, offset: int, data: bytes) -> None:
+        """Set bytes at a specific offset in a string key."""
+        pass
+    
+    @abstractmethod
+    def get_bytes(self, key: bytes) -> bytes:
+        """Get the entire value of a string key as bytes."""
+        pass
+    
+    @abstractmethod
+    def get_range_bytes(self, key: bytes, start: int, end: int) -> bytes:
+        """Get a range of bytes from a string key."""
+        pass
 
+
+class RedisConnection(DatabaseConnection):
+    """Redis implementation of DatabaseConnection."""
+    
     def __init__(self, **kwargs):
         if 'path' in kwargs:
            kwargs['connection_class'] = UnixDomainSocketConnection
         self._pool = redis.ConnectionPool(**kwargs)
-
+    
     @property
-    def connection(self):
+    def _redis(self):
         return redis.Redis(connection_pool=self._pool)
+    
+    def create_pipeline(self):
+        """Create a Redis pipeline for batching operations."""
+        return RedisPipeline(self._redis.pipeline())
+    
+    def get_index_range_by_lex(self, key: str, min_lex: str, max_lex: str) -> list[bytes]:
+        """Get items from sorted set within lexicographical range."""
+        return self._redis.zrangebylex(key, min_lex, max_lex)
+    
+    def get_all_index_members(self, key: str) -> list[bytes]:
+        """Get all members from sorted set."""
+        return self._redis.zrange(key, 0, -1)
+    
+    def delete_key(self, key: bytes) -> None:
+        """Delete a key from Redis."""
+        self._redis.delete(key)
+    
+    def remove_from_index(self, key: bytes, *members: bytes) -> None:
+        """Remove members from a Redis sorted set."""
+        self._redis.zrem(key, *members)
+    
+    def add_to_index(self, key: bytes, mapping: dict[bytes, float]) -> None:
+        """Add members with scores to a Redis sorted set."""
+        self._redis.zadd(key, mapping)
+    
+    def set_data(self, key: bytes, offset: int, data: bytes) -> None:
+        """Set bytes at a specific offset in a Redis string."""
+        self._redis.setrange(key, offset, data)
+    
+    def get_bytes(self, key: bytes) -> bytes:
+        """Get the entire value of a Redis string as bytes."""
+        return self._redis.get(key) or b''
+    
+    def get_range_bytes(self, key: bytes, start: int, end: int) -> bytes:
+        """Get a range of bytes from a Redis string."""
+        return self._redis.getrange(key, start, end)
+
+
+class SQLiteConnection(DatabaseConnection):
+    """SQLite implementation of DatabaseConnection."""
+    
+    _open_connections = []
+    
+    def __init__(self, db_file: str = None):
+        self.db_file = db_file or ":memory:"
+        self._conn = sqlite3.connect(self.db_file, check_same_thread=False)
+        self._create_tables()
+        
+        # Track this connection for cleanup
+        SQLiteConnection._open_connections.append(self._conn)
+        
+        # Register cleanup handler on first connection
+        if len(SQLiteConnection._open_connections) == 1:
+            atexit.register(SQLiteConnection._cleanup_connections)
+    
+    def _create_tables(self):
+        """Create the required tables if they don't exist."""
+        cursor = self._conn.cursor()
+        
+        # Table for sorted set (metadata p2m) - using BLOB for binary keys
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS p2m (
+                member BLOB PRIMARY KEY
+            )
+        ''')
+        
+        # Table for p2d storage - using BLOB for binary keys
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS p2d (
+                key BLOB PRIMARY KEY,
+                value BLOB
+            )
+        ''')
+        
+        self._conn.commit()
+    
+    def close(self):
+        """Close the SQLite connection."""
+        if self._conn and self._conn in SQLiteConnection._open_connections:
+            self._conn.close()
+            SQLiteConnection._open_connections.remove(self._conn)
+    
+    @classmethod
+    def _cleanup_connections(cls):
+        """Close all open SQLite connections."""
+        for conn in cls._open_connections[:]:  # Copy list to avoid modification during iteration
+            try:
+                conn.close()
+            except Exception:
+                pass  # Ignore errors during cleanup
+        cls._open_connections.clear()
+    
+    def create_pipeline(self):
+        """Create a SQLite pipeline for batching operations."""
+        return SQLitePipeline(self)
+    
+    def get_index_range_by_lex(self, key: str, min_lex: str, max_lex: str) -> list[bytes]:
+        """Get items from sorted set within lexicographical range."""
+        cursor = self._conn.cursor()
+        
+        # Convert Redis-style range to bytes for direct comparison
+        min_val = min_lex[1:] if min_lex.startswith('[') else min_lex
+        max_val = max_lex[1:] + '\xff' if max_lex.startswith('[') else max_lex
+        
+        # Convert to bytes for direct BLOB comparison
+        min_val_bytes = min_val.encode('utf-8')
+        max_val_bytes = max_val.encode('utf-8')
+        
+        cursor.execute('''
+            SELECT member FROM p2m 
+            WHERE member >= ? AND member < ?
+            ORDER BY member
+        ''', (min_val_bytes, max_val_bytes))
+        
+        return [row[0] for row in cursor.fetchall()]
+    
+    def get_all_index_members(self, key: str) -> list[bytes]:
+        """Get all members from sorted set."""
+        cursor = self._conn.cursor()
+        cursor.execute('SELECT member FROM p2m ORDER BY member')
+        return [row[0] for row in cursor.fetchall()]
+    
+    def delete_key(self, key: bytes) -> None:
+        """Delete a key from SQLite."""
+        cursor = self._conn.cursor()
+        cursor.execute('DELETE FROM p2d WHERE key = ?', (key,))
+        self._conn.commit()
+    
+    def remove_from_index(self, key: bytes, *members: bytes) -> None:
+        """Remove members from SQLite sorted set."""
+        cursor = self._conn.cursor()
+        for member in members:
+            cursor.execute('DELETE FROM p2m WHERE member = ?', (member,))
+        self._conn.commit()
+    
+    def add_to_index(self, key: bytes, mapping: dict[bytes, float]) -> None:
+        """Add members to SQLite sorted set (scores ignored for now)."""
+        cursor = self._conn.cursor()
+        for member, score in mapping.items():
+            cursor.execute('''
+                INSERT OR REPLACE INTO p2m (member) VALUES (?)
+            ''', (member,))
+        self._conn.commit()
+    
+    def set_data(self, key: bytes, offset: int, data: bytes) -> None:
+        """Set bytes at a specific offset in SQLite."""
+        cursor = self._conn.cursor()
+        # Get existing data
+        cursor.execute('SELECT value FROM p2d WHERE key = ?', (key,))
+        row = cursor.fetchone()
+        
+        if row is None:
+            # Create new entry with zeros up to offset, then data
+            new_data = b'\x00' * offset + data
+        else:
+            existing_data = row[0] or b''
+            # Extend existing data if needed
+            if len(existing_data) < offset:
+                existing_data += b'\x00' * (offset - len(existing_data))
+            
+            # Replace bytes at offset
+            new_data = existing_data[:offset] + data + existing_data[offset + len(data):]
+        
+        cursor.execute('''
+            INSERT OR REPLACE INTO p2d (key, value) VALUES (?, ?)
+        ''', (key, new_data))
+        self._conn.commit()
+    
+    def get_bytes(self, key: bytes) -> bytes:
+        """Get the entire value as bytes from SQLite."""
+        cursor = self._conn.cursor()
+        cursor.execute('SELECT value FROM p2d WHERE key = ?', (key,))
+        row = cursor.fetchone()
+        return row[0] if row and row[0] is not None else b''
+    
+    def get_range_bytes(self, key: bytes, start: int, end: int) -> bytes:
+        """Get a range of bytes from SQLite using substr."""
+        cursor = self._conn.cursor()
+        
+        if start == -1 and end == 0:
+            return b''  # Redis convention for empty range
+        
+        if end == -1:
+            # Get from start to end of blob
+            cursor.execute('SELECT substr(value, ?, length(value) - ? + 1) FROM p2d WHERE key = ?', 
+                          (start + 1, start, key))  # SQLite substr is 1-indexed
+        else:
+            # Get specific range
+            length = end - start + 1
+            cursor.execute('SELECT substr(value, ?, ?) FROM p2d WHERE key = ?', 
+                          (start + 1, length, key))  # SQLite substr is 1-indexed
+        
+        row = cursor.fetchone()
+        return row[0] if row and row[0] is not None else b''
+
+
+class SQLitePipeline:
+    """Pipeline for SQLite operations."""
+    
+    def __init__(self, conn):
+        self._conn = conn
+        self._commands = []
+        self._results = []
+    
+    def delete_key(self, key: bytes) -> None:
+        """Add delete command to pipeline."""
+        self._commands.append(('delete', key))
+    
+    def remove_from_index(self, key: bytes, *members: bytes) -> None:
+        """Add remove from sorted set command to pipeline."""
+        for member in members:
+            self._commands.append(('remove_index', member))
+    
+    def add_to_index(self, key: bytes, mapping: dict[bytes, float]) -> None:
+        """Add members to sorted set in pipeline."""
+        for member, score in mapping.items():
+            self._commands.append(('add_index', member))
+    
+    def set_data(self, key: bytes, offset: int, data: bytes) -> None:
+        """Add set range bytes command to pipeline."""
+        self._commands.append(('set_data', key, offset, data))
+    
+    def get_range_bytes(self, key: bytes, start: int, end: int) -> None:
+        """Add get range bytes command to pipeline."""
+        self._commands.append(('get_range_bytes', key, start, end))
+    
+    def execute(self):
+        """Execute all commands in the pipeline."""
+        results = []
+        
+        for cmd in self._commands:
+            if cmd[0] == 'delete':
+                self._conn.delete_key(cmd[1])
+                results.append(None)
+                
+            elif cmd[0] == 'remove_index':
+                self._conn.remove_from_index(None, cmd[1])  # key not used in SQLite implementation
+                results.append(None)
+                
+            elif cmd[0] == 'add_index':
+                self._conn.add_to_index(None, {cmd[1]: 0.0})  # key and score not used in SQLite implementation
+                results.append(None)
+                
+            elif cmd[0] == 'set_data':
+                key, offset, data = cmd[1], cmd[2], cmd[3]
+                self._conn.set_data(key, offset, data)
+                results.append(None)
+                
+            elif cmd[0] == 'get_range_bytes':
+                key, start, end = cmd[1], cmd[2], cmd[3]
+                result = self._conn.get_range_bytes(key, start, end)
+                results.append(result)
+        
+        self._commands.clear()
+        return results
+
+
+class RedisPipeline:
+    """Wrapper for Redis pipeline to abstract Redis-specific methods."""
+    
+    def __init__(self, pipeline):
+        self._pipeline = pipeline
+    
+    def delete_key(self, key: bytes) -> None:
+        """Add delete command to pipeline."""
+        self._pipeline.delete(key)
+    
+    def remove_from_index(self, key: bytes, *members: bytes) -> None:
+        """Add remove from sorted set command to pipeline."""
+        self._pipeline.zrem(key, *members)
+    
+    def add_to_index(self, key: bytes, mapping: dict[bytes, float]) -> None:
+        """Add members with scores to sorted set in pipeline."""
+        self._pipeline.zadd(key, mapping)
+    
+    def set_data(self, key: bytes, offset: int, data: bytes) -> None:
+        """Add set range bytes command to pipeline."""
+        self._pipeline.setrange(key, offset, data)
+    
+    def get_range_bytes(self, key: bytes, start: int, end: int) -> None:
+        """Add get range bytes command to pipeline."""
+        self._pipeline.getrange(key, start, end)
+    
+    def execute(self):
+        """Execute all commands in the pipeline."""
+        return self._pipeline.execute()
+
+
+class Db:
+
+    def __init__(self, connection: DatabaseConnection = None, **kwargs):
+        if connection is not None:
+            self.connection = connection
+        else:
+            # Default to Redis connection for backward compatibility
+            self.connection = RedisConnection(**kwargs)
 
     def split_key(self, key: str) -> str:
         pattern = r'([^#]+)(?:#([^$]*))?(?:\$(.*))?'
@@ -155,13 +515,13 @@ class Db:
     def get_metadata(self, key: str) -> list[Metadata]:
         key = self.make_safe(*self.split_key(key))
         mds = [Metadata.unpack(p) for p in
-                    self.connection.zrangebylex(INDEX, f'[{key}', f'[{key}\xff')]
+                    self.connection.get_index_range_by_lex(INDEX, f'[{key}', f'[{key}\xff')]
         mds.sort(key=attrgetter('ordinal'))
         return mds
 
     def all_keys(self) -> list[Metadata]:
         mds = [Metadata.unpack(p) for p in
-                    self.connection.zrange(INDEX, 0, -1)]
+                    self.connection.get_all_index_members(INDEX)]
         mds.sort(key=attrgetter('ordinal'))
         keys = {}
         for md in mds:
@@ -171,10 +531,10 @@ class Db:
         return keys
 
     def delete_all(self) -> list[Metadata]:
-        p = self.connection.pipeline()
-        for packed in self.connection.zrange(INDEX, 0, -1):
-            p.delete(Metadata.unpack(packed).data_key)
-            p.zrem(INDEX, packed)
+        p = self.connection.create_pipeline()
+        for packed in self.connection.get_all_index_members(INDEX):
+            p.delete_key(Metadata.unpack(packed).data_key)
+            p.remove_from_index(INDEX, packed)
         p.execute()
 
     def __setitem__(self, key: str, pandas: pd.Series | pd.DataFrame):
@@ -184,7 +544,7 @@ class Db:
         assert column is None or isinstance(pandas, pd.Series) or pandas.shape[1] == 1, \
                 'Can only assign one column to a specific column key'
         safe_key = self.make_safe(frame, column, row)
-        for p in self.connection.zrangebylex(INDEX, f'[{safe_key}', f'[{safe_key}\xff'):
+        for p in self.connection.get_index_range_by_lex(INDEX, f'[{safe_key}', f'[{safe_key}\xff'):
             md = Metadata.unpack(p)
             saved[(md.col_header, md.row_header)] = (md, p)
         if isinstance(pandas, pd.Series):
@@ -202,7 +562,7 @@ class Db:
                                     pd.Series(flat[:,i],index=index)))
             else:
                 series.extend([(column or h,'',s) for h,s in pandas.items()])
-        p = self.connection.pipeline()
+        p = self.connection.create_pipeline()
         toadd, todel = [],[]
         for col, row, s in series:
             assert not isinstance(s.dtype,  pd.api.extensions.ExtensionDtype)
@@ -232,27 +592,27 @@ class Db:
                     if range_.stop < series_md.stop:
                         existing_start = range_.stop - series_md.start
                         data = np.hstack([data,
-                            self.connection.get(series_md.data_key)[existing_start:]])
+                            self.connection.get_bytes(series_md.data_key)[existing_start:]])
                     data_offset = 0
-                    series_md.range_.start = range_.start
+                    series_md.start = range_.start
                 else: #series_md.range_.stop <= range_.start
                     data_offset = range_.start - series_md.start
                 series_md.stop = max(range_.stop, series_md.stop)
                 toadd.append(series_md)
                 todel.append(packed)
-            p.setrange(series_md.data_key, data_offset * type_.length, data.tobytes())
+            p.set_data(series_md.data_key, data_offset * type_.length, data.tobytes())
         if todel:
-            p.zrem(INDEX, *todel)
+            p.remove_from_index(INDEX, *todel)
         if toadd:
-            p.zadd(INDEX, {m.pack(): 0.0 for m in toadd})
+            p.add_to_index(INDEX, {m.pack(): 0.0 for m in toadd})
         p.execute()
 
     def __delitem__(self, key: str):
         key = self.make_safe(*self.split_key(key))
-        p = self.connection.pipeline()
-        for packed in self.connection.zrangebylex(INDEX, f'[{key}', f'[{key}\xff'):
-            p.delete(Metadata.unpack(packed).data_key)
-            p.zrem(INDEX, packed)
+        p = self.connection.create_pipeline()
+        for packed in self.connection.get_index_range_by_lex(INDEX, f'[{key}', f'[{key}\xff'):
+            p.delete_key(Metadata.unpack(packed).data_key)
+            p.remove_from_index(INDEX, packed)
         p.execute()
 
     def __getitem__(self, args: str | tuple[str,slice]) -> pd.Frame:
@@ -264,7 +624,7 @@ class Db:
             start, stop = args[1].start, args[1].stop
         safe_key = self.make_safe(*self.split_key(key))
         mds = [Metadata.unpack(d) for d in \
-                self.connection.zrangebylex(INDEX, f'[{safe_key}', f'[{safe_key}\xff')]
+                self.connection.get_index_range_by_lex(INDEX, f'[{safe_key}', f'[{safe_key}\xff')]
         if not mds:
             raise KeyError(f'Key "{key}" not found')
         mds.sort(key=attrgetter('ordinal'))
@@ -278,7 +638,7 @@ class Db:
         elif not isinstance(stop, int):
             stop = per[stop].start
         ary = np.full((stop - start,len(mds)), mds[0].type_.pad_value, order='F')
-        p = self.connection.pipeline()
+        p = self.connection.create_pipeline()
         offsets = [self._req(md, start, stop, p) for md in mds]
         for i, md, offset, bytes_ in zip(range(len(mds)),mds, offsets, p.execute()):
             if len(bytes_) > 0:
@@ -298,15 +658,15 @@ class Db:
         df = pd.DataFrame(ary,columns=cols, index=index)
         return df
 
-    def _req(self, saved: Metadata, start: int, stop: int, p: redis.client.Pipeline)  -> int:
+    def _req(self, saved: Metadata, start: int, stop: int, p)  -> int:
         if start < saved.stop and stop >= saved.start:
             offset = max(0,saved.start - start)
             start = max(start, saved.start)
             stop = min(stop, saved.stop)
-            p.getrange(saved.data_key,
+            p.get_range_bytes(saved.data_key,
                 (start - saved.start) * saved.type_.length,
                 (stop - saved.start) * saved.type_.length - 1)
         else: # no overlap with saved 
             offset = -1
-            p.getrange(saved.data_key, -1, 0)
+            p.get_range_bytes(saved.data_key, -1, 0)
         return offset
