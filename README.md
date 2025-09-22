@@ -30,8 +30,8 @@ Here's a program to calculate deviations from moving average for each column in 
 
 ## Why pynto?
  - Expressive: Pythonic syntax; Combinatory logic for modular, reusable code 
- - Performant: Column-wise caching to eliminate duplicate operations
- - Batteries included:  Built-in Redis-based time series database
+ - Performant: Memoization to eliminate duplicate operations
+ - Batteries included:  Built-in time series database
  - Interoperable: Seemlessly integration with Pandas/numpy
 
 ## Get pynto
