@@ -456,7 +456,7 @@ class Evaluator:
         debug_stack(flat)
         saveds = [col for col in flat if isinstance(col, SavedColumn)]
         if saveds:
-            p = db.get_client().connection.create_pipeline()
+            p = db.get_client().connection.pipeline()
             offsets, needed_saveds = [], []
             for col in saveds:
                 if not col.calculated:

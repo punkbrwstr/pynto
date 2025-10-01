@@ -207,12 +207,13 @@ class Db:
         for col, row, s in series:
             assert not isinstance(s.dtype,  pd.api.extensions.ExtensionDtype)
             type_ = DataType.from_dtype(s.dtype.str)
-            s = _trim_values(s)
-            if s is None:
-                continue
+            md_tuple = saved.get((col,row))
+            if not md_tuple:
+                s = _trim_values(s)
+                if s is None:
+                    continue
             range_ = Range.from_index(s.index)
             data = s.to_numpy()
-            md_tuple = saved.get((col,row))
             if not md_tuple:
                 data_offset = 0
                 series_md = Metadata(range_.start, range_.stop, range_.periodicity,

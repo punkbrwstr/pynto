@@ -114,7 +114,7 @@ _Words_ can also be defined globally in the pynto vocabulary.
 
 ### The Database
 
-pynto has built-in database functionality that lets you save DataFrames and Series to a Redis or SQLite database.  The database saves the underlying numpy data in native byte format for zero-copy retrieval.   Each DataFrame column is saved as an independent key and can be retrieved or updated on its own.  The database also supports three-dimensional frames that have a two-level MultiIndex.
+pynto has built-in database functionality that lets you save DataFrames and Series to a Redis database.  The database saves the underlying numpy data in native byte format for zero-copy retrieval.   Each DataFrame column is saved as an independent key and can be retrieved or updated on its own.  The database also supports three-dimensional frames that have a two-level MultiIndex.
 
 ```
 >>> pt.db['my_df'] = expr.rows['2021-06-01':'2021-06-03']
