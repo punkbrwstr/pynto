@@ -12,5 +12,12 @@ class _Definer:
 
 define = _Definer()
 
+now = lambda: Periodicity.B.current().last_date
+
 def __getattr__(name: str):
-    return resolve(name)
+    if not name.startswith('__'):
+        return resolve(name)
+    else:
+        if name not in globals():
+            raise AttributeError
+        return globals()[name]

@@ -854,7 +854,7 @@ class StartColumn(ResampleColumn):
     start: datelike
 
     def set_input_range(self) -> None:
-        input_range = Range(self.range_.periodicity[self.start].start,
+        input_range = Range(self.range_.periodicity[self.start].ordinal,
                             self.range_.stop, self.range_.periodicity)
         for col in self.input_stack:
             col.set_range(input_range)
@@ -926,7 +926,7 @@ class JoinColumn(Column):
 
     def set_input_range(self) -> None:
         range_ = self.range_
-        cutover_index = range_.periodicity[self.date].start
+        cutover_index = range_.periodicity[self.date].ordinal
         if range_.stop < cutover_index:
             self.input_stack.pop()
             self.input_stack[0].set_range(range_)

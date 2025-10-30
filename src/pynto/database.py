@@ -235,7 +235,7 @@ class Db:
                         data = np.hstack([data,
                             self.connection.get(series_md.data_key)[existing_start:]])
                     data_offset = 0
-                    series_md.range_.start = range_.start
+                    series_md.start = range_.start
                 else: #series_md.range_.stop <= range_.start
                     data_offset = range_.start - series_md.start
                 series_md.stop = max(range_.stop, series_md.stop)
