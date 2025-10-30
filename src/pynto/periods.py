@@ -105,6 +105,23 @@ def _count_y(d1: datetime.date, d2: datetime.date) -> int:
 def _offset_y(date: datetime.date, by: int) -> datetime.date:
     return _offset_m(date, by * 12)
 
+def _str_b(per: Period) -> str:
+    return str(per.last_date)
+
+def _str_w(per: Period) -> str:
+    return f'{per.last_date.year}-{per.last_date.isocalendar().week}'
+
+def _str_m(per: Period) -> str:
+    return str(per.last_date)[:7]
+
+def _str_y(per: Period) -> str:
+    return str(per.last_date)[:4]
+
+def _str_q(per: Period) -> str:
+    return f'{per.last_date.year}-{(per.last_date.month - 1) // 3 + 1}'
+
+
+
 @dataclass(repr=False)
 class PeriodicityMixin:
     code: str
@@ -115,27 +132,40 @@ class PeriodicityMixin:
     _round: Callable[[datetime.date], datetime.date]
     _count: Callable[[datetime.date, datetime.date], int]
     _offset: Callable[[datetime.date, int], datetime.date]
+    _to_str: Callable[[Period], str]
 
 
 class Periodicity(PeriodicityMixin,Enum):
-    B = 'B',datetime.date(1970, 1,1), 260, 'B',     'DAILY', _round_b, _count_b, _offset_b
-    N = 'N',datetime.date(1969,12,29), 52, 'W-MON', None, _get_round_w(0), _count_w, _offset_w
-    T = 'T',datetime.date(1969,12,30), 52, 'W-TUE', None, _get_round_w(1), _count_w, _offset_w
-    W = 'W',datetime.date(1969,12,31), 52, 'W-WED', None, _get_round_w(2), _count_w, _offset_w
-    H = 'H',datetime.date(1969, 1, 1), 52, 'W-THU', None, _get_round_w(3), _count_w, _offset_w
-    F = 'F',datetime.date(1970, 1, 2), 52, 'W-FRI', 'WEEKLY', _get_round_w(4), _count_w, _offset_w
-    M = 'M',datetime.date(1970, 1,30), 12, 'BME',   'MONTHLY', _round_m, _count_m, _offset_m
-    Q = 'Q',datetime.date(1970, 3,31),  4, 'BQE-DEC', 'QUARTERLY', _round_q, _count_q, _offset_q
-    Y = 'Y',datetime.date(1970,12,31),  1, 'BYE-DEC', 'YEARLY', _round_y, _count_y, _offset_y
+    B = 'B',datetime.date(1970, 1,1), 260, 'B',           'DAILY', \
+        _round_b, _count_b, _offset_b, _str_b
+    N = 'N',datetime.date(1969,12,29), 52, 'W-MON',          None, \
+        _get_round_w(0), _count_w, _offset_w, _str_w
+    T = 'T',datetime.date(1969,12,30), 52, 'W-TUE',          None, \
+        _get_round_w(1), _count_w, _offset_w, _str_w
+    W = 'W',datetime.date(1969,12,31), 52, 'W-WED',          None, \
+        _get_round_w(2), _count_w, _offset_w, _str_w
+    H = 'H',datetime.date(1969, 1, 1), 52, 'W-THU',          None, \
+        _get_round_w(3), _count_w, _offset_w, _str_w
+    F = 'F',datetime.date(1970, 1, 2), 52, 'W-FRI',      'WEEKLY', \
+        _get_round_w(4), _count_w, _offset_w, _str_w
+    M = 'M',datetime.date(1970, 1,30), 12, 'BME',       'MONTHLY', \
+        _round_m, _count_m, _offset_m, _str_m
+    Q = 'Q',datetime.date(1970, 3,31),  4, 'BQE-DEC', 'QUARTERLY', \
+        _round_q, _count_q, _offset_q, _str_q
+    Y = 'Y',datetime.date(1970,12,31),  1, 'BYE-DEC',    'YEARLY', \
+        _round_y, _count_y, _offset_y, _str_y
 
-    def __getitem__(self, index: datelike | int | slice) -> Range:
+    def __getitem__(self, index: datelike | Period | int | slice) -> Period | Range:
         if isinstance(index, datelike):
             ordinal = self._count(self.epoque, self._round(parse_date(index)))
-            return Range(ordinal, ordinal + 1, self)
+            return Period(ordinal, self)
         elif isinstance(index, int):
             if index < 0:
-                index += self.now().ordinal
-            return Range(index, index + 1, self)
+                index += self.next().ordinal
+            return Period(index, self)
+        elif isinstance(index, Period):
+            ordinal = self._count(self.epoque, self._round(index.last_date))
+            return Period(ordinal, self)
         elif isinstance(index, slice):
             if isinstance(index.stop, datelike):
                 date = parse_date(index.stop)
@@ -143,9 +173,11 @@ class Periodicity(PeriodicityMixin,Enum):
             elif isinstance(index.stop, int):
                 stop = index.stop
                 if stop < 0:
-                    stop += self.now().ordinal
+                    stop += self.next().ordinal
+            elif isinstance(index.stop, Period):
+                stop = self._count(self.epoque, self._round(index.stop.last_date))
             elif index.stop is None:
-                stop = self.now().ordinal
+                stop = self.next().ordinal
             else: 
                 raise TypeError(f'Unsupported indexer')
             if isinstance(index.start, datelike):
@@ -154,7 +186,9 @@ class Periodicity(PeriodicityMixin,Enum):
             elif isinstance(index.start, int):
                 start = index.start
                 if start < 0:
-                    start += self.now().ordinal
+                    start += self.next().ordinal
+            elif isinstance(index.start, Period):
+                start = self._count(self.epoque, self._round(index.start.last_date))
             elif index.start is None:
                 start = 0
             else: 
@@ -163,12 +197,15 @@ class Periodicity(PeriodicityMixin,Enum):
         else:
             raise TypeError(f'Unsupported indexer')
 
-    def now(self) -> Period:
+    def next(self) -> Period:
         ny = datetime.datetime.now(datetime.UTC).astimezone(zoneinfo.ZoneInfo(key='US/Eastern'))
         ny_date = ny.date()
         if ny.hour >= 17:
             ny_date += datetime.timedelta(days=1)
-        return self[ny_date][0]
+        return self[ny_date]
+
+    def current(self) -> Period:
+        return self.next() - 1
 
     def __hash__(self):
         return hash(self.code)
@@ -214,17 +251,20 @@ class Period:
         return Period(self.ordinal - by, self.periodicity)
 
     def expand(self, by: int = 1) -> Range:
-        if by >= 0:
-            return Range(self.ordinal, self.ordinal + by, self.periodicity)
+        if by > 0:
+            start, stop = self.ordinal, self.ordinal + by
+        elif by == 0:
+            start, stop = self.ordinal - 1, self.ordinal
         else:
-            return Range(self.ordinal + by, self.ordinal + 1, self.periodicity)
+            start, stop = self.ordinal + by, self.ordinal + 1
+        return Range(start, stop, self.periodicity)
 
 
     def __str__(self) -> str:
-        return f'{self.periodicity}[{self.last_date}]'
+        return f'{self.periodicity}{self.periodicity._to_str(self)}'
 
     def __repr__(self) -> str:
-        return f'{self.periodicity}[{self.last_date}]'
+        return self.__str__()
 
 @dataclass
 class Range:
@@ -234,21 +274,21 @@ class Range:
 
     def __post_init__(self):
         assert self.start <= self.stop, \
-            f'Range stop less than start ({self.start}-{self.stop})'
+            f'Range stop cannot be less than start ({self.start}-{self.stop})'
 
     @classmethod
     def from_index(cls, date_range: pd.DatetimeIndex) -> Range:
         assert date_range.freq is not None, 'Index must have freq.' 
         return  Periodicity.from_offset_code(date_range.freq.name) \
-            [date_range[0]:date_range[-1]].expand() # type: ignore
+            [date_range[0]:date_range[-1]].expand(0) # type: ignore
 
     def change_periodicity(self, periodicity: Periodicity):
-        return periodicity[self[0].last_date:self[-1].last_date].expand() # type: ignore
+        return periodicity[self[0]:self[-1] + 1] # type: ignore
 
     def resample_indicies(self, range_: Range, round_: bool = True) -> tuple[int,list[int]]:
         my_ordinals, target_ordinals = [], []
         for i, target_per in enumerate(range_):
-            my_per = self.periodicity[target_per.last_date][0]
+            my_per = self.periodicity[target_per]
             if my_per.ordinal >= self.start and my_per.ordinal < self.stop \
                 and (round_ or my_per.last_date == target_per.last_date) :
                 my_ordinals.append(my_per.ordinal - self.start)
@@ -275,6 +315,12 @@ class Range:
     def __len__(self) -> int:
         assert self.stop >= self.start, f'Negative range length {self.start}-{self.stop}'
         return self.stop - self.start
+
+    def __add__(self, by: int) -> Period:
+        return Range(self.start + by, self.stop + by, self.periodicity)
+
+    def __sub__(self, by: int) -> Period:
+        return Range(self.start - by, self.stop - by, self.periodicity)
                 
     def __repr__(self) -> str:
         if len(self) == 0:
