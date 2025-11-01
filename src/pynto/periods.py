@@ -280,7 +280,7 @@ class Range:
     def from_index(cls, date_range: pd.DatetimeIndex) -> Range:
         assert date_range.freq is not None, 'Index must have freq.' 
         return  Periodicity.from_offset_code(date_range.freq.name) \
-            [date_range[0]:date_range[-1]].expand(0) # type: ignore
+            [date_range[0]:date_range[-1]].expand(1) # type: ignore
 
     def change_periodicity(self, periodicity: Periodicity):
         return periodicity[self[0]:self[-1] + 1] # type: ignore
