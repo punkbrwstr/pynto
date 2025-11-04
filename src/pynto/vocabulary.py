@@ -22,19 +22,18 @@ from . import database as db
 from .periods import Range, Periodicity, datelike
 
 logger = logging.getLogger(__name__)
-
+logging.basicConfig(level=logging.INFO, format='%(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 _DEBUG = False
 
-def set_debug():
+def toggle_debug():
     global _DEBUG
-    _DEBUG = True
-    logger.setLevel(logging.DEBUG)
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(logging.DEBUG)
-    #formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    formatter = logging.Formatter('%(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    _DEBUG = not _DEBUG
+    if _DEBUG:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
 
 class ColumnIDGenerator:
     def __init__(self):
@@ -140,7 +139,13 @@ class SiblingColumn(Column):
 
     @property
     def values(self) -> np.ndarray:
-        return self.cache[self.range_][:, [self.ordinal]]
+        try:
+            return self.cache[self.range_][:, [self.ordinal]]
+        except:
+            print(f'look up here {self.ordinal}')
+            print(f'     {self.header}')
+            print(f'     {self}')
+            raise
 
     def drop(self):
         if self.allow_sibling_drops:
@@ -150,12 +155,13 @@ class SiblingColumn(Column):
 class Word:
     def __init__(self, name: str, slice_: slice = slice(None),
                     copy_selected: bool = False, discard_excluded: bool = False,
-                 inverse_selection: bool = False):
+                 inverse_selection: bool = False, raise_on_empty: bool = False):
         self.name = name
         self.slice_ = slice_
         self.copy_selected = copy_selected
         self.discard_excluded = discard_excluded
         self.inverse_selection = inverse_selection
+        self.raise_on_empty = raise_on_empty
         self.filters: list[str] | None = None
         self.next_: Word | None = None
         self.prev: Word | None = None
@@ -163,6 +169,8 @@ class Word:
         self.called: bool = False
 
     def operate(self, stack: list[Column]) -> None:
+        if self.raise_on_empty and len(stack) == 0:
+            raise IndexError(f'Empty stack for {self.name}')
         pass
 
     def __call__(self, kwargs = None) -> Word:
@@ -354,7 +362,7 @@ class Word:
     def __str__(self) -> str:
         ignore = 'prev next_ closed called generator slice_ filters copy_selected' \
                     + ' discard_excluded inverse_selection operation open_quotes' \
-                    + ' name allow_sibling_drops ascending'
+                    + ' name allow_sibling_drops ascending raise_on_empty'
         str_args = []
         for k,v in self.__dict__.items():
             if k != self and k not in ignore.split():
@@ -389,7 +397,7 @@ class Word:
 def debug_col_repr(c: Column, n: int) -> str:
     if not _DEBUG:
         return ''
-    return lambda c, n: f'{' '*n}{c.id_}-{c.__class__.__name__}' \
+    return  f'{' '*n}{c.id_}-{c.__class__.__name__}' \
         + f' "{c.header}"' \
         + f' range {c.range_}' \
         + f' cache #{str(id(c.cache))[-4:]})'
@@ -426,18 +434,26 @@ class Evaluator:
             flat.append(col)
             working.extend(col.input_stack)
         flat.reverse()
-        p = Periodicity[key.step] if hasattr(key, 'step') and key.step \
-            else per if per else Periodicity.B
         if isinstance(key, Range):
             range_ = key
         elif isinstance(key, datelike) or isinstance(key, int):
-            range_ = p[key]
+            p = per if per else Periodicity.B
+            range_ = p[key].expand(0)
         elif isinstance(key, slice):
-            if isinstance(key.start, int) and key.start < 0 and max_ is not None:
-                key.start += max_
-            if isinstance(key.stop, int) and key.stop < 0 and max_ is not None:
-                key.stop += max_
-            range_ = p[key.start or min_:key.stop or max_]
+            start, stop, step = key.start, key.stop, key.step
+            p = Periodicity[step] if step \
+                else per if per else Periodicity.B
+            if isinstance(start, int) and max_ is not None:
+                if start < 0:
+                    start = p[max_] + start
+                else:
+                    start = p[min_] + start
+            if isinstance(stop, int) and max_ is not None:
+                if stop < 0:
+                    stop = p[max_] + stop
+                else:
+                    stop = p[min_] + stop
+            range_ = p[start or min_:stop or max_]
         else: 
             raise TypeError(f'Unsupported indexer')
         for col in stack:
@@ -754,6 +770,10 @@ class HMap(Combinator):
 class Cleave(Combinator):
     def __init__(self, name):
         super().__init__(name, num_quotations = -1)
+
+    def __call__(self, num_quotations: int = -1):
+        self.num_quotations = num_quotations
+        return super().__call__()
 
     def operate(self, stack: list[Column]) -> None:
         output = []
@@ -1232,6 +1252,9 @@ def is_na_op(x: np.ndarray, out: np.ndarray) -> None:
 def inc_op(x: np.ndarray, out: np.ndarray) -> None:
     out[:] = x + 1
 
+def dec_op(x: np.ndarray, out: np.ndarray) -> None:
+    out[:] = x - 1
+
 def expanding_mean(x: np.ndarray) -> np.ndarray:
     if len(x.shape) == 1:
         return np.add.accumulate(x) / (np.arange(len(x)) + 1)
@@ -1325,9 +1348,9 @@ vocab['saved'] = (cat, 'Pushes columns saved to internal DB as _key_', Saved)
 vocab['pandas'] = (cat,'Pushes columns from Pandas DataFrame or Series _pandas_', FromPandas)
 
 cat = 'Stack Manipulation'
-vocab['pull'] = (cat, 'Brings selected columns to the top', lambda name: Word(name))
+vocab['pull'] = (cat, 'Brings selected columns to the top', lambda name: Word(name, raise_on_empty=True))
 vocab['dup'] = (cat, 'Duplicates columns',
-                lambda name: Word(name, slice_=slice(-1,None), copy_selected=True))
+                lambda name: Word(name, slice_=slice(-1,None), copy_selected=True, raise_on_empty=True))
 vocab['filter'] = (cat, 'Removes non-selected columns',
                 lambda name: Word(name, discard_excluded=True))
 vocab['drop'] = (cat, 'Removes selected columns',
@@ -1451,6 +1474,7 @@ vocab['rank'] = (cat, 'Row-wise rank',
                  lambda name: OneForOneFunction(name, rank,
                                     slice_=slice(None), allow_sibling_drops=False))
 vocab['inc'] = (cat, 'Increment',lambda name: OneForOneFunction(name, inc_op))
+vocab['dec'] = (cat, 'Decrement',lambda name: OneForOneFunction(name, dec_op))
 
 def resolve(name: str, throw_exception: bool = True) -> Word | None:
     if re.match(r'c\d[_\d]*',name) is not None:
