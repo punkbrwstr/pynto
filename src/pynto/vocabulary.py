@@ -113,7 +113,7 @@ class Column:
         return self.id_ == other.id_
 
     def __del__(self):
-        logger.debug('destroying '+ debug_col_repr(self, 4))
+        pass #logger.debug('destroying '+ debug_col_repr(self, 4))
 
 @dataclass(kw_only=True,eq=False)
 class SiblingColumn(Column):
@@ -121,21 +121,35 @@ class SiblingColumn(Column):
     ordinal: int | None = None
     input_column: Column | None = None
     allow_sibling_drops: bool = True
+    copies: list[SiblingColumn] | None = None
 
     def set_range(self, range_: Range) -> None:
-        self.setup_siblings()
-        super().set_range(range_)
-
-    def setup_siblings(self) -> None:
         if self.ordinal is None:
             output_columns = len(self.siblings)
             for i, sib in enumerate(self.siblings):
-                sib.ordinal = i
+                sib.set_ordinal(i)
                 sib.output_columns = output_columns
                 if sib.input_column:
                     self.input_stack.append(sib.input_column)
                     sib.input_column = None
             self.siblings.clear()
+        super().set_range(range_)
+
+    def __copy__(self):
+        copy_ = super().__copy__()
+        copy_.copies = None
+        if self.copies is None:
+            self.copies = [copy_]
+        else:
+            self.copies.append(copy_)
+        return copy_
+
+    def set_ordinal(self, ordinal: int) -> None:
+        self.ordinal = ordinal
+        if self.copies:
+            for c in self.copies:
+                c.set_ordinal(ordinal)
+            self.copies.clear()
 
     @property
     def values(self) -> np.ndarray:
@@ -397,19 +411,25 @@ class Word:
 def debug_col_repr(c: Column, n: int) -> str:
     if not _DEBUG:
         return ''
-    return  f'{' '*n}{c.id_}-{c.__class__.__name__}' \
+    return  f'{' '*n}#{c.id_}-{c.__class__.__name__}' \
         + f' "{c.header}"' \
-        + f' range {c.range_}' \
-        + f' cache #{str(id(c.cache))[-4:]})'
+        + f' {c.range_}' \
+        + f' (cache #{str(id(c.cache))[-4:]})' \
+        + (f' ordinal {c.ordinal})' if hasattr(c,'ordinal') else '') \
+        + (f' sibs [{",".join([str(c2.id_) for c2 in c.siblings])}]' if hasattr(c,'siblings') else '') \
+        + (f' cops [{",".join([str(c2.id_) for c2 in c.copies])}]' 
+                if hasattr(c,'copies') and c.copies else '')
 
-def debug_stack(stack,title='stack', offset=4):   
+def debug_stack(stack,title=None, offset=4):   
     if not _DEBUG:
         return
-    logger.debug((' ' * offset) + title)
+    if title:
+        logger.debug((' ' * offset) + title)
+        offset += 4
     for c in stack:
-        logger.debug(debug_col_repr(c,offset+4))
+        logger.debug(debug_col_repr(c,offset))
         if c.input_stack:
-            debug_stack(c.input_stack,'inputs',offset+4+4)
+            debug_stack(c.input_stack,'inputs',offset+4)
         if hasattr(c,'siblings'):
             debug_stack(c.siblings,'sibs',offset+4)
 
@@ -457,8 +477,9 @@ class Evaluator:
         else: 
             raise TypeError(f'Unsupported indexer')
         for col in stack:
-            logger.debug('setting range'+ debug_col_repr(col, 4))
+            logger.debug('pre set range '+ debug_col_repr(col, 0))
             col.set_range(range_)
+            logger.debug('post set range'+ debug_col_repr(col, 0))
         logger.debug('Stack')
         debug_stack(stack)
         working = stack[:]
@@ -787,11 +808,16 @@ class Cleave(Combinator):
 class BoundWord(Word):
     def __init__(self, bound: list[Column]):
         self.bound = bound
+        self.operate_count = 0
         super().__init__('bound')
 
     def operate(self, stack: list[Column]) -> None:
-        bound_copy = [copy.copy(c) for c in self.bound]
-        stack.extend(bound_copy)
+        if self.operate_count == 0:
+            stack.extend(self.bound)
+        else:
+            bound_copy = [copy.copy(c) for c in self.bound]
+            stack.extend(bound_copy)
+        self.operate_count += 1
 
 class Partial(Quotation, Combinator):
     def __init__(self, name: str):
