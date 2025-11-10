@@ -478,7 +478,11 @@ class Evaluator:
             raise TypeError(f'Unsupported indexer')
         for col in stack:
             logger.debug('pre set range '+ debug_col_repr(col, 0))
-            col.set_range(range_)
+            try:
+                col.set_range(range_)
+            except Exception as e:
+                logger.error(f'Error setting range for {col}')
+                raise e
             logger.debug('post set range'+ debug_col_repr(col, 0))
         logger.debug('Stack')
         debug_stack(stack)
@@ -496,7 +500,7 @@ class Evaluator:
             p = db.get_client().connection.pipeline()
             offsets, needed_saveds = [], []
             for col in saveds:
-                if not col.calculated:
+                if col.range_ and not col.calculated:
                     col.cache[col.range_] = np.full((len(col.range_),1), np.nan, order='F')
                     offsets.append(db.get_client()._req(
                         col.md, col.range_.start, col.range_.stop, p))
@@ -971,28 +975,23 @@ class JoinColumn(Column):
     date: datelike
 
     def set_input_range(self) -> None:
-        range_ = self.range_
-        cutover_index = range_.periodicity[self.date].ordinal
-        if range_.stop < cutover_index:
-            self.input_stack.pop()
-            self.input_stack[0].set_range(range_)
-        elif range_.start >= cutover_index:
-            self.input_stack.pop(-2)
-            self.input_stack[0].set_range(range_)
+        r = self.range_
+        cutover_index = r.periodicity[self.date].ordinal
+        if r.stop < cutover_index:
+            self.input_stack[0].set_range(r)
+        elif r.start >= cutover_index:
+            self.input_stack[-1].set_range(r)
         else:
-            r_first = copy.copy(range_)
-            r_first.stop = cutover_index
-            self.input_stack[0].set_range(r_first)
-            r_second = copy.copy(range_)
-            r_second.start = cutover_index
-            self.input_stack[1].set_range(r_second)
+            self.input_stack[0].set_range(Range(r.start, cutover_index, r.periodicity))
+            self.input_stack[1].set_range(Range(cutover_index, r.stop, r.periodicity))
 
     def calculate(self) -> None:
         i = 0
         for input_ in self.input_stack:
-            v = input_.values
-            self.values[i:i+len(v)] = v
-            i += len(v)
+            if input_.range_ is not None:
+                v = input_.values
+                self.values[i:i+len(v)] = v
+                i += len(v)
 
 class Join(Word):
     def __init__(self, name: str):
@@ -1374,6 +1373,7 @@ vocab['saved'] = (cat, 'Pushes columns saved to internal DB as _key_', Saved)
 vocab['pandas'] = (cat,'Pushes columns from Pandas DataFrame or Series _pandas_', FromPandas)
 
 cat = 'Stack Manipulation'
+vocab['id'] = (cat, 'Identity/no-op', lambda name: Word(name))
 vocab['pull'] = (cat, 'Brings selected columns to the top', lambda name: Word(name, raise_on_empty=True))
 vocab['dup'] = (cat, 'Duplicates columns',
                 lambda name: Word(name, slice_=slice(-1,None), copy_selected=True, raise_on_empty=True))
