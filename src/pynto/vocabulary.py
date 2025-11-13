@@ -608,8 +608,8 @@ class PandasColumn(SiblingColumn):
         self.pandas_range = Range.from_index(self.pandas.index)
 
     def get_bounds(self) -> tuple[datetime.date,datetime.date,Periodicity] | None:
-        return (self.pandas_range[0].last_date,
-                self.pandas_range.expand()[-1].last_date,
+        return (self.pandas_range[0][-1],
+                self.pandas_range.expand()[-1][-1],
                 self.pandas_range.periodicity)
 
     def calculate(self) -> None:
@@ -655,7 +655,7 @@ class SavedColumn(Column):
         self.range_ = range_.change_periodicity(self.md.periodicity)
 
     def get_bounds(self) -> tuple[datetime.date,datetime.date,Periodicity] | None:
-        return (self.md[0].last_date, self.md.expand()[-1].last_date, self.md.periodicity)
+        return (self.md[0][-1], self.md.expand()[-1][-1], self.md.periodicity)
 
 class Saved(Word):
     def __init__(self, name: str):

@@ -106,19 +106,19 @@ def _offset_y(date: datetime.date, by: int) -> datetime.date:
     return _offset_m(date, by * 12)
 
 def _str_b(per: Period) -> str:
-    return str(per.last_date)
+    return str(per[-1])
 
 def _str_w(per: Period) -> str:
-    return f'{per.last_date.year}-{per.last_date.isocalendar().week}'
+    return f'{per[-1].year}-{per[-1].isocalendar().week}'
 
 def _str_m(per: Period) -> str:
-    return str(per.last_date)[:7]
+    return str(per[-1])[:7]
 
 def _str_y(per: Period) -> str:
-    return str(per.last_date)[:4]
+    return str(per[-1])[:4]
 
 def _str_q(per: Period) -> str:
-    return f'{per.last_date.year}-{(per.last_date.month - 1) // 3 + 1}'
+    return f'{per[-1].year}-{(per[-1].month - 1) // 3 + 1}'
 
 
 
@@ -164,7 +164,7 @@ class Periodicity(PeriodicityMixin,Enum):
                 index += self.next().ordinal
             return Period(index, self)
         elif isinstance(index, Period):
-            ordinal = self._count(self.epoque, self._round(index.last_date))
+            ordinal = self._count(self.epoque, self._round(index[-1]))
             return Period(ordinal, self)
         elif isinstance(index, slice):
             if isinstance(index.stop, datelike):
@@ -175,7 +175,7 @@ class Periodicity(PeriodicityMixin,Enum):
                 if stop < 0:
                     stop += self.next().ordinal
             elif isinstance(index.stop, Period):
-                stop = self._count(self.epoque, self._round(index.stop.last_date))
+                stop = self._count(self.epoque, self._round(index.stop[-1]))
             elif index.stop is None:
                 stop = self.next().ordinal
             else: 
@@ -188,7 +188,7 @@ class Periodicity(PeriodicityMixin,Enum):
                 if start < 0:
                     start += self.next().ordinal
             elif isinstance(index.start, Period):
-                start = self._count(self.epoque, self._round(index.start.last_date))
+                start = self._count(self.epoque, self._round(index.start[-1]))
             elif index.start is None:
                 start = 0
             else: 
@@ -235,14 +235,28 @@ class Period:
     ordinal: int
     periodicity: Periodicity
 
-    @property
-    def last_date(self) -> datetime.date:
-        return self.periodicity._offset(self.periodicity.epoque, self.ordinal)
+    def __len__(self) -> int:
+        return (self.periodicity._offset(self.periodicity.epoque, self.ordinal) \
+                   - self.periodicity._offset(self.periodicity.epoque, self.ordinal - 1 )).days
 
-    @property
-    def first_date(self) -> datetime.date:
-        return self.periodicity._offset(self.periodicity.epoque,
-                self.ordinal -1 ) + datetime.timedelta(days=1)
+    def __getitem__(self, index: int) -> datetime.date:
+        if index >= 0:
+            first = self.periodicity._offset(self.periodicity.epoque, self.ordinal - 1 ) \
+                + datetime.timedelta(days=1)
+            d = first + datetime.timedelta(days=index)
+            if index == 0:
+                return d
+            last = self.periodicity._offset(self.periodicity.epoque, self.ordinal)
+        else:
+            last = self.periodicity._offset(self.periodicity.epoque, self.ordinal)
+            d = last + datetime.timedelta(days=index + 1)
+            if index == -1:
+                return d
+            first = self.periodicity._offset(self.periodicity.epoque, self.ordinal - 1 ) \
+                + datetime.timedelta(days=1)
+        if d < first or d > last:
+            raise IndexError(f'Period index {index} out of range for {self}')
+        return d
 
     def __add__(self, by: int) -> Period:
         return Period(self.ordinal + by, self.periodicity)
@@ -290,7 +304,7 @@ class Range:
         for i, target_per in enumerate(range_):
             my_per = self.periodicity[target_per]
             if my_per.ordinal >= self.start and my_per.ordinal < self.stop \
-                and (round_ or my_per.last_date == target_per.last_date) :
+                and (round_ or my_per[-1] == target_per[-1]) :
                 my_ordinals.append(my_per.ordinal - self.start)
                 target_ordinals.append(i)
         return target_ordinals, my_ordinals
@@ -325,7 +339,7 @@ class Range:
     def __repr__(self) -> str:
         if len(self) == 0:
             return '[]'
-        return f'{str(self.periodicity)}[{self[0].last_date}:{(self[-1] + 1).last_date}]'
+        return f'{str(self.periodicity)}[{self[0][-1]}:{(self[-1] + 1)[-1]}]'
 
     def __hash__(self) -> int:
         return hash((self.start,self.stop,self.periodicity))
@@ -347,11 +361,11 @@ class Range:
         return Range(self.start + by, self.stop + by,self.periodicity)
 
     def to_index(self) -> pd.DatetimeIndex:
-        return pd.date_range(self[0].last_date, self[-1].last_date,
+        return pd.date_range(self[0][-1], self[-1][-1],
                     freq=self.periodicity.offset_code)
 
     def day_counts(self) -> list[int]:
-        dates = [p.last_date for p in self.expand(-1)]
+        dates = [p[-1] for p in self.expand(-1)]
         return [(d1 - d0).days for d1,d0 in zip(dates[1:], dates[:-1])]
 
 

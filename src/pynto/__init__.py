@@ -12,7 +12,7 @@ class _Definer:
 
 define = _Definer()
 
-now = lambda: Periodicity.B.current().last_date
+now = lambda: Periodicity.B.current()[-1]
 
 def __getattr__(name: str):
     if not name.startswith('__'):
