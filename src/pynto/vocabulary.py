@@ -1130,7 +1130,9 @@ class OneForOneFunction(Word):
         self.allow_sibling_drops = allow_sibling_drops
         super().__init__(name, slice_)
 
-    def __call__(self, ascending: bool = True) -> Word:
+    def __call__(self) -> Word:
+    #def __call__(self, ascending: bool = True) -> Word:
+        self.ascending = True
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
