@@ -1279,12 +1279,9 @@ def is_na_op(x: np.ndarray, out: np.ndarray) -> None:
 def inc_op(x: np.ndarray, out: np.ndarray) -> None:
     out[:] = x + 1
 
-<<<<<<< HEAD
 def dec_op(x: np.ndarray, out: np.ndarray) -> None:
     out[:] = x - 1
 
-=======
->>>>>>> 032232012e5ded58cd5250fa551ef7484289ca82
 def expanding_mean(x: np.ndarray) -> np.ndarray:
     if len(x.shape) == 1:
         return np.add.accumulate(x) / (np.arange(len(x)) + 1)
@@ -1505,10 +1502,7 @@ vocab['rank'] = (cat, 'Row-wise rank',
                  lambda name: OneForOneFunction(name, rank,
                                     slice_=slice(None), allow_sibling_drops=False))
 vocab['inc'] = (cat, 'Increment',lambda name: OneForOneFunction(name, inc_op))
-<<<<<<< HEAD
 vocab['dec'] = (cat, 'Decrement',lambda name: OneForOneFunction(name, dec_op))
-=======
->>>>>>> 032232012e5ded58cd5250fa551ef7484289ca82
 
 def resolve(name: str, throw_exception: bool = True) -> Word | None:
     if re.match(r'c\d[_\d]*',name) is not None:
