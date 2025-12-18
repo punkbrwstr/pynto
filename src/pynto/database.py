@@ -159,6 +159,9 @@ class Db:
         mds.sort(key=attrgetter('ordinal'))
         return mds
 
+    def columns(self, key: str) -> list[str]:
+        return [md.col_header for md in self.get_metadata(key)]
+
     def all_keys(self) -> list[Metadata]:
         mds = [Metadata.unpack(p) for p in
                     self.connection.zrange(INDEX, 0, -1)]

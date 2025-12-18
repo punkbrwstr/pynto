@@ -1360,6 +1360,9 @@ def rolling_ewv(data: np.ndarray, window: int) -> np.ndarray:
 def rolling_ews(data: np.ndarray, window: int) -> np.ndarray:
     return np.sqrt(rolling_ewv(data, window))
 
+def rolling_zsc(data: np.ndarray, window: int) -> np.ndarray:
+    return (data - bn.move_mean(data, axis=0, window=window)) / \
+                bn.move_std(data, axis=0, window=window)
 
 vocab: dict[str, tuple[str,str,Callable[[str],Word]]] = {}
 
@@ -1465,6 +1468,7 @@ _funcs = [
     ('ewm',  'Exponentially-weighted moving average', None, rolling_ewma, None),
     ('ewv',  'Exponentially-weighted variance', None, rolling_ewv, None),
     ('ews',  'Exponentially-weighted standard deviation', None, rolling_ews, None),
+    ('zsc',  'Z-score', None, rolling_zsc, None),
 
     ]
 for code, desc, red, roll, scan in _funcs:
