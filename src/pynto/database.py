@@ -153,16 +153,22 @@ class Db:
         return key.decode()
 
     def get_metadata(self, key: str) -> list[Metadata]:
-        key = self.make_safe(*self.split_key(key))
+        k = self.make_safe(*self.split_key(key))
         mds = [Metadata.unpack(p) for p in
-                    self.connection.zrangebylex(INDEX, f'[{key}', f'[{key}\xff')]
+                    self.connection.zrangebylex(INDEX, f'[{k}', f'[{k}\xff')]
+        if not mds:
+            raise KeyError(f'Db key \'{key}\' not found')
         mds.sort(key=attrgetter('ordinal'))
         return mds
 
     def columns(self, key: str) -> list[str]:
         return [md.col_header for md in self.get_metadata(key)]
 
-    def all_keys(self) -> list[Metadata]:
+    def all_keys(self) -> list[str]:
+        return list(set([Metadata.unpack(p).key for p in
+                    self.connection.zrange(INDEX, 0, -1)]))
+
+    def all_series(self) -> dict[str,list[tuple[str,str]]]:
         mds = [Metadata.unpack(p) for p in
                     self.connection.zrange(INDEX, 0, -1)]
         mds.sort(key=attrgetter('ordinal'))

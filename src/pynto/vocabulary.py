@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, KW_ONLY
 from functools import partial, reduce
 from operator import add
 from typing import Any, Callable
+from enum import Enum
 
 import bottleneck as bn
 import numpy as np
@@ -48,6 +49,11 @@ class ColumnIDGenerator:
 
 _IDs = ColumnIDGenerator()
 
+class ResampleMethod(Enum):
+    LAST = 1
+    SUM = 2
+    AVG = 3
+
 @dataclass(eq=False)
 class Column:
     header: str = ''
@@ -56,6 +62,7 @@ class Column:
     input_stack: list[Column] = field(default_factory=list)
     cache: dict[Range,None | np.ndarray] = field(default_factory=dict)
     id_: int = field(default_factory=_IDs.get_next)
+    resample_method: ResampleMethod = ResampleMethod.LAST
 
     def calculate(self) -> None:
         pass
@@ -519,10 +526,31 @@ class Evaluator:
             col.cache[col.range_] = np.empty((len(col.range_), col.output_columns), order='F')
             col.calculate()
             col.input_stack = []
+        if not stack:
+            return None
+        cols_values = []
         for i, col in enumerate(stack):
-            assert col.range_ == range_, \
-                f'Mismatching range needs resample for col {i - len(stack)}: {col.header}'
-        values = np.concatenate([col.values for col in stack]).reshape((len(range_),len(stack)),order='F')
+            if col.range_ == range_:
+                cols_values.append(col.values)
+            else:
+                v = np.full((len(range_),1), np.nan, order='F')
+                idx, idx_input = col.range_.resample_indicies(range_, False)
+                match col.resample_method:
+                    case ResampleMethod.LAST:
+                        print('got here1')
+                        v[idx] = col.values[idx_input]
+                    case ResampleMethod.SUM:
+                        sums = np.nancumsum(col.values)
+                        v[idx[0]] = col.values[idx_input[0]] 
+                        v[idx[1:]] = (sums[idx_input[1:]] - sums[idx_input[:-1]])[:,None]
+                    case ResampleMethod.AVG:
+                        sums = np.nancumsum(col.values)
+                        counts = np.nancumsum(col.values / col.values)
+                        v[idx[0]] = col.values[idx_input[0]] 
+                        v[idx[1:]] = (sums[idx_input[1:]] - sums[idx_input[:-1]])[:,None]
+                        v[idx[1:]] /= (counts[idx_input[1:]] - counts[idx_input[:-1]])[:,None]
+                cols_values.append(v)
+        values = np.concatenate(cols_values).reshape((len(range_),len(stack)),order='F')
         if self.values_only:
             return values
         return pd.DataFrame(values, columns=[col.header for col in stack], index=range_.to_index())
@@ -852,62 +880,51 @@ class Compose(Quotation, Combinator):
             else:
                 self.quoted += quoted
 
-@dataclass(kw_only=True, eq=False)
-class ResampleColumn(Column):
-    round_: bool
-
-    def calculate(self) -> None:
-        self.values[:] = np.nan
-        idx, idx_input = self.input_stack[0].range_ \
-                            .resample_indicies(self.range_, self.round_)
-        self.values[idx] = self.input_stack[0].values[idx_input]
-
 class Resample(Word):
-    def __call__(self, round_: bool = False):
-        return super().__call__(locals())
+    def __init__(self, name: str, method: ResampleMethod):
+        self.method = method
+        super().__init__(name)
 
     def operate(self, stack: list[Column]) -> None:
-        inputs = stack[:]
-        stack.clear()
-        for col in inputs:
-            stack.append(ResampleColumn(col.header, 
-                        round_=self.round_, input_stack=[col]))
+        for col in stack:
+            col.resample_method = self.method
 
 @dataclass(kw_only=True, eq=False)
-class PeriodicityColumn(ResampleColumn):
+class PeriodicityColumn(Column):
     periodicity: Periodicity
 
-    def set_input_range(self) -> None:
-        input_range = self.range_.change_periodicity(self.periodicity)
-        for col in self.input_stack:
-            col.set_range(input_range)
+    def set_range(self, range_: Range) -> None:
+        super().set_range(range_.change_periodicity(self.periodicity))
+
+    def calculate(self) -> None:
+        self.values[:] = self.input_stack[0].values
 
 class SetPeriodicity(Word):
-    def __call__(self, periodicity: str | Periodicity, \
-                    round_: bool = False) -> Word:
+    def __call__(self, periodicity: str | Periodicity) -> Word:
         if isinstance(periodicity, str):
             self.periodicity = Periodicity[periodicity]
         else:
             self.periodicity = periodicity
-        self.round_ = round_
         return super().__call__()
 
     def operate(self, stack: list[Column]) -> None:
         inputs = stack[:]
         stack.clear()
         for col in inputs:
-            stack.append(PeriodicityColumn(col.header, round_=self.round_,
+            stack.append(PeriodicityColumn(col.header,
                                periodicity=self.periodicity, input_stack=[col]))
 
 @dataclass(kw_only=True, eq=False)
-class StartColumn(ResampleColumn):
+class StartColumn(Column):
     start: datelike
 
-    def set_input_range(self) -> None:
-        input_range = Range(self.range_.periodicity[self.start].ordinal,
-                            self.range_.stop, self.range_.periodicity)
-        for col in self.input_stack:
-            col.set_range(input_range)
+    def set_range(self, range_: Range) -> None:
+        new_start = Range(range_.periodicity[self.start].ordinal,
+                            range_.stop, range_.periodicity)
+        super().set_range(new_start)
+
+    def calculate(self) -> None:
+        self.values[:] = self.input_stack[0].values
 
 class SetStart(Word):
     def __call__(self, start: datelike, \
@@ -1211,6 +1228,8 @@ class HeaderSet(Word):
 
     def operate(self, stack: list[Column]) -> None:
         start = len(stack) - len(self.headers)
+        assert start >= 0, \
+            f"Insufficient columns for hset('{",".join(self.headers)}')"
         for i in range(start,len(stack)):
             stack[i].header = self.headers[i - start]
 
@@ -1430,8 +1449,12 @@ vocab['zero_first'] = (cat, 'Changes first value to zero',
                     lambda name: OneForOneFunction(name, zero_first_op))
 vocab['zero_to_na'] = (cat, 'Changes zeros to nans',
                     lambda name: OneForOneFunction(name, zero_to_na_op))
-vocab['resample'] = (cat, 'Adapts periodicity to match range with optional rounding _round_',
-                    Resample)
+vocab['resample_sum'] = (cat, 'Sets periodicity resampling method to sum',
+                    lambda name: Resample(name, ResampleMethod.SUM))
+vocab['resample_last'] = (cat, 'Sets periodicity resampling method to last',
+                    lambda name: Resample(name, ResampleMethod.LAST))
+vocab['resample_avg'] = (cat, 'Sets periodicity resampling method to avg',
+                    lambda name: Resample(name, ResampleMethod.AVG))
 vocab['per'] = (cat, 'Changes column periodicity to _periodicity_, then resamples', SetPeriodicity)
 vocab['start'] = (cat, 'Changes period start to _start_, then resamples', SetStart)
 
