@@ -162,7 +162,7 @@ class Db:
         return mds
 
     def columns(self, key: str) -> list[str]:
-        return [md.col_header for md in self.get_metadata(key)]
+        return list(dict.fromkeys([md.col_header for md in self.get_metadata(key)]))
 
     def all_keys(self) -> list[str]:
         return list(set([Metadata.unpack(p).key for p in
@@ -178,6 +178,16 @@ class Db:
                 keys[md.key] = []
             keys[md.key].append((md.col_header, md.row_header))
         return keys
+
+    def diags(self, key: str) -> pd.DataFrame:
+        cols = []
+        for header in self.columns(key):
+            col = self[f'{key}#{header}${header}']
+            col.index = col.index.droplevel(1)
+            cols.append(col)
+        return pd.concat(cols, axis=1)
+
+
 
     def delete_all(self) -> list[Metadata]:
         p = self.connection.pipeline()

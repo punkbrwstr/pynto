@@ -75,12 +75,6 @@ class Column:
     def values(self, values: np.ndarray) -> np.ndarray:
         self.cache[self.range_] = values
 
-    @property
-    def input_matrix(self) -> np.ndarray:
-        shape = (len(self.input_stack[0].range_),len(self.input_stack))
-        return np.concatenate([col.values for col in self.input_stack]) \
-                        .reshape(shape,order='F')
-
     def set_range(self, range_: Range) -> None:
         self.range_ = range_
         if range_ not in self.cache:
@@ -170,7 +164,8 @@ class SiblingColumn(Column):
 
     def drop(self):
         if self.allow_sibling_drops:
-            self.siblings.remove(self)
+            pass
+            #self.siblings.remove(self)
         super().drop()
 
 class Word:
@@ -440,6 +435,24 @@ def debug_stack(stack,title=None, offset=4):
         if hasattr(c,'siblings'):
             debug_stack(c.siblings,'sibs',offset+4)
 
+def _resample(to_range: Range, to_values: np.ndarray,
+                from_range: Range, from_values: np.ndarray,
+                method: ResampleMethod) -> None:
+    idx, idx_input = from_range.resample_indicies(to_range, False)
+    match method:
+        case ResampleMethod.LAST:
+            to_values[idx] = from_values[idx_input]
+        case ResampleMethod.SUM:
+            sums = np.nancumsum(from_values)
+            to_values[idx[0]] = from_values[idx_input[0]] 
+            to_values[idx[1:]] = (sums[idx_input[1:]] - sums[idx_input[:-1]])[:,None]
+        case ResampleMethod.AVG:
+            sums = np.nancumsum(from_values)
+            counts = np.nancumsum(from_values / from_values)
+            to_values[idx[0]] = from_values[idx_input[0]] 
+            to_values[idx[1:]] = (sums[idx_input[1:]] - sums[idx_input[:-1]])[:,None]
+            to_values[idx[1:]] /= (counts[idx_input[1:]] - counts[idx_input[:-1]])[:,None]
+
 class Evaluator:
     def __init__(self, word: Word, values_only: bool = False):
         self.word = word
@@ -455,8 +468,8 @@ class Evaluator:
             col = working.pop()
             bounds = col.get_bounds()
             if bounds:
-                min_ = bounds[0] if not min_ else min(min_, bounds[0])
-                max_ = bounds[1] if not max_ else max(max_, bounds[1])
+                min_ = bounds[0] if min_ is None else min(min_, bounds[0])
+                max_ = bounds[1] if max_ is None else max(max_, bounds[1])
                 per = bounds[2]
             flat.append(col)
             working.extend(col.input_stack)
@@ -505,17 +518,28 @@ class Evaluator:
         saveds = [col for col in flat if isinstance(col, SavedColumn)]
         if saveds:
             p = db.get_client().connection.pipeline()
-            offsets, needed_saveds = [], []
+            offsets, needed_saveds, resample = [], [], []
             for col in saveds:
                 if col.range_ and not col.calculated:
                     col.cache[col.range_] = np.full((len(col.range_),1), np.nan, order='F')
-                    offsets.append(db.get_client()._req(
-                        col.md, col.range_.start, col.range_.stop, p))
+                    if col.range_.periodicity != col.md.periodicity:
+                        r = range_.change_periodicity(col.md.periodicity)
+                        resample.append(r)
+                    else:
+                        r = col.range_
+                        resample.append(None)
+                    offsets.append(db.get_client()._req(col.md, r.start, r.stop, p))
                     needed_saveds.append(col)
-            for col, offset, bytes_ in zip(needed_saveds, offsets, p.execute()):
+            for col, offset, bytes_,r in zip(needed_saveds, offsets, p.execute(), resample):
                 if len(bytes_) > 0:
                     data = np.frombuffer(bytes_, col.md.type_.dtype)
-                    col.values[offset:offset + len(data),0] = data
+                    if r is not None:
+                        from_values = np.full((len(r),1), np.nan, order='F')
+                        from_values[offset:offset + len(data),0] = data
+                        _resample(col.range_, col.values,
+                                    r, from_values, col.resample_method)
+                    else:
+                        col.values[offset:offset + len(data),0] = data
         logger.debug('Processing flat')
         while flat:
             col = flat.popleft()
@@ -528,33 +552,11 @@ class Evaluator:
             col.input_stack = []
         if not stack:
             return None
-        cols_values = []
-        for i, col in enumerate(stack):
-            if col.range_ == range_:
-                cols_values.append(col.values)
-            else:
-                v = np.full((len(range_),1), np.nan, order='F')
-                idx, idx_input = col.range_.resample_indicies(range_, False)
-                match col.resample_method:
-                    case ResampleMethod.LAST:
-                        print('got here1')
-                        v[idx] = col.values[idx_input]
-                    case ResampleMethod.SUM:
-                        sums = np.nancumsum(col.values)
-                        v[idx[0]] = col.values[idx_input[0]] 
-                        v[idx[1:]] = (sums[idx_input[1:]] - sums[idx_input[:-1]])[:,None]
-                    case ResampleMethod.AVG:
-                        sums = np.nancumsum(col.values)
-                        counts = np.nancumsum(col.values / col.values)
-                        v[idx[0]] = col.values[idx_input[0]] 
-                        v[idx[1:]] = (sums[idx_input[1:]] - sums[idx_input[:-1]])[:,None]
-                        v[idx[1:]] /= (counts[idx_input[1:]] - counts[idx_input[:-1]])[:,None]
-                cols_values.append(v)
-        values = np.concatenate(cols_values).reshape((len(range_),len(stack)),order='F')
+        values = np.concatenate([col.values for col in stack]) \
+                    .reshape((len(range_),len(stack)),order='F')
         if self.values_only:
             return values
         return pd.DataFrame(values, columns=[col.header for col in stack], index=range_.to_index())
-
 
 # Nullary/generator words
 class NullaryWord(Word):
@@ -678,9 +680,6 @@ class FromPandas(Word):
 @dataclass(kw_only=True, eq=False)
 class SavedColumn(Column):
     md: db.Metadata
-
-    def set_range(self, range_: Range) -> None:
-        self.range_ = range_.change_periodicity(self.md.periodicity)
 
     def get_bounds(self) -> tuple[datetime.date,datetime.date,Periodicity] | None:
         return (self.md[0][-1], self.md.expand()[-1][-1], self.md.periodicity)
@@ -893,11 +892,14 @@ class Resample(Word):
 class PeriodicityColumn(Column):
     periodicity: Periodicity
 
-    def set_range(self, range_: Range) -> None:
-        super().set_range(range_.change_periodicity(self.periodicity))
+    def set_input_range(self) -> None:
+        self.input_stack[0].set_range(self.range_.change_periodicity(self.periodicity))
 
     def calculate(self) -> None:
-        self.values[:] = self.input_stack[0].values
+        self.values[:] = np.nan
+        _resample(self.range_,self.values, 
+                    self.input_stack[0].range_, self.input_stack[0].values,
+                    self.input_stack[0].resample_method)
 
 class SetPeriodicity(Word):
     def __call__(self, periodicity: str | Periodicity) -> Word:
@@ -918,13 +920,18 @@ class SetPeriodicity(Word):
 class StartColumn(Column):
     start: datelike
 
-    def set_range(self, range_: Range) -> None:
-        new_start = Range(range_.periodicity[self.start].ordinal,
-                            range_.stop, range_.periodicity)
-        super().set_range(new_start)
+    def set_input_range(self) -> None:
+        input_start = self.range_.periodicity[self.start].ordinal
+        input_range = Range(input_start, self.range_.stop, self.range_.periodicity)
+        self.input_stack[0].set_range(input_range)
 
     def calculate(self) -> None:
-        self.values[:] = self.input_stack[0].values
+        offset = self.range_.start - self.input_stack[0].range_.start
+        if offset >= 0:
+            self.values[:] = self.input_stack[0].values[offset:]
+        else:
+            self.values[offset:] = self.input_stack[0].values
+            
 
 class SetStart(Word):
     def __call__(self, start: datelike, \
@@ -935,8 +942,7 @@ class SetStart(Word):
         inputs = stack[:]
         stack.clear()
         for col in inputs:
-            stack.append(StartColumn(col.header, round_=self.round_,
-                               start=self.start, input_stack=[col]))
+            stack.append(StartColumn(col.header, start=self.start, input_stack=[col]))
 
 @dataclass(kw_only=True, eq=False)
 class FillColumn(Column):
@@ -1027,7 +1033,9 @@ class ReductionColumn(Column):
     operation: Callable[[np.ndarray], np.ndarray]
 
     def calculate(self) -> None:
-        self.values[:] = self.operation(self.input_matrix)[:, None]
+        inputs = np.concatenate([col.values for col in self.input_stack]) \
+                    .reshape((len(self.range_),len(self.input_stack)),order='F')
+        self.values[:] = self.operation(inputs)[:, None]
 
 class Reduction(Word):
     def __init__(self, name: str, operation: Callable[[np.ndarray, np.ndarray], None]):
@@ -1046,25 +1054,27 @@ class RollingColumn(SiblingColumn):
     operation: Callable[[np.ndarray, int], np.ndarray]
     window: int
     reduction: bool = False
+    lookback: int | None = None
 
     def set_input_range(self) -> None:
-        input_range = self.range_.expand(int(-self.window * 1.25))
+        self.lookback = int(self.window * 1.25)
+        input_range = self.range_.expand(-self.lookback)
         for col in self.input_stack:
             col.set_range(input_range)
 
     def calculate(self) -> None:
-        lookback = int(self.window * 1.25)
-        data = self.input_matrix
+        data = np.concatenate([col.values for col in self.input_stack]) \
+                .reshape((len(self.input_stack[0].range_),len(self.input_stack)),order='F')
         mask = ~np.any(np.isnan(data), axis=1)
         idx = np.where(mask)[0]
-        start = np.where(idx >= lookback)[0][0]
+        start = np.where(idx >= self.lookback)[0][0]
         out = self.cache[self.range_]
-        out[(idx - lookback)[start:]] = self.operation(data[mask], self.window)[start:]
+        out[(idx - self.lookback)[start:]] = self.operation(data[mask], self.window)[start:]
         if not np.all(mask):
             idx = np.where(~mask)[0]
-            if np.any(idx >= lookback):
-                start = np.where(idx >= lookback)[0][0]
-                out[(idx - lookback)[start:]] = np.nan
+            if np.any(idx >= self.lookback):
+                start = np.where(idx >= self.lookback)[0][0]
+                out[(idx - self.lookback)[start:]] = np.nan
 
 
 class Rolling(Word):
@@ -1178,7 +1188,10 @@ class OneForOneFunctionColumn(SiblingColumn):
     ascending: bool = True
 
     def calculate(self) -> None:
-        data = self.input_matrix
+        cols_values = []
+        for i, col in enumerate(self.input_stack):
+            cols_values.append(col.values)
+        data =  np.concatenate(cols_values).reshape((len(self.range_),i+1),order='F')
         if not self.ascending:
             data = data[::-1]
         self.operation(data, out=self.cache[self.range_])
@@ -1380,8 +1393,8 @@ def rolling_ews(data: np.ndarray, window: int) -> np.ndarray:
     return np.sqrt(rolling_ewv(data, window))
 
 def rolling_zsc(data: np.ndarray, window: int) -> np.ndarray:
-    return (data - bn.move_mean(data, axis=0, window=window)) / \
-                bn.move_std(data, axis=0, window=window)
+    return (data - bn.move_mean(data, window=window, axis=0, min_count=2)) / \
+                bn.move_std(data, window=window, axis=0, min_count=2)
 
 vocab: dict[str, tuple[str,str,Callable[[str],Word]]] = {}
 
@@ -1474,7 +1487,7 @@ _funcs = [
     ('mod',  'Modulo', partial(np.mod.reduce, axis=1),
                 None, None),
     ('avg',  'Arithmetic average', partial(bn.nanmean, axis=1),
-                partial(bn.move_mean, axis=0), expanding_mean),
+                partial(bn.move_mean, axis=0, min_count=2), expanding_mean),
     ('std',  'Standard deviation', partial(bn.nanstd, axis=1),
                 partial(bn.move_std, axis=0), expanding_std),
     ('var',  'Variance', partial(bn.nanvar, axis=1),
