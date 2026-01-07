@@ -8,7 +8,7 @@ import re
 import sys
 import traceback
 from collections import deque
-from dataclasses import dataclass, field, KW_ONLY
+from dataclasses import dataclass, field, KW_ONLY, replace
 from functools import partial, reduce
 from operator import add
 from typing import Any, Callable
@@ -102,10 +102,7 @@ class Column:
 
     def __copy__(self):
         logger.debug('copying '+ debug_col_repr(self, 4))
-        copied = copy.copy(super())
-        copied.id_ = _IDs.get_next()
-        logger.debug('  copy '+ debug_col_repr(copied, 4))
-        return copied
+        return replace(self, id_=_IDs.get_next())
 
     def __hash__(self):
         return hash(self.id_)
