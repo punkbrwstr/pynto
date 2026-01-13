@@ -1,4 +1,4 @@
-![pynto logo](resources/pynto.png)
+![pynto logo](https://raw.githubusercontent.com/punkbrwstr/pynto/master/resources/pynto.png)
 
 ## pynto: Data analysis in Python using stack-based programming
 
