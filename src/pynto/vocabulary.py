@@ -53,6 +53,7 @@ class ResampleMethod(Enum):
     LAST = 1
     SUM = 2
     AVG = 3
+    LAST_NOFILL = 4
 
 @dataclass(eq=False)
 class Column:
@@ -438,6 +439,12 @@ def _resample(to_range: Range, to_values: np.ndarray,
     idx, idx_input = from_range.resample_indicies(to_range, False)
     match method:
         case ResampleMethod.LAST:
+            x = from_values.ravel()
+            where = np.where(~np.isnan(x),np.arange(len(x)),0)
+            np.maximum.accumulate(where,out=where)
+            from_values[:] = x[where][:,None]
+            to_values[idx] = from_values[idx_input]
+        case ResampleMethod.LAST_NOFILL:
             to_values[idx] = from_values[idx_input]
         case ResampleMethod.SUM:
             sums = np.nancumsum(from_values)
@@ -520,7 +527,7 @@ class Evaluator:
                 if col.range_ and not col.calculated:
                     col.cache[col.range_] = np.full((len(col.range_),1), np.nan, order='F')
                     if col.range_.periodicity != col.md.periodicity:
-                        r = range_.change_periodicity(col.md.periodicity)
+                        r = col.range_.change_periodicity(col.md.periodicity)
                         resample.append(r)
                     else:
                         r = col.range_
@@ -899,6 +906,9 @@ class PeriodicityColumn(Column):
                     self.input_stack[0].resample_method)
 
 class SetPeriodicity(Word):
+    def __init__(self, name: str):
+        super().__init__(name, slice(-1,None))
+
     def __call__(self, periodicity: str | Periodicity) -> Word:
         if isinstance(periodicity, str):
             self.periodicity = Periodicity[periodicity]
@@ -1028,22 +1038,32 @@ class Join(Word):
 @dataclass(kw_only=True, eq=False)
 class ReductionColumn(Column):
     operation: Callable[[np.ndarray], np.ndarray]
+    ignore_nans: bool
 
     def calculate(self) -> None:
         inputs = np.concatenate([col.values for col in self.input_stack]) \
                     .reshape((len(self.range_),len(self.input_stack)),order='F')
-        self.values[:] = self.operation(inputs)[:, None]
+        values = self.operation(inputs)[:, None]
+        if self.ignore_nans:
+            values[np.all(np.isnan(inputs),axis=1)] = np.nan
+        else:
+            values[np.any(np.isnan(inputs),axis=1)] = np.nan
+        self.values[:] = values
 
 class Reduction(Word):
     def __init__(self, name: str, operation: Callable[[np.ndarray, np.ndarray], None]):
         self.operation = operation
         super().__init__(name, slice(-2, None))
 
+    def __call__(self, ignore_nans: bool = False) -> Word:
+        return super().__call__(locals())
+
     def operate(self, stack: list[Column]) -> None:
         inputs = [*stack]
         stack.clear()
         stack.append(ReductionColumn(inputs[0].header,
                     operation=self.operation,
+                    ignore_nans=self.ignore_nans,
                     input_stack=inputs))
 
 @dataclass(kw_only=True, eq=False)
@@ -1054,7 +1074,7 @@ class RollingColumn(SiblingColumn):
     lookback: int | None = None
 
     def set_input_range(self) -> None:
-        self.lookback = int(self.window * 1.25)
+        self.lookback = max(5,int(self.window * 1.25))
         input_range = self.range_.expand(-self.lookback)
         for col in self.input_stack:
             col.set_range(input_range)
@@ -1064,14 +1084,18 @@ class RollingColumn(SiblingColumn):
                 .reshape((len(self.input_stack[0].range_),len(self.input_stack)),order='F')
         mask = ~np.any(np.isnan(data), axis=1)
         idx = np.where(mask)[0]
-        start = np.where(idx >= self.lookback)[0][0]
         out = self.cache[self.range_]
-        out[(idx - self.lookback)[start:]] = self.operation(data[mask], self.window)[start:]
-        if not np.all(mask):
-            idx = np.where(~mask)[0]
-            if np.any(idx >= self.lookback):
-                start = np.where(idx >= self.lookback)[0][0]
-                out[(idx - self.lookback)[start:]] = np.nan
+        if np.any(idx >= self.lookback):
+            start = np.where(idx >= self.lookback)[0][0]
+            out[(idx - self.lookback)[start:]] = self.operation(data[mask], self.window)[start:]
+            if not np.all(mask):
+                idx = np.where(~mask)[0]
+                if np.any(idx >= self.lookback):
+                    start = np.where(idx >= self.lookback)[0][0]
+                    out[(idx - self.lookback)[start:]] = np.nan
+        else:
+            out[:] = np.nan
+                
 
 
 class Rolling(Word):
@@ -1123,10 +1147,11 @@ class AccumulatorColumn(Column):
         mask = ~np.isnan(data)
         mask = ~np.any(np.isnan(data), axis=1)
         idx = np.where(mask)[0]
-        if not self.ascending:
-            self.values[idx] = self.func(data[mask][::-1])[::-1]
-        else:
-            self.values[idx] = self.func(data[mask])
+        if not np.all(~mask):
+            if not self.ascending:
+                self.values[idx] = self.func(data[mask][::-1])[::-1]
+            else:
+                self.values[idx] = self.func(data[mask])
         if not np.all(mask):
             self.values[~mask] = np.nan
 
@@ -1296,7 +1321,7 @@ class HeaderAlphabetize(Word):
             col.header = next(gen)
 
 def zero_first_op(x: np.ndarray, out: np.ndarray) -> None:
-    out[1:] = x
+    out[1:] = x[1:]
     out[0] = 0.0
 
 def zero_to_na_op(x: np.ndarray, out: np.ndarray) -> None:
@@ -1508,6 +1533,8 @@ for code, desc, red, roll, scan in _funcs:
     if red:
         vocab[code] = ('Row-wise Reduction', desc,
                     lambda name, func=red: Reduction(name, func))
+        vocab[f'n{code}'] = ('Row-wise Reduction Ignoring NaNs', desc,
+                    lambda name, func=red: Reduction(name, func)(True))
     if roll:
         vocab[f'r{code}'] = ('Rolling Window', desc,
                      lambda name, func=roll: Rolling(name, func))

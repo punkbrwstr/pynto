@@ -299,7 +299,7 @@ class Range:
     def change_periodicity(self, periodicity: Periodicity | str):
         if isinstance(periodicity, str):
             periodicity = Periodicity[periodicity.upper()]
-        return periodicity[self[0]:self[-1] + 1] # type: ignore
+        return periodicity[self[0][0]:self[-1][-1]].expand() # type: ignore
 
     def resample_indicies(self, range_: Range, round_: bool = True) -> tuple[int,list[int]]:
         my_ordinals, target_ordinals = [], []
