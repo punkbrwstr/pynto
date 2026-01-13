@@ -127,6 +127,7 @@ pynto has built-in database functionality that lets you save DataFrames and Seri
 ## pynto built-in vocabulary
 
 
+
 ## Column Creation
 
 | Word | Description | Parameters | Column Indexer |
@@ -146,7 +147,7 @@ pynto has built-in database functionality that lets you save DataFrames and Seri
 | Word | Description | Parameters | Column Indexer |
 |------|-------------|------------|----------------|
 | call | Applies quotation |  | [:] |
-| cleave | Applies all preceding quotations |  | [:] |
+| cleave | Applies all preceding quotations | num_quotations: int = -1 | [:] |
 | compose | Combines quotations | num_quotations: int = 2 | [:] |
 | hmap | Applies quotation to stacks created grouping columns by header |  | [:] |
 | ifexists | Applies quotation if stack has at least _count_ columns | count: int = 1 | [:] |
@@ -180,11 +181,13 @@ pynto has built-in database functionality that lets you save DataFrames and Seri
 | ffill | Fills nans with previous values, looking back _lookback_ before range and leaving trailing nans unless not _leave_end_ | lookback: int = 10, leave_end: bool = True | [:] |
 | fill | Fills nans with _value_  | value: float | [:] |
 | join | Joins two columns at _date_ | date: datelike | [-2:] |
-| per | Changes column periodicity to _periodicity_, then resamples | periodicity: str \| Periodicity, round_: bool = False | [:] |
-| resample | Adapts periodicity to match range with optional rounding _round_ | round_: bool = False | [:] |
+| per | Changes column periodicity to _periodicity_, then resamples | periodicity: str \| Periodicity | [-1:] |
+| resample_avg | Sets periodicity resampling method to avg |  | [:] |
+| resample_last | Sets periodicity resampling method to last |  | [:] |
+| resample_sum | Sets periodicity resampling method to sum |  | [:] |
 | start | Changes period start to _start_, then resamples | start: datelike, round_: bool = False | [:] |
-| zero_first | Changes first value to zero | ascending: bool = True | [-1:] |
-| zero_to_na | Changes zeros to nans | ascending: bool = True | [-1:] |
+| zero_first | Changes first value to zero |  | [-1:] |
+| zero_to_na | Changes zeros to nans |  | [-1:] |
 
 ## Header manipulation
 
@@ -201,18 +204,19 @@ pynto has built-in database functionality that lets you save DataFrames and Seri
 
 | Word | Description | Parameters | Column Indexer |
 |------|-------------|------------|----------------|
-| abs | Absolute value | ascending: bool = True | [-1:] |
-| exp | Exponential | ascending: bool = True | [-1:] |
-| expm1 | Exponential minus one | ascending: bool = True | [-1:] |
-| inc | Increment | ascending: bool = True | [-1:] |
-| inv | Multiplicative inverse | ascending: bool = True | [-1:] |
-| lnot | Logical not | ascending: bool = True | [-1:] |
-| log | Natural log | ascending: bool = True | [-1:] |
-| log1p | Natural log of increment | ascending: bool = True | [-1:] |
-| neg | Additive inverse | ascending: bool = True | [-1:] |
-| rank | Row-wise rank | ascending: bool = True | [:] |
-| sign | Sign | ascending: bool = True | [-1:] |
-| sqrt | Square root | ascending: bool = True | [-1:] |
+| abs | Absolute value |  | [-1:] |
+| dec | Decrement |  | [-1:] |
+| exp | Exponential |  | [-1:] |
+| expm1 | Exponential minus one |  | [-1:] |
+| inc | Increment |  | [-1:] |
+| inv | Multiplicative inverse |  | [-1:] |
+| lnot | Logical not |  | [-1:] |
+| log | Natural log |  | [-1:] |
+| log1p | Natural log of increment |  | [-1:] |
+| neg | Additive inverse |  | [-1:] |
+| rank | Row-wise rank |  | [:] |
+| sign | Sign |  | [-1:] |
+| sqrt | Square root |  | [-1:] |
 
 ## Quotation
 
@@ -255,23 +259,41 @@ pynto has built-in database functionality that lets you save DataFrames and Seri
 | rret | Lagged return | window: int = 2 | [-1:] |
 | rstd | Standard deviation | window: int = 2 | [-1:] |
 | rvar | Variance | window: int = 2 | [-1:] |
+| rzsc | Z-score | window: int = 2 | [-1:] |
 
 ## Row-wise Reduction
 
 | Word | Description | Parameters | Column Indexer |
 |------|-------------|------------|----------------|
-| add | Addition |  | [-2:] |
-| avg | Arithmetic average |  | [-2:] |
-| div | Division |  | [-2:] |
-| max | Maximum |  | [-2:] |
-| med | Median |  | [-2:] |
-| min | Minimum |  | [-2:] |
-| mod | Modulo |  | [-2:] |
-| mul | Multiplication |  | [-2:] |
-| pow | Power |  | [-2:] |
-| std | Standard deviation |  | [-2:] |
-| sub | Subtraction |  | [-2:] |
-| var | Variance |  | [-2:] |
+| add | Addition | ignore_nans: bool = False | [-2:] |
+| avg | Arithmetic average | ignore_nans: bool = False | [-2:] |
+| div | Division | ignore_nans: bool = False | [-2:] |
+| max | Maximum | ignore_nans: bool = False | [-2:] |
+| med | Median | ignore_nans: bool = False | [-2:] |
+| min | Minimum | ignore_nans: bool = False | [-2:] |
+| mod | Modulo | ignore_nans: bool = False | [-2:] |
+| mul | Multiplication | ignore_nans: bool = False | [-2:] |
+| pow | Power | ignore_nans: bool = False | [-2:] |
+| std | Standard deviation | ignore_nans: bool = False | [-2:] |
+| sub | Subtraction | ignore_nans: bool = False | [-2:] |
+| var | Variance | ignore_nans: bool = False | [-2:] |
+
+## Row-wise Reduction Ignoring NaNs
+
+| Word | Description | Parameters | Column Indexer |
+|------|-------------|------------|----------------|
+| nadd | Addition | ignore_nans: bool = False | [-2:] |
+| navg | Arithmetic average | ignore_nans: bool = False | [-2:] |
+| ndiv | Division | ignore_nans: bool = False | [-2:] |
+| nmax | Maximum | ignore_nans: bool = False | [-2:] |
+| nmed | Median | ignore_nans: bool = False | [-2:] |
+| nmin | Minimum | ignore_nans: bool = False | [-2:] |
+| nmod | Modulo | ignore_nans: bool = False | [-2:] |
+| nmul | Multiplication | ignore_nans: bool = False | [-2:] |
+| npow | Power | ignore_nans: bool = False | [-2:] |
+| nstd | Standard deviation | ignore_nans: bool = False | [-2:] |
+| nsub | Subtraction | ignore_nans: bool = False | [-2:] |
+| nvar | Variance | ignore_nans: bool = False | [-2:] |
 
 ## Stack Manipulation
 
@@ -281,6 +303,7 @@ pynto has built-in database functionality that lets you save DataFrames and Seri
 | dup | Duplicates columns |  | [-1:] |
 | filter | Removes non-selected columns |  | [:] |
 | hsort | Sorts columns by header |  | [:] |
+| id | Identity/no-op |  | [:] |
 | interleave | Divides columns in _parts_ groups and interleaves the groups | parts: int = 2 | [:] |
 | nip | Removes non-selected columns, defaulting selection to top |  | [-1:] |
 | pull | Brings selected columns to the top |  | [:] |
