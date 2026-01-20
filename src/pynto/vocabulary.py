@@ -437,6 +437,10 @@ def _resample(to_range: Range, to_values: np.ndarray,
                 from_range: Range, from_values: np.ndarray,
                 method: ResampleMethod) -> None:
     idx, idx_input = from_range.resample_indicies(to_range, False)
+    #print(from_values)
+    #print(from_range)
+    #print(to_range)
+    #print(idx_input)
     match method:
         case ResampleMethod.LAST:
             x = from_values.ravel()
@@ -1061,7 +1065,8 @@ class Reduction(Word):
     def operate(self, stack: list[Column]) -> None:
         inputs = [*stack]
         stack.clear()
-        stack.append(ReductionColumn(inputs[0].header,
+        if inputs:
+            stack.append(ReductionColumn(inputs[0].header,
                     operation=self.operation,
                     ignore_nans=self.ignore_nans,
                     input_stack=inputs))
@@ -1490,6 +1495,8 @@ vocab['resample_last'] = (cat, 'Sets periodicity resampling method to last',
                     lambda name: Resample(name, ResampleMethod.LAST))
 vocab['resample_avg'] = (cat, 'Sets periodicity resampling method to avg',
                     lambda name: Resample(name, ResampleMethod.AVG))
+vocab['resample_lastnofill'] = (cat, 'Sets periodicity resampling method to last with no fill',
+                    lambda name: Resample(name, ResampleMethod.LAST_NOFILL))
 vocab['per'] = (cat, 'Changes column periodicity to _periodicity_, then resamples', SetPeriodicity)
 vocab['start'] = (cat, 'Changes period start to _start_, then resamples', SetStart)
 
