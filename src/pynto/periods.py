@@ -289,6 +289,9 @@ class Range:
     def __post_init__(self):
         assert self.start <= self.stop, \
             f'Range stop cannot be less than start ({self.start}-{self.stop})'
+        if isinstance(self.periodicity, str):
+            self.periodicity = Periodicity[self.periodicity]
+
 
     @classmethod
     def from_index(cls, date_range: pd.DatetimeIndex) -> Range:
