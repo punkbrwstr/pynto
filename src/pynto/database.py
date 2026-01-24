@@ -212,8 +212,9 @@ class Db:
             columns = _check_dups(pandas.columns.values)
             if isinstance(pandas.index, pd.MultiIndex):
                 assert len(pandas.index.levels) == 2, 'Too many axes.'
-                rows = _check_dups(pandas.loc[pandas.index[0][0]].index.values, 'Rows')
-                index=pandas.index.remove_unused_levels().levels[0]
+                #rows = _check_dups(pandas.loc[pandas.index[0][0]].index.values, 'Rows')
+                rows = _check_dups(list(pandas.index.get_level_values(1).unique()), 'Rows')
+                index = pandas.index.remove_unused_levels().levels[0]
                 flat = pandas.values.reshape(len(index), len(columns) * len(rows))
                 for i, (row, col) in enumerate(zip(np.repeat(rows,len(columns)),
                                                 np.tile(columns,len(rows)))):
@@ -312,7 +313,10 @@ class Db:
             for md in mds:
                 rows[md.row_header] = None
                 columns[md.col_header] = None
-            index = pd.MultiIndex.from_product([index, list(rows.keys())])
+            row_index = list(rows.keys())
+            row_index = pd.CategoricalIndex(row_index, categories=row_index, ordered=True)
+            index = pd.MultiIndex.from_product([index, row_index])
+            #index = pd.MultiIndex.from_product([index, list(rows.keys())])
             ary = ary.reshape(ary.shape[0]*len(rows),len(columns))
             cols = np.array(columns.keys())
         df = pd.DataFrame(ary,columns=cols, index=index)
