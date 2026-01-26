@@ -701,7 +701,10 @@ class Saved(Word):
 
     def operate(self, stack: list[Column]) -> None:
         for md in db.get_client().get_metadata(self.key):
-            stack.append(SavedColumn(md.col_header + md.row_header, md=md))
+            header = md.col_header
+            if md.row_header:
+                header += '$' + md.row_header
+            stack.append(SavedColumn(header, md=md))
 
 
 # Quotation / combinator words
