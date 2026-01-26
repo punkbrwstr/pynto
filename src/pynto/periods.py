@@ -264,15 +264,8 @@ class Period:
     def __sub__(self, by: int) -> Period:
         return Period(self.ordinal - by, self.periodicity)
 
-    def expand(self, by: int = 1) -> Range:
-        if by > 0:
-            start, stop = self.ordinal, self.ordinal + by
-        elif by == 0:
-            start, stop = self.ordinal - 1, self.ordinal
-        else:
-            start, stop = self.ordinal + by, self.ordinal + 1
-        return Range(start, stop, self.periodicity)
-
+    def to_range(self) -> Range:
+        return Range(self.ordinal, self.ordinal + 1, self.periodicity)
 
     def __str__(self) -> str:
         return f'{self.periodicity}{self.periodicity._to_str(self)}'
@@ -302,6 +295,9 @@ class Range:
     def change_periodicity(self, periodicity: Periodicity | str):
         if isinstance(periodicity, str):
             periodicity = Periodicity[periodicity.upper()]
+        print(self[0][0])
+        print(self[-1][-1])
+        print(periodicity[self[0][0]:self[-1][-1]])
         return periodicity[self[0][0]:self[-1][-1]].expand() # type: ignore
 
     def resample_indicies(self, range_: Range, round_: bool = True) -> tuple[int,list[int]]:
@@ -344,7 +340,7 @@ class Range:
     def __repr__(self) -> str:
         if len(self) == 0:
             return '[]'
-        return f'{str(self.periodicity)}[{self[0][-1]}:{(self[-1] + 1)[-1]}]'
+        return f'{str(self.periodicity)}[{self[0]}:{(self[-1] + 1)}]'
 
     def __hash__(self) -> int:
         return hash((self.start,self.stop,self.periodicity))
