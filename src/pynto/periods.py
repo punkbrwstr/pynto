@@ -290,15 +290,12 @@ class Range:
     def from_index(cls, date_range: pd.DatetimeIndex) -> Range:
         assert date_range.freq is not None, 'Index must have freq.' 
         return  Periodicity.from_offset_code(date_range.freq.name) \
-            [date_range[0]:date_range[-1]].expand(1) # type: ignore
+            [date_range[0]:date_range[-1]].expand(1) 
 
-    def change_periodicity(self, periodicity: Periodicity | str):
+    def change_periodicity(self, periodicity: Periodicity | str) -> Range:
         if isinstance(periodicity, str):
             periodicity = Periodicity[periodicity.upper()]
-        print(self[0][0])
-        print(self[-1][-1])
-        print(periodicity[self[0][0]:self[-1][-1]])
-        return periodicity[self[0][0]:self[-1][-1]].expand() # type: ignore
+        return periodicity[self[0][0]:self[-1][-1]].expand() 
 
     def resample_indicies(self, range_: Range, round_: bool = True) -> tuple[int,list[int]]:
         my_ordinals, target_ordinals = [], []

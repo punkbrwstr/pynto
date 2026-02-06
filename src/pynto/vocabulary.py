@@ -101,6 +101,9 @@ class Column:
     def drop(self):
         pass
 
+    def prepare(self):
+        pass
+
     def __copy__(self):
         logger.debug('copying '+ debug_col_repr(self, 4))
         return replace(self, id_=_IDs.get_next())
@@ -122,7 +125,7 @@ class SiblingColumn(Column):
     allow_sibling_drops: bool = True
     copies: list[SiblingColumn] | None = None
 
-    def set_range(self, range_: Range) -> None:
+    def prepare(self):
         if self.ordinal is None:
             output_columns = len(self.siblings)
             for i, sib in enumerate(self.siblings):
@@ -132,7 +135,6 @@ class SiblingColumn(Column):
                     self.input_stack.append(sib.input_column)
                     sib.input_column = None
             self.siblings.clear()
-        super().set_range(range_)
 
     def __copy__(self):
         copy_ = super().__copy__()
@@ -152,13 +154,7 @@ class SiblingColumn(Column):
 
     @property
     def values(self) -> np.ndarray:
-        try:
-            return self.cache[self.range_][:, [self.ordinal]]
-        except:
-            print(f'look up here {self.ordinal}')
-            print(f'     {self.header}')
-            print(f'     {self}')
-            raise
+        return self.cache[self.range_][:, [self.ordinal]]
 
     def drop(self):
         if self.allow_sibling_drops:
@@ -326,12 +322,12 @@ class Word:
         return [col.header for col in self.stack]
 
     @property
-    def first(self) -> Evaluator:
-        return Evaluator(self)[0]
+    def last(self) -> Evaluator:
+        return Evaluator(self)[-1:]
 
     @property
-    def last(self) -> Evaluator:
-        return Evaluator(self)[-1]
+    def all(self) -> Evaluator:
+        return Evaluator(self)[:]
 
     @property
     def rows(self) -> Evaluator:
@@ -437,10 +433,6 @@ def _resample(to_range: Range, to_values: np.ndarray,
                 from_range: Range, from_values: np.ndarray,
                 method: ResampleMethod) -> None:
     idx, idx_input = from_range.resample_indicies(to_range, False)
-    #print(from_values)
-    #print(from_range)
-    #print(to_range)
-    #print(idx_input)
     match method:
         case ResampleMethod.LAST:
             x = from_values.ravel()
@@ -474,6 +466,7 @@ class Evaluator:
         flat = []
         while working:
             col = working.pop()
+            col.prepare()
             bounds = col.get_bounds()
             if bounds:
                 min_ = bounds[0] if min_ is None else min(min_, bounds[0])
@@ -486,7 +479,7 @@ class Evaluator:
             range_ = key
         elif isinstance(key, datelike) or isinstance(key, int):
             p = per if per else Periodicity.B
-            range_ = p[key].expand(0)
+            range_ = p[key].to_range()
         elif isinstance(key, slice):
             start, stop, step = key.start, key.stop, key.step
             p = Periodicity[step] if step \
@@ -556,7 +549,10 @@ class Evaluator:
                 continue
             logger.debug(f'    calc' + debug_col_repr(col,1)) 
             col.cache[col.range_] = np.empty((len(col.range_), col.output_columns), order='F')
-            col.calculate()
+            try:
+                col.calculate()
+            except Exception as e:
+                raise ValueError(f'Unable to calculate {col!r}') from e
             col.input_stack = []
         if not stack:
             return None
@@ -705,7 +701,6 @@ class Saved(Word):
             if md.row_header:
                 header += '$' + md.row_header
             stack.append(SavedColumn(header, md=md))
-
 
 # Quotation / combinator words
 class Quotation(Word):
@@ -931,32 +926,104 @@ class SetPeriodicity(Word):
                                periodicity=self.periodicity, input_stack=[col]))
 
 @dataclass(kw_only=True, eq=False)
-class StartColumn(Column):
-    start: datelike
+class StartColumn(SiblingColumn):
+    start: datelike | int
+    offset: int | None = None
 
     def set_input_range(self) -> None:
-        input_start = self.range_.periodicity[self.start].ordinal
-        input_range = Range(input_start, self.range_.stop, self.range_.periodicity)
-        self.input_stack[0].set_range(input_range)
+        if isinstance(self.start, int):
+            self.offset = self.start
+        else:
+            self.offset = self.range_.periodicity[self.start].ordinal - self.range_.start
+        input_range = Range(self.range_.start + self.offset,
+                        self.range_.stop, self.range_.periodicity)
+        for col in self.input_stack:
+            col.set_range(input_range)
 
     def calculate(self) -> None:
-        offset = self.range_.start - self.input_stack[0].range_.start
-        if offset >= 0:
-            self.values[:] = self.input_stack[0].values[offset:]
+        data = np.concatenate([col.values for col in self.input_stack]) \
+                .reshape((len(self.input_stack[0].range_),len(self.input_stack)),order='F')
+        out = self.cache[self.range_]
+        if self.offset <= 0:
+            out[:] = data[-self.offset:]
         else:
-            self.values[offset:] = self.input_stack[0].values
+            out[self.offset:] = data
+            out[:self.offset] = np.nan
             
-
 class SetStart(Word):
-    def __call__(self, start: datelike, \
-                    round_: bool = False) -> Word:
+    def __init__(self, name: str):
+        super().__init__(name, slice(-1,None))
+
+    def __call__(self, start: datelike | int) -> Word:
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
-        inputs = stack[:]
+        cache = {}
+        inputs = [*stack]
         stack.clear()
-        for col in inputs:
-            stack.append(StartColumn(col.header, start=self.start, input_stack=[col]))
+        siblings = set()
+        input_stack = []
+        cache = {}
+        for i, col in enumerate(inputs):
+            sib = StartColumn(
+                        col.header,
+                        start=self.start,                           
+                        input_stack=input_stack,
+                        input_column=col,
+                        cache=cache,
+                        siblings=siblings
+                        )
+            siblings.add(sib)
+            stack.append(sib)
+
+@dataclass(kw_only=True, eq=False)
+class FillFirstColumn(SiblingColumn):
+    lookback: int
+
+    def set_input_range(self) -> None:
+        self.lookback = -abs(self.lookback)
+        input_range = self.range_.expand(self.lookback)
+        for col in self.input_stack:
+            col.set_range(input_range)
+
+    def calculate(self) -> None:
+        data = np.concatenate([col.values for col in self.input_stack]) \
+                .reshape((len(self.input_stack[0].range_),len(self.input_stack)),order='F')
+        out = self.cache[self.range_]
+        first_part = data[:-self.lookback+1]
+        row_ok = ~np.isnan(first_part).any(axis=1)
+        good_idxs = np.flatnonzero(row_ok)
+        if good_idxs.size > 0:
+            out[0] = data[good_idxs[-1]]
+        else:
+            out[0] = np.nan
+        out[1:] = data[-self.lookback+1:]
+            
+class FillFirst(Word):
+    def __init__(self, name: str):
+        super().__init__(name, slice(-1,None))
+
+    def __call__(self, lookback: int = 5) -> Word:
+        return super().__call__(locals())
+
+    def operate(self, stack: list[Column]) -> None:
+        cache = {}
+        inputs = [*stack]
+        stack.clear()
+        siblings = set()
+        input_stack = []
+        cache = {}
+        for i, col in enumerate(inputs):
+            sib = FillFirstColumn(
+                        col.header,
+                        lookback=self.lookback,                           
+                        input_stack=input_stack,
+                        input_column=col,
+                        cache=cache,
+                        siblings=siblings
+                        )
+            siblings.add(sib)
+            stack.append(sib)
 
 @dataclass(kw_only=True, eq=False)
 class FillColumn(Column):
@@ -1144,39 +1211,6 @@ class RollingReduction(Rolling):
                     reduction=True,
                     input_stack=inputs))
 
-@dataclass(kw_only=True, eq=False)
-class AccumulatorColumn(Column):
-    func: Callable[[np.ndarray, int], np.ndarray]
-    ascending: bool = True
-
-    def calculate(self) -> None:
-        data = self.input_stack[0].values
-
-        mask = ~np.isnan(data)
-        mask = ~np.any(np.isnan(data), axis=1)
-        idx = np.where(mask)[0]
-        if not np.all(~mask):
-            if not self.ascending:
-                self.values[idx] = self.func(data[mask][::-1])[::-1]
-            else:
-                self.values[idx] = self.func(data[mask])
-        if not np.all(mask):
-            self.values[~mask] = np.nan
-
-class Accumulator(Word):
-    def __init__(self, name: str, func: Callable[[np.ndarray,np.ndarray],None],
-                 ascending: bool = True) -> Word:
-        self.func = func
-        self.ascending = ascending
-        super().__init__(name, slice_=slice(-1,None))
-
-    def operate(self, stack: list[Column]) -> None:
-        inputs = [*stack]
-        stack.clear()
-        for col in inputs:
-            stack.append(AccumulatorColumn(col.header, func=self.func, 
-                                           ascending=self.ascending, input_stack=[col]))
-
 class OneForOneFunction(Word):
     def __init__(self, name: str,
                     operation: Callable[[np.ndarray,np.ndarray],None],
@@ -1186,11 +1220,6 @@ class OneForOneFunction(Word):
         self.operation = operation
         self.allow_sibling_drops = allow_sibling_drops
         super().__init__(name, slice_)
-
-    def __call__(self) -> Word:
-    #def __call__(self, ascending: bool = True) -> Word:
-        self.ascending = True
-        return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
         inputs = [*stack]
@@ -1224,11 +1253,9 @@ class OneForOneFunctionColumn(SiblingColumn):
         data =  np.concatenate(cols_values).reshape((len(self.range_),i+1),order='F')
         if not self.ascending:
             data = data[::-1]
-        self.operation(data, out=self.cache[self.range_])
-
-def rank(inputs: np.ndarray, out: np.ndarray) -> None:
-    out[:] = inputs.argsort(axis=1).argsort(axis=1)
-
+            self.operation(data, out=self.cache[self.range_][::-1])
+        else:
+            self.operation(data, out=self.cache[self.range_])
 
 class Roll(Word):
     def operate(self, stack: list[Column]) -> None:
@@ -1309,24 +1336,29 @@ class HeaderApply(Word):
         for col in stack:
             col.header = self.header_func(col.header)
 
-def alphabet_generator():
-    n = 0
-    while True:
-        result = ''
-        num = n
-        while True:
-            result = chr(97 + (num % 26)) + result
-            num = num // 26 - 1
-            if num < 0:
-                break
-        yield result
-        n += 1
-
 class HeaderAlphabetize(Word):
+    @staticmethod
+    def alphabet_generator():
+        n = 0
+        while True:
+            result = ''
+            num = n
+            while True:
+                result = chr(97 + (num % 26)) + result
+                num = num // 26 - 1
+                if num < 0:
+                    break
+            yield result
+            n += 1
+
     def operate(self, stack: list[Column]) -> None:
-        gen = alphabet_generator()
+        gen = self.alphabet_generator()
         for col in stack:
             col.header = next(gen)
+
+def rank(inputs: np.ndarray, out: np.ndarray) -> None:
+    out[:] = inputs.argsort(axis=1).argsort(axis=1)
+
 
 def zero_first_op(x: np.ndarray, out: np.ndarray) -> None:
     out[1:] = x[1:]
@@ -1344,51 +1376,67 @@ def inc_op(x: np.ndarray, out: np.ndarray) -> None:
 def dec_op(x: np.ndarray, out: np.ndarray) -> None:
     out[:] = x - 1
 
+def expanding_wrapper(func: Callable[[np.ndarray,np.ndarray],None]) \
+            -> Callable[[np.ndarray,np.ndarray],None]:
+    def wrapper(a, out, func=func):
+        mask = np.all(~np.isnan(a), axis=1)
+        if not np.all(~mask):
+            out[mask] = func(a[mask])
+        out[~mask] = np.nan
+    return wrapper
+
 def expanding_mean(x: np.ndarray) -> np.ndarray:
-    if len(x.shape) == 1:
-        return np.add.accumulate(x) / (np.arange(len(x)) + 1)
-    else:
-        return np.add.accumulate(x) / (np.arange(len(x)) + 1)[:,None]
+    csum = np.cumsum(x, axis=0)
+    N = x.shape[0]
+    counts = np.arange(1, N + 1, dtype=float)
+    shape = [1] * x.ndim
+    shape[0] = N
+    counts = counts.reshape(shape)
+    return csum / counts
 
 def expanding_var(x: np.ndarray) -> np.ndarray:
     cumsumOfSquares = np.add.accumulate(x * x)
     cumsum = np.add.accumulate(x)
-    count = np.add.accumulate(x / x)
-    count[0] += 1
-    return (cumsumOfSquares - cumsum * cumsum / count) / (count - 1)
+    N = x.shape[0]
+    counts = np.arange(1, N + 1, dtype=np.float64)
+    shape = [1] * x.ndim
+    shape[0] = N
+    counts = counts.reshape(shape)
+    out = np.full(x.shape,np.nan)
+    np.divide(cumsumOfSquares - cumsum * cumsum / counts, counts - 1, out=out, where=counts - 1 > 0)
+    return out
 
 def expanding_std(x: np.ndarray) -> np.ndarray:
     return np.sqrt(expanding_var(x))
 
-def rolling_lag(x: np.ndarray, window: int) -> np.ndarray:
-    window -= 1
-    if len(x.shape) == 1:
-        return np.concat([np.full(window, np.nan), x[:-window]])
-    else:
-        return np.concat([np.full((window,x.shape[1]), np.nan), x[:-window]])
-
 def expanding_lag(x: np.ndarray) -> np.ndarray:
     return np.full(x.shape,x[0])
 
-def rolling_diff(x: np.ndarray, window: int) -> np.ndarray:
-    window -= 1
-    if len(x.shape) == 1:
-        return np.concat([np.full(window, np.nan), x[window:] - x[:-window]])
-    else:
-        return np.concat([np.full((window,x.shape[1]), np.nan), x[window:] - x[:-window]])
+def expanding_ret(x: np.ndarray) -> np.ndarray:
+    mask = ~np.isnan(x)                
+    first_row_idx = mask.argmax(axis=0) 
+    has_value = mask.any(axis=0)
+    cols = np.arange(x.shape[1])
+    first = np.where(has_value, x[first_row_idx, cols], np.nan)
+    out = np.full(x.shape, np.nan)
+    np.divide(x, first, out=out, where=~np.isnan(first))
+    return out - 1
 
 def expanding_diff(x: np.ndarray) -> np.ndarray:
     return x - x[0]
 
+def rolling_diff(x: np.ndarray, window: int) -> np.ndarray:
+    window -= 1
+    return np.concat([np.full((window,x.shape[1]), np.nan), x[window:] - x[:-window]])
+
+def rolling_lag(x: np.ndarray, window: int) -> np.ndarray:
+    window -= 1
+    return np.concat([np.full((window,x.shape[1]), np.nan), x[:-window]])
+
+
 def rolling_ret(x: np.ndarray, window: int) -> np.ndarray:
     window -= 1
-    if len(x.shape) == 1:
-        return np.concat([np.full(window, np.nan), x[window:] / x[:-window] - 1])
-    else:
-        return np.concat([np.full((window,x.shape[1]), np.nan), x[window:] / x[:-window] - 1])
-
-def expanding_ret(x: np.ndarray) -> np.ndarray:
-    return x / x[0] - 1
+    return np.concat([np.full((window,x.shape[1]), np.nan), x[window:] / x[:-window] - 1])
 
 def rolling_cov(x: np.ndarray, window: int) -> np.ndarray:
     means = bn.move_mean(x, window, axis=0)
@@ -1487,6 +1535,11 @@ cat = 'Data cleanup'
 vocab['fill'] = (cat, 'Fills nans with _value_ ',Fill)
 vocab['ffill'] = (cat, 'Fills nans with previous values, looking back _lookback_ before range ' \
                   + 'and leaving trailing nans unless not _leave_end_', FFill)
+vocab['fillfirst'] = (cat, 'Fills first row with previous non-nan value, looking back _lookback_ ' \
+                    + ' before range', FillFirst)
+vocab['sync'] = (cat, 'Align available data by setting all values to NaN when any values is NaN',
+                     lambda name: OneForOneFunction(name, expanding_wrapper(lambda a: a),
+                                                        slice_=slice(None)))
 vocab['join'] = (cat, 'Joins two columns at _date_', Join)
 vocab['zero_first'] = (cat, 'Changes first value to zero',
                     lambda name: OneForOneFunction(name, zero_first_op))
@@ -1550,9 +1603,10 @@ for code, desc, red, roll, scan in _funcs:
                      lambda name, func=roll: Rolling(name, func))
     if scan:
         vocab[f'c{code}'] = ('Cumulative', desc,
-                     lambda name, func=scan: Accumulator(name, func))
+                     lambda name, func=scan: OneForOneFunction(name, expanding_wrapper(func)))
         vocab[f'rc{code}'] = ('Reverse Cumulative', desc,
-                     lambda name, func=scan: Accumulator(name, func, ascending=False))
+                     lambda name, func=scan: OneForOneFunction(name,
+                                                        expandin_wrapper(func), ascending=False))
 vocab['rcov'] = ('Rolling Window', 'Covariance', 
                  lambda name: RollingReduction(name, rolling_cov, slice_=slice(-2,None)))
 vocab['rcor'] = ('Rolling Window', 'Correlation', 
