@@ -291,13 +291,15 @@ class Word:
             logger.debug(f'{" " * prefix}      selected {selected}')
             current_stack = []
             to_delete = set()
+            already_selected = set()
             for i in selected:
-                if current.copy_selected:
+                if current.copy_selected or i in already_selected:
                     c = copy.copy(stack[i])
                     current_stack.append(c)
                 else:
                     to_delete.add(i)
                     current_stack.append(stack[i])
+                already_selected.add(i)
 
             if current.discard_excluded:
                 excluded = set(range(len(stack))) - set(selected)
@@ -306,6 +308,7 @@ class Word:
                     stack[i].drop() # no longer needed as siblings   
                 to_delete.update(excluded)
             for i in sorted(to_delete, reverse=True):
+                logger.debug(f'{" " * prefix}      deleting {debug_col_repr(stack[i],4)}')
                 del(stack[i])
             current.operate(current_stack)
             stack.extend(current_stack)
