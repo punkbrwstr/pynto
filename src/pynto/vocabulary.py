@@ -1474,8 +1474,9 @@ def rolling_ews(data: np.ndarray, window: int) -> np.ndarray:
     return np.sqrt(rolling_ewv(data, window))
 
 def rolling_zsc(data: np.ndarray, window: int) -> np.ndarray:
-    return (data - bn.move_mean(data, window=window, axis=0, min_count=2)) / \
-                bn.move_std(data, window=window, axis=0, min_count=2)
+    std = bn.move_std(data, window=window, axis=0, min_count=2)
+    return np.divide((data - bn.move_mean(data, window=window, axis=0, min_count=2)),
+                    std, out=None, where=std != 0)
 
 vocab: dict[str, tuple[str,str,Callable[[str],Word]]] = {}
 
