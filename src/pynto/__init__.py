@@ -6,13 +6,16 @@ from .database import get_client
 
 db = get_client()
 
+
 class _Definer:
     def __setitem__(self, name: str, word: Word) -> None:
         vocab[name] = ('Ad-hoc', name, lambda name: Word(name) + word)
 
+
 define = _Definer()
 
 now = lambda: Periodicity.B.current()[-1]
+
 
 def __getattr__(name: str):
     if not name.startswith('__'):

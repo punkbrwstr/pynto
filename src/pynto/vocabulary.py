@@ -3,30 +3,29 @@ from __future__ import annotations
 import copy
 import datetime
 import logging
-import numbers
 import re
 import sys
-import traceback
 from collections import deque
-from dataclasses import dataclass, field, KW_ONLY, replace
-from functools import partial, reduce
-from operator import add
-from typing import Any, Callable
+from dataclasses import dataclass, field, replace
+from functools import partial
+from typing import Callable
 from enum import Enum
 
 import bottleneck as bn
 import numpy as np
-import numpy.ma as ma
 import pandas as pd
 
 from . import database as db
 from .periods import Range, Periodicity, datelike
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 _DEBUG = False
+
 
 def toggle_debug():
     global _DEBUG
@@ -35,6 +34,7 @@ def toggle_debug():
         logger.setLevel(logging.DEBUG)
     else:
         logger.setLevel(logging.INFO)
+
 
 class ColumnIDGenerator:
     def __init__(self):
@@ -47,7 +47,9 @@ class ColumnIDGenerator:
     def reset(self):
         self.current = 0
 
+
 _IDs = ColumnIDGenerator()
+
 
 class ResampleMethod(Enum):
     LAST = 1
@@ -55,13 +57,14 @@ class ResampleMethod(Enum):
     AVG = 3
     LAST_NOFILL = 4
 
+
 @dataclass(eq=False)
 class Column:
     header: str = ''
     range_: Range | None = None
     output_columns: int = 1
     input_stack: list[Column] = field(default_factory=list)
-    cache: dict[Range,None | np.ndarray] = field(default_factory=dict)
+    cache: dict[Range, None | np.ndarray] = field(default_factory=dict)
     id_: int = field(default_factory=_IDs.get_next)
     resample_method: ResampleMethod = ResampleMethod.LAST
 
@@ -95,7 +98,7 @@ class Column:
     def calculated(self) -> bool:
         return self.cache.get(self.range_) is not None
 
-    def get_bounds(self) -> tuple[datetime.date,datetime.date,Periodicity] | None:
+    def get_bounds(self) -> tuple[datetime.date, datetime.date, Periodicity] | None:
         return None
 
     def drop(self):
@@ -105,7 +108,7 @@ class Column:
         pass
 
     def __copy__(self):
-        logger.debug('copying '+ debug_col_repr(self, 4))
+        logger.debug('copying ' + debug_col_repr(self, 4))
         return replace(self, id_=_IDs.get_next())
 
     def __hash__(self):
@@ -115,9 +118,10 @@ class Column:
         return self.id_ == other.id_
 
     def __del__(self):
-        pass #logger.debug('destroying '+ debug_col_repr(self, 4))
+        pass  # logger.debug('destroying '+ debug_col_repr(self, 4))
 
-@dataclass(kw_only=True,eq=False)
+
+@dataclass(kw_only=True, eq=False)
 class SiblingColumn(Column):
     siblings: set[SiblingColumn]
     ordinal: int | None = None
@@ -159,13 +163,20 @@ class SiblingColumn(Column):
     def drop(self):
         if self.allow_sibling_drops:
             pass
-            #self.siblings.remove(self)
+            # self.siblings.remove(self)
         super().drop()
 
+
 class Word:
-    def __init__(self, name: str, slice_: slice = slice(None),
-                    copy_selected: bool = False, discard_excluded: bool = False,
-                 inverse_selection: bool = False, raise_on_empty: bool = False):
+    def __init__(
+        self,
+        name: str,
+        slice_: slice = slice(None),
+        copy_selected: bool = False,
+        discard_excluded: bool = False,
+        inverse_selection: bool = False,
+        raise_on_empty: bool = False,
+    ):
         self.name = name
         self.slice_ = slice_
         self.copy_selected = copy_selected
@@ -183,11 +194,11 @@ class Word:
             raise IndexError(f'Empty stack for {self.name}')
         pass
 
-    def __call__(self, kwargs = None) -> Word:
+    def __call__(self, kwargs=None) -> Word:
         self.called = True
         if kwargs:
             for key, value in kwargs.items():
-                if key not in ['__class__','self']:
+                if key not in ['__class__', 'self']:
                     setattr(self, key, value)
         return self
 
@@ -219,10 +230,17 @@ class Word:
         else:
             return self.__getattribute__(name)
 
-    def __getitem__(self, key: int | tuple[int, bool] \
-                                | slice | tuple[slice,bool] \
-                                | str | tuple[str, bool] \
-                                | list[str] | tuple[list[str], bool] ) -> Word:
+    def __getitem__(
+        self,
+        key: int
+        | tuple[int, bool]
+        | slice
+        | tuple[slice, bool]
+        | str
+        | tuple[str, bool]
+        | list[str]
+        | tuple[list[str], bool],
+    ) -> Word:
         if isinstance(key, tuple):
             assert isinstance(key[1], bool), 'Second argument must be boolean'
             self.copy_selected = key[1]
@@ -232,7 +250,7 @@ class Word:
             key = key[0]
         if isinstance(key, int):
             if key == -1:
-                self.slice_ = slice(key,None)
+                self.slice_ = slice(key, None)
             else:
                 self.slice_ = slice(key, key + 1)
         elif isinstance(key, slice):
@@ -263,20 +281,21 @@ class Word:
     def __dir__(self):
         return sorted(set(vocab.keys()))
 
-
     def build_stack(self, stack: list[Column] | None = None) -> list[Column]:
         assert self.open_quotes == 0, 'Unclosed quotation.  Cannot evaluate'
         if stack is None:
             stack = []
             prefix = 0
         else:
-            prefix = 8      
+            prefix = 8
         current = self._head()
         logger.debug(f'{" " * prefix}Build stack')
         while current is not None:
-            if not current.called: # need to set defaults (if any)
+            if not current.called:  # need to set defaults (if any)
                 current()
-            logger.debug(f'{" " * prefix}   current word {current} slice {current.slice_}')
+            logger.debug(
+                f'{" " * prefix}   current word {current} slice {current.slice_}'
+            )
             selected = list(range(len(stack))[current.slice_])
             if current.filters:
                 filtered = []
@@ -304,16 +323,20 @@ class Word:
             if current.discard_excluded:
                 excluded = set(range(len(stack))) - set(selected)
                 for i in excluded:
-                    logger.debug(f'{" " * prefix}      dropping {debug_col_repr(stack[i],4)}')
-                    stack[i].drop() # no longer needed as siblings   
+                    logger.debug(
+                        f'{" " * prefix}      dropping {debug_col_repr(stack[i], 4)}'
+                    )
+                    stack[i].drop()  # no longer needed as siblings
                 to_delete.update(excluded)
             for i in sorted(to_delete, reverse=True):
-                logger.debug(f'{" " * prefix}      deleting {debug_col_repr(stack[i],4)}')
-                del(stack[i])
+                logger.debug(
+                    f'{" " * prefix}      deleting {debug_col_repr(stack[i], 4)}'
+                )
+                del stack[i]
             current.operate(current_stack)
             stack.extend(current_stack)
             current = current.next_
-            #debug_stack(stack, offset=prefix + 4)
+            # debug_stack(stack, offset=prefix + 4)
         return stack
 
     @property
@@ -373,23 +396,25 @@ class Word:
         return Quotation('q')(self).call[-1:0]
 
     def __str__(self) -> str:
-        ignore = 'prev next_ closed called generator slice_ filters copy_selected' \
-                    + ' discard_excluded inverse_selection operation open_quotes' \
-                    + ' name allow_sibling_drops ascending raise_on_empty'
+        ignore = (
+            'prev next_ closed called generator slice_ filters copy_selected'
+            + ' discard_excluded inverse_selection operation open_quotes'
+            + ' name allow_sibling_drops ascending raise_on_empty'
+        )
         str_args = []
-        for k,v in self.__dict__.items():
+        for k, v in self.__dict__.items():
             if k != self and k not in ignore.split():
                 if isinstance(v, str):
                     str_args.append(f"{k}='{v[:2000]}'")
                     if len(v) > 2000:
                         str_args[-1] += '...'
                 else:
-                    str_args.append(f"{k}={str(v)}")
+                    str_args.append(f'{k}={str(v)}')
         s = self.name
         if str_args:
             s += f'({", ".join(str_args)})'
         if self.filters:
-            s += f'[{self.filters}]' 
+            s += f'[{self.filters}]'
         else:
             s += f'[{self.slice_.start or ""}:{self.slice_.stop or ""}:{self.slice_.step or ""}]'
         return s
@@ -407,54 +432,73 @@ class Word:
         s = 'pt.' + s
         return s
 
+
 def debug_col_repr(c: Column, n: int) -> str:
     if not _DEBUG:
         return ''
-    return  f'{' '*n}#{c.id_}-{c.__class__.__name__}' \
-        + f' "{c.header}"' \
-        + f' {c.range_}' \
-        + f' (cache #{str(id(c.cache))[-4:]})' \
-        + (f' ordinal {c.ordinal})' if hasattr(c,'ordinal') else '') \
-        + (f' sibs [{",".join([str(c2.id_) for c2 in c.siblings])}]' if hasattr(c,'siblings') else '') \
-        + (f' cops [{",".join([str(c2.id_) for c2 in c.copies])}]' 
-                if hasattr(c,'copies') and c.copies else '')
+    return (
+        f'{" " * n}#{c.id_}-{c.__class__.__name__}'
+        + f' "{c.header}"'
+        + f' {c.range_}'
+        + f' (cache #{str(id(c.cache))[-4:]})'
+        + (f' ordinal {c.ordinal})' if hasattr(c, 'ordinal') else '')
+        + (
+            f' sibs [{",".join([str(c2.id_) for c2 in c.siblings])}]'
+            if hasattr(c, 'siblings')
+            else ''
+        )
+        + (
+            f' cops [{",".join([str(c2.id_) for c2 in c.copies])}]'
+            if hasattr(c, 'copies') and c.copies
+            else ''
+        )
+    )
 
-def debug_stack(stack,title=None, offset=4):   
+
+def debug_stack(stack, title=None, offset=4):
     if not _DEBUG:
         return
     if title:
         logger.debug((' ' * offset) + title)
         offset += 4
     for c in stack:
-        logger.debug(debug_col_repr(c,offset))
+        logger.debug(debug_col_repr(c, offset))
         if c.input_stack:
-            debug_stack(c.input_stack,'inputs',offset+4)
-        if hasattr(c,'siblings'):
-            debug_stack(c.siblings,'sibs',offset+4)
+            debug_stack(c.input_stack, 'inputs', offset + 4)
+        if hasattr(c, 'siblings'):
+            debug_stack(c.siblings, 'sibs', offset + 4)
 
-def _resample(to_range: Range, to_values: np.ndarray,
-                from_range: Range, from_values: np.ndarray,
-                method: ResampleMethod) -> None:
+
+def _resample(
+    to_range: Range,
+    to_values: np.ndarray,
+    from_range: Range,
+    from_values: np.ndarray,
+    method: ResampleMethod,
+) -> None:
     idx, idx_input = from_range.resample_indicies(to_range, False)
     match method:
         case ResampleMethod.LAST:
             x = from_values.ravel()
-            where = np.where(~np.isnan(x),np.arange(len(x)),0)
-            np.maximum.accumulate(where,out=where)
-            from_values[:] = x[where][:,None]
+            where = np.where(~np.isnan(x), np.arange(len(x)), 0)
+            np.maximum.accumulate(where, out=where)
+            from_values[:] = x[where][:, None]
             to_values[idx] = from_values[idx_input]
         case ResampleMethod.LAST_NOFILL:
             to_values[idx] = from_values[idx_input]
         case ResampleMethod.SUM:
             sums = np.nancumsum(from_values)
-            to_values[idx[0]] = from_values[idx_input[0]] 
-            to_values[idx[1:]] = (sums[idx_input[1:]] - sums[idx_input[:-1]])[:,None]
+            to_values[idx[0]] = from_values[idx_input[0]]
+            to_values[idx[1:]] = (sums[idx_input[1:]] - sums[idx_input[:-1]])[:, None]
         case ResampleMethod.AVG:
             sums = np.nancumsum(from_values)
             counts = np.nancumsum(from_values / from_values)
-            to_values[idx[0]] = from_values[idx_input[0]] 
-            to_values[idx[1:]] = (sums[idx_input[1:]] - sums[idx_input[:-1]])[:,None]
-            to_values[idx[1:]] /= (counts[idx_input[1:]] - counts[idx_input[:-1]])[:,None]
+            to_values[idx[0]] = from_values[idx_input[0]]
+            to_values[idx[1:]] = (sums[idx_input[1:]] - sums[idx_input[:-1]])[:, None]
+            to_values[idx[1:]] /= (counts[idx_input[1:]] - counts[idx_input[:-1]])[
+                :, None
+            ]
+
 
 class Evaluator:
     def __init__(self, word: Word, values_only: bool = False):
@@ -485,8 +529,7 @@ class Evaluator:
             range_ = p[key].to_range()
         elif isinstance(key, slice):
             start, stop, step = key.start, key.stop, key.step
-            p = Periodicity[step] if step \
-                else per if per else Periodicity.B
+            p = Periodicity[step] if step else per if per else Periodicity.B
             if isinstance(start, int) and max_ is not None:
                 if start < 0:
                     start = p[max_] + start
@@ -497,17 +540,17 @@ class Evaluator:
                     stop = p[max_] + stop
                 else:
                     stop = p[min_] + stop
-            range_ = p[start or min_:stop or max_]
-        else: 
-            raise TypeError(f'Unsupported indexer')
+            range_ = p[start or min_ : stop or max_]
+        else:
+            raise TypeError('Unsupported indexer')
         for col in stack:
-            logger.debug('pre set range '+ debug_col_repr(col, 0))
+            logger.debug('pre set range ' + debug_col_repr(col, 0))
             try:
                 col.set_range(range_)
             except Exception as e:
                 logger.error(f'Error setting range for {col}')
                 raise e
-            logger.debug('post set range'+ debug_col_repr(col, 0))
+            logger.debug('post set range' + debug_col_repr(col, 0))
         logger.debug('Stack')
         debug_stack(stack)
         working = stack[:]
@@ -525,7 +568,9 @@ class Evaluator:
             offsets, needed_saveds, resample = [], [], []
             for col in saveds:
                 if col.range_ and not col.calculated:
-                    col.cache[col.range_] = np.full((len(col.range_),1), np.nan, order='F')
+                    col.cache[col.range_] = np.full(
+                        (len(col.range_), 1), np.nan, order='F'
+                    )
                     if col.range_.periodicity != col.md.periodicity:
                         r = col.range_.change_periodicity(col.md.periodicity)
                         resample.append(r)
@@ -534,24 +579,29 @@ class Evaluator:
                         resample.append(None)
                     offsets.append(db.get_client()._req(col.md, r.start, r.stop, p))
                     needed_saveds.append(col)
-            for col, offset, bytes_,r in zip(needed_saveds, offsets, p.execute(), resample):
+            for col, offset, bytes_, r in zip(
+                needed_saveds, offsets, p.execute(), resample
+            ):
                 if len(bytes_) > 0:
                     data = np.frombuffer(bytes_, col.md.type_.dtype)
                     if r is not None:
-                        from_values = np.full((len(r),1), np.nan, order='F')
-                        from_values[offset:offset + len(data),0] = data
-                        _resample(col.range_, col.values,
-                                    r, from_values, col.resample_method)
+                        from_values = np.full((len(r), 1), np.nan, order='F')
+                        from_values[offset : offset + len(data), 0] = data
+                        _resample(
+                            col.range_, col.values, r, from_values, col.resample_method
+                        )
                     else:
-                        col.values[offset:offset + len(data),0] = data
+                        col.values[offset : offset + len(data), 0] = data
         logger.debug('Processing flat')
         while flat:
             col = flat.popleft()
             if col.calculated or not col.range_:
-                logger.debug(f'    skip' + debug_col_repr(col,1)) 
+                logger.debug('    skip' + debug_col_repr(col, 1))
                 continue
-            logger.debug(f'    calc' + debug_col_repr(col,1)) 
-            col.cache[col.range_] = np.empty((len(col.range_), col.output_columns), order='F')
+            logger.debug('    calc' + debug_col_repr(col, 1))
+            col.cache[col.range_] = np.empty(
+                (len(col.range_), col.output_columns), order='F'
+            )
             try:
                 col.calculate()
             except Exception as e:
@@ -559,59 +609,69 @@ class Evaluator:
             col.input_stack = []
         if not stack:
             return None
-        values = np.concatenate([col.values for col in stack]) \
-                    .reshape((len(range_),len(stack)),order='F')
+        values = np.concatenate([col.values for col in stack]).reshape(
+            (len(range_), len(stack)), order='F'
+        )
         if self.values_only:
             return values
-        return pd.DataFrame(values, columns=[col.header for col in stack], index=range_.to_index())
+        return pd.DataFrame(
+            values, columns=[col.header for col in stack], index=range_.to_index()
+        )
+
 
 # Nullary/generator words
 class NullaryWord(Word):
-    def __init__(self, name: str, generator: Callable[[Range, np.ndarray],None]):
+    def __init__(self, name: str, generator: Callable[[Range, np.ndarray], None]):
         self.generator = generator
-        super().__init__(name, slice(-1,0))
+        super().__init__(name, slice(-1, 0))
 
     def operate(self, stack: list[Column]) -> None:
         stack.append(NullaryColumn(header=self.name, generator=self.generator))
 
+
 @dataclass(kw_only=True, eq=False)
 class NullaryColumn(Column):
-    generator: Callable[[Range, np.ndarray],None]
+    generator: Callable[[Range, np.ndarray], None]
 
     def calculate(self) -> None:
         self.generator(self.range_, self.values)
 
+
 class RandomNormal(NullaryWord):
     @staticmethod
     def generate(range_: Range, values: np.ndarray):
-        values[:] = np.random.randn(len(range_))[:,None]
+        values[:] = np.random.randn(len(range_))[:, None]
 
     def __init__(self, name: str):
-        super().__init__(name,  self.generate)
+        super().__init__(name, self.generate)
+
 
 class Timestamp(NullaryWord):
     @staticmethod
     def generate(range_: Range, values: np.ndarray):
-        values[:] = range_.to_index().view('int').astype(np.float64)[:,None]
+        values[:] = range_.to_index().view('int').astype(np.float64)[:, None]
 
     def __init__(self, name: str):
         super().__init__(name, self.generate)
+
 
 class PeriodOrdinal(NullaryWord):
     @staticmethod
     def generate(range_: Range, values: np.ndarray):
-        values[:] = np.arange(range_.start,range_.stop).astype(np.float64)[:,None]
+        values[:] = np.arange(range_.start, range_.stop).astype(np.float64)[:, None]
 
     def __init__(self, name: str):
         super().__init__(name, self.generate)
+
 
 class Daycount(NullaryWord):
     @staticmethod
     def generate(range_: Range, values: np.ndarray):
-        values[:] = np.array(range_.day_counts(), dtype=np.float64)[:,None]
+        values[:] = np.array(range_.day_counts(), dtype=np.float64)[:, None]
 
     def __init__(self, name: str):
         super().__init__(name, self.generate)
+
 
 class Constant(NullaryWord):
     @staticmethod
@@ -627,33 +687,39 @@ class Constant(NullaryWord):
 
     def operate(self, stack: list[Column]) -> None:
         for constant in self.constants:
-            stack.append(NullaryColumn(
-                            header=self.name,
-                            generator=partial(self.generate, constant)))
+            stack.append(
+                NullaryColumn(
+                    header=self.name, generator=partial(self.generate, constant)
+                )
+            )
+
 
 class ConstantRange(Constant):
     def __call__(self, n: int) -> Word:
         return super().__call__(*range(n))
 
+
 @dataclass(kw_only=True, eq=False)
 class PandasColumn(SiblingColumn):
     pandas: pd.DataFrame
     round_: bool
-    pandas_range: Range| None = None
+    pandas_range: Range | None = None
 
     def __post_init__(self):
         self.pandas_range = Range.from_index(self.pandas.index)
 
-    def get_bounds(self) -> tuple[datetime.date,datetime.date,Periodicity] | None:
-        return (self.pandas_range[0][-1],
-                self.pandas_range.expand()[-1][-1],
-                self.pandas_range.periodicity)
+    def get_bounds(self) -> tuple[datetime.date, datetime.date, Periodicity] | None:
+        return (
+            self.pandas_range[0][-1],
+            self.pandas_range.expand()[-1][-1],
+            self.pandas_range.periodicity,
+        )
 
     def calculate(self) -> None:
         self.cache[self.range_][:] = np.nan
-        idx, idx_input = self.pandas_range \
-                            .resample_indicies(self.range_, self.round_)
-        self.cache[self.range_][idx,:] = self.pandas.values[idx_input,:]
+        idx, idx_input = self.pandas_range.resample_indicies(self.range_, self.round_)
+        self.cache[self.range_][idx, :] = self.pandas.values[idx_input, :]
+
 
 class FromPandas(Word):
     def __call__(self, pandas: pd.DataFrame | pd.Series, round_: bool = False) -> Word:
@@ -674,26 +740,28 @@ class FromPandas(Word):
         cache = {}
         for i, (header, col) in enumerate(self.pandas.items()):
             sib = PandasColumn(
-                        header,
-                        round_=self.round_,
-                        pandas=self.pandas,
-                        input_stack=input_stack,
-                        cache=cache,
-                        siblings=siblings
-                        )
+                header,
+                round_=self.round_,
+                pandas=self.pandas,
+                input_stack=input_stack,
+                cache=cache,
+                siblings=siblings,
+            )
             siblings.add(sib)
             stack.append(sib)
+
 
 @dataclass(kw_only=True, eq=False)
 class SavedColumn(Column):
     md: db.Metadata
 
-    def get_bounds(self) -> tuple[datetime.date,datetime.date,Periodicity] | None:
+    def get_bounds(self) -> tuple[datetime.date, datetime.date, Periodicity] | None:
         return (self.md[0][-1], self.md.expand()[-1][-1], self.md.periodicity)
+
 
 class Saved(Word):
     def __init__(self, name: str):
-        super().__init__(name, slice(-1,0))
+        super().__init__(name, slice(-1, 0))
 
     def __call__(self, key: str) -> Word:
         return super().__call__(locals())
@@ -705,9 +773,10 @@ class Saved(Word):
                 header += '$' + md.row_header
             stack.append(SavedColumn(header, md=md))
 
+
 # Quotation / combinator words
 class Quotation(Word):
-    def __init__(self, name: str, slice_=slice(-1,0)):
+    def __init__(self, name: str, slice_=slice(-1, 0)):
         super().__init__(name, slice_)
 
     def __call__(self, quoted: Word | None = None) -> Word:
@@ -723,6 +792,7 @@ class Quotation(Word):
             self.open_quotes += 1
         return super().__add__(other, copy_addend)
 
+
 class Combinator(Word):
     def __init__(self, name: str, slice_: slice = slice(None), num_quotations: int = 1):
         self.num_quotations = num_quotations
@@ -731,17 +801,19 @@ class Combinator(Word):
     def get_quotations(self) -> list[Word]:
         quotations = []
         current = self.prev
-        needed = self.num_quotations 
+        needed = self.num_quotations
         while needed != 0 and current and isinstance(current, Quotation):
             quotations.append(current.quoted)
-            needed -=1
+            needed -= 1
             current = current.prev
         assert needed <= 0, 'Missing quotation for combinator'
         return quotations
 
+
 class Call(Combinator):
     def operate(self, stack: list[Column]) -> None:
         self.get_quotations()[0].build_stack(stack)
+
 
 class IfExists(Combinator):
     def __call__(self, count: int = 1) -> Word:
@@ -751,9 +823,10 @@ class IfExists(Combinator):
         if len(stack) >= self.count:
             self.get_quotations()[0].build_stack(stack)
 
+
 class IfExistsElse(Combinator):
     def __init__(self, name: str):
-        super().__init__(name, num_quotations = 2)
+        super().__init__(name, num_quotations=2)
 
     def __call__(self, count: int = 1) -> Word:
         return super().__call__(locals())
@@ -764,19 +837,21 @@ class IfExistsElse(Combinator):
         else:
             self.get_quotations()[1].build_stack(stack)
 
+
 class IfHeaders(Combinator):
-    def __call__(self, predicate: Callable[[list[str]],bool]) -> Word:
+    def __call__(self, predicate: Callable[[list[str]], bool]) -> Word:
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
         if self.predicate([col.header for col in stack]):
             self.get_quotations()[0].build_stack(stack)
 
+
 class IfHeadersElse(Combinator):
     def __init__(self, name: str):
-        super().__init__(name, num_quotations = 2)
+        super().__init__(name, num_quotations=2)
 
-    def __call__(self, predicate: Callable[[list[str]],bool]) -> Word:
+    def __call__(self, predicate: Callable[[list[str]], bool]) -> Word:
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
@@ -785,21 +860,24 @@ class IfHeadersElse(Combinator):
         else:
             self.get_quotations()[1].build_stack(stack)
 
+
 class Map(Combinator):
     def __call__(self, every: int = 1):
         self.every = every
         return super().__call__()
 
     def operate(self, stack: list[Column]) -> None:
-        assert len(stack) % self.every == 0, \
-           f'Stack length {len(stack)} not evenly divisible by every {self.every}'
+        assert len(stack) % self.every == 0, (
+            f'Stack length {len(stack)} not evenly divisible by every {self.every}'
+        )
         copied = stack[:]
         stack.clear()
         quoted = self.get_quotations()[0]
-        for t in zip(*[iter(copied)]*self.every):
+        for t in zip(*[iter(copied)] * self.every):
             this_stack = list(t)
             quoted.build_stack(this_stack)
             stack += this_stack
+
 
 class Repeat(Combinator):
     def __call__(self, times: int = 2) -> Word:
@@ -810,13 +888,14 @@ class Repeat(Combinator):
         for _ in range(self.times):
             self.get_quotations()[0].build_stack(stack)
 
+
 class HMap(Combinator):
     def operate(self, stack: list[Column]) -> None:
         quoted = self.get_quotations()[0]
         new_stack = []
         for header in set([c.header for c in stack]):
             to_del, filtered_stack = [], []
-            for i,col in enumerate(stack):
+            for i, col in enumerate(stack):
                 if header == col.header:
                     filtered_stack.append(stack[i])
                     to_del.append(i)
@@ -824,13 +903,14 @@ class HMap(Combinator):
             new_stack += filtered_stack
             to_del.sort(reverse=True)
             for i in to_del:
-                del(stack[i])
-        del(stack[:])
+                del stack[i]
+        del stack[:]
         stack += new_stack
+
 
 class Cleave(Combinator):
     def __init__(self, name):
-        super().__init__(name, num_quotations = -1)
+        super().__init__(name, num_quotations=-1)
 
     def __call__(self, num_quotations: int = -1):
         self.num_quotations = num_quotations
@@ -844,6 +924,7 @@ class Cleave(Combinator):
             output += this_stack
         stack.clear()
         stack.extend(output)
+
 
 class BoundWord(Word):
     def __init__(self, bound: list[Column]):
@@ -859,16 +940,18 @@ class BoundWord(Word):
             stack.extend(bound_copy)
         self.operate_count += 1
 
+
 class Partial(Quotation, Combinator):
     def __init__(self, name: str):
-        super().__init__(name, slice(-1,None))
-        
+        super().__init__(name, slice(-1, None))
+
     def __add__(self, other: Word, copy_addend: bool = True) -> Word:
         return Word.__add__(self, other, copy_addend)
 
     def operate(self, stack: list[Column]) -> None:
         self.quoted = BoundWord(stack[:]) + self.get_quotations()[0]
         stack.clear()
+
 
 class Compose(Quotation, Combinator):
     def __init__(self, name: str):
@@ -888,6 +971,7 @@ class Compose(Quotation, Combinator):
             else:
                 self.quoted += quoted
 
+
 class Resample(Word):
     def __init__(self, name: str, method: ResampleMethod):
         self.method = method
@@ -896,6 +980,7 @@ class Resample(Word):
     def operate(self, stack: list[Column]) -> None:
         for col in stack:
             col.resample_method = self.method
+
 
 @dataclass(kw_only=True, eq=False)
 class PeriodicityColumn(Column):
@@ -906,13 +991,18 @@ class PeriodicityColumn(Column):
 
     def calculate(self) -> None:
         self.values[:] = np.nan
-        _resample(self.range_,self.values, 
-                    self.input_stack[0].range_, self.input_stack[0].values,
-                    self.input_stack[0].resample_method)
+        _resample(
+            self.range_,
+            self.values,
+            self.input_stack[0].range_,
+            self.input_stack[0].values,
+            self.input_stack[0].resample_method,
+        )
+
 
 class SetPeriodicity(Word):
     def __init__(self, name: str):
-        super().__init__(name, slice(-1,None))
+        super().__init__(name, slice(-1, None))
 
     def __call__(self, periodicity: str | Periodicity) -> Word:
         if isinstance(periodicity, str):
@@ -925,8 +1015,12 @@ class SetPeriodicity(Word):
         inputs = stack[:]
         stack.clear()
         for col in inputs:
-            stack.append(PeriodicityColumn(col.header,
-                               periodicity=self.periodicity, input_stack=[col]))
+            stack.append(
+                PeriodicityColumn(
+                    col.header, periodicity=self.periodicity, input_stack=[col]
+                )
+            )
+
 
 @dataclass(kw_only=True, eq=False)
 class StartColumn(SiblingColumn):
@@ -937,25 +1031,30 @@ class StartColumn(SiblingColumn):
         if isinstance(self.start, int):
             self.offset = self.start
         else:
-            self.offset = self.range_.periodicity[self.start].ordinal - self.range_.start
-        input_range = Range(self.range_.start + self.offset,
-                        self.range_.stop, self.range_.periodicity)
+            self.offset = (
+                self.range_.periodicity[self.start].ordinal - self.range_.start
+            )
+        input_range = Range(
+            self.range_.start + self.offset, self.range_.stop, self.range_.periodicity
+        )
         for col in self.input_stack:
             col.set_range(input_range)
 
     def calculate(self) -> None:
-        data = np.concatenate([col.values for col in self.input_stack]) \
-                .reshape((len(self.input_stack[0].range_),len(self.input_stack)),order='F')
+        data = np.concatenate([col.values for col in self.input_stack]).reshape(
+            (len(self.input_stack[0].range_), len(self.input_stack)), order='F'
+        )
         out = self.cache[self.range_]
         if self.offset <= 0:
-            out[:] = data[-self.offset:]
+            out[:] = data[-self.offset :]
         else:
-            out[self.offset:] = data
-            out[:self.offset] = np.nan
-            
+            out[self.offset :] = data
+            out[: self.offset] = np.nan
+
+
 class SetStart(Word):
     def __init__(self, name: str):
-        super().__init__(name, slice(-1,None))
+        super().__init__(name, slice(-1, None))
 
     def __call__(self, start: datelike | int) -> Word:
         return super().__call__(locals())
@@ -969,15 +1068,16 @@ class SetStart(Word):
         cache = {}
         for i, col in enumerate(inputs):
             sib = StartColumn(
-                        col.header,
-                        start=self.start,                           
-                        input_stack=input_stack,
-                        input_column=col,
-                        cache=cache,
-                        siblings=siblings
-                        )
+                col.header,
+                start=self.start,
+                input_stack=input_stack,
+                input_column=col,
+                cache=cache,
+                siblings=siblings,
+            )
             siblings.add(sib)
             stack.append(sib)
+
 
 @dataclass(kw_only=True, eq=False)
 class FillFirstColumn(SiblingColumn):
@@ -990,21 +1090,23 @@ class FillFirstColumn(SiblingColumn):
             col.set_range(input_range)
 
     def calculate(self) -> None:
-        data = np.concatenate([col.values for col in self.input_stack]) \
-                .reshape((len(self.input_stack[0].range_),len(self.input_stack)),order='F')
+        data = np.concatenate([col.values for col in self.input_stack]).reshape(
+            (len(self.input_stack[0].range_), len(self.input_stack)), order='F'
+        )
         out = self.cache[self.range_]
-        first_part = data[:-self.lookback+1]
+        first_part = data[: -self.lookback + 1]
         row_ok = ~np.isnan(first_part).any(axis=1)
         good_idxs = np.flatnonzero(row_ok)
         if good_idxs.size > 0:
             out[0] = data[good_idxs[-1]]
         else:
             out[0] = np.nan
-        out[1:] = data[-self.lookback+1:]
-            
+        out[1:] = data[-self.lookback + 1 :]
+
+
 class FillFirst(Word):
     def __init__(self, name: str):
-        super().__init__(name, slice(-1,None))
+        super().__init__(name, slice(-1, None))
 
     def __call__(self, lookback: int = 5) -> Word:
         return super().__call__(locals())
@@ -1018,15 +1120,16 @@ class FillFirst(Word):
         cache = {}
         for i, col in enumerate(inputs):
             sib = FillFirstColumn(
-                        col.header,
-                        lookback=self.lookback,                           
-                        input_stack=input_stack,
-                        input_column=col,
-                        cache=cache,
-                        siblings=siblings
-                        )
+                col.header,
+                lookback=self.lookback,
+                input_stack=input_stack,
+                input_column=col,
+                cache=cache,
+                siblings=siblings,
+            )
             siblings.add(sib)
             stack.append(sib)
+
 
 @dataclass(kw_only=True, eq=False)
 class FillColumn(Column):
@@ -1035,6 +1138,7 @@ class FillColumn(Column):
     def calculate(self) -> None:
         self.values[:] = self.input_stack[0].values
         self.values[np.isnan(self.values)] = self.value
+
 
 class Fill(Word):
     def __call__(self, value: float) -> Word:
@@ -1045,6 +1149,7 @@ class Fill(Word):
         stack.clear()
         for col in inputs:
             stack.append(FillColumn(col.header, value=self.value, input_stack=[col]))
+
 
 @dataclass(kw_only=True, eq=False)
 class FFillColumn(Column):
@@ -1058,13 +1163,14 @@ class FFillColumn(Column):
 
     def calculate(self) -> None:
         x = self.input_stack[0].values.ravel()
-        idx = np.where(~np.isnan(x),np.arange(len(x)),0)
-        np.maximum.accumulate(idx,out=idx)
-        self.values[:] = x[idx][self.lookback:][:,None]
+        idx = np.where(~np.isnan(x), np.arange(len(x)), 0)
+        np.maximum.accumulate(idx, out=idx)
+        self.values[:] = x[idx][self.lookback :][:, None]
         if self.leave_end:
             if len(x) > idx.max() + 1:
                 at_end = len(x) - idx.max() - 1
                 self.values[-at_end:] = np.nan
+
 
 class FFill(Word):
     def __call__(self, lookback: int = 10, leave_end: bool = True) -> Word:
@@ -1074,8 +1180,15 @@ class FFill(Word):
         inputs = stack[:]
         stack.clear()
         for col in inputs:
-            stack.append(FFillColumn(col.header, lookback=self.lookback,
-                                     leave_end=self.leave_end, input_stack=[col]))
+            stack.append(
+                FFillColumn(
+                    col.header,
+                    lookback=self.lookback,
+                    leave_end=self.leave_end,
+                    input_stack=[col],
+                )
+            )
+
 
 @dataclass(kw_only=True, eq=False)
 class JoinColumn(Column):
@@ -1097,20 +1210,27 @@ class JoinColumn(Column):
         for input_ in self.input_stack:
             if input_.range_ is not None:
                 v = input_.values
-                self.values[i:i+len(v)] = v
+                self.values[i : i + len(v)] = v
                 i += len(v)
+
 
 class Join(Word):
     def __init__(self, name: str):
-        super().__init__(name, slice_=slice(-2,None))
+        super().__init__(name, slice_=slice(-2, None))
 
     def __call__(self, date: datelike) -> Word:
         self.date = date
         return super().__call__()
 
     def operate(self, stack: list[Column]) -> None:
-        stack.append(JoinColumn(stack[-2].header, date=self.date,
-                                input_stack=[stack.pop(-2),stack.pop()]))
+        stack.append(
+            JoinColumn(
+                stack[-2].header,
+                date=self.date,
+                input_stack=[stack.pop(-2), stack.pop()],
+            )
+        )
+
 
 @dataclass(kw_only=True, eq=False)
 class ReductionColumn(Column):
@@ -1118,14 +1238,16 @@ class ReductionColumn(Column):
     ignore_nans: bool
 
     def calculate(self) -> None:
-        inputs = np.concatenate([col.values for col in self.input_stack]) \
-                    .reshape((len(self.range_),len(self.input_stack)),order='F')
+        inputs = np.concatenate([col.values for col in self.input_stack]).reshape(
+            (len(self.range_), len(self.input_stack)), order='F'
+        )
         values = self.operation(inputs)[:, None]
         if self.ignore_nans:
-            values[np.all(np.isnan(inputs),axis=1)] = np.nan
+            values[np.all(np.isnan(inputs), axis=1)] = np.nan
         else:
-            values[np.any(np.isnan(inputs),axis=1)] = np.nan
+            values[np.any(np.isnan(inputs), axis=1)] = np.nan
         self.values[:] = values
+
 
 class Reduction(Word):
     def __init__(self, name: str, operation: Callable[[np.ndarray, np.ndarray], None]):
@@ -1139,10 +1261,15 @@ class Reduction(Word):
         inputs = [*stack]
         stack.clear()
         if inputs:
-            stack.append(ReductionColumn(inputs[0].header,
+            stack.append(
+                ReductionColumn(
+                    inputs[0].header,
                     operation=self.operation,
                     ignore_nans=self.ignore_nans,
-                    input_stack=inputs))
+                    input_stack=inputs,
+                )
+            )
+
 
 @dataclass(kw_only=True, eq=False)
 class RollingColumn(SiblingColumn):
@@ -1152,20 +1279,23 @@ class RollingColumn(SiblingColumn):
     lookback: int | None = None
 
     def set_input_range(self) -> None:
-        self.lookback = max(5,int(self.window * 1.25))
+        self.lookback = max(5, int(self.window * 1.25))
         input_range = self.range_.expand(-self.lookback)
         for col in self.input_stack:
             col.set_range(input_range)
 
     def calculate(self) -> None:
-        data = np.concatenate([col.values for col in self.input_stack]) \
-                .reshape((len(self.input_stack[0].range_),len(self.input_stack)),order='F')
+        data = np.concatenate([col.values for col in self.input_stack]).reshape(
+            (len(self.input_stack[0].range_), len(self.input_stack)), order='F'
+        )
         mask = ~np.any(np.isnan(data), axis=1)
         idx = np.where(mask)[0]
         out = self.cache[self.range_]
         if np.any(idx >= self.lookback):
             start = np.where(idx >= self.lookback)[0][0]
-            out[(idx - self.lookback)[start:]] = self.operation(data[mask], self.window)[start:]
+            out[(idx - self.lookback)[start:]] = self.operation(
+                data[mask], self.window
+            )[start:]
             if not np.all(mask):
                 idx = np.where(~mask)[0]
                 if np.any(idx >= self.lookback):
@@ -1173,11 +1303,10 @@ class RollingColumn(SiblingColumn):
                     out[(idx - self.lookback)[start:]] = np.nan
         else:
             out[:] = np.nan
-                
 
 
 class Rolling(Word):
-    def __init__(self, name: str, operation: np.ufunc, slice_=slice(-1,None)):
+    def __init__(self, name: str, operation: np.ufunc, slice_=slice(-1, None)):
         self.operation = operation
         super().__init__(name, slice_=slice_)
 
@@ -1193,32 +1322,42 @@ class Rolling(Word):
         cache = {}
         for i, col in enumerate(inputs):
             sib = RollingColumn(
-                        col.header,
-                        operation=self.operation,
-                        window=self.window,                           
-                        input_stack=input_stack,
-                        input_column=col,
-                        cache=cache,
-                        siblings=siblings
-                        )
+                col.header,
+                operation=self.operation,
+                window=self.window,
+                input_stack=input_stack,
+                input_column=col,
+                cache=cache,
+                siblings=siblings,
+            )
             siblings.add(sib)
             stack.append(sib)
 
-class RollingReduction(Rolling):    
+
+class RollingReduction(Rolling):
     def operate(self, stack: list[Column]) -> None:
         inputs = [*stack]
         stack.clear()
-        stack.append(RollingColumn(inputs[0].header,
-                    window=self.window,
-                    operation=self.operation,
-                    reduction=True,
-                    input_stack=inputs))
+        stack.append(
+            RollingColumn(
+                inputs[0].header,
+                window=self.window,
+                operation=self.operation,
+                reduction=True,
+                input_stack=inputs,
+            )
+        )
+
 
 class OneForOneFunction(Word):
-    def __init__(self, name: str,
-                    operation: Callable[[np.ndarray,np.ndarray],None],
-                    slice_ = slice(-1, None), ascending: bool = True,
-                    allow_sibling_drops: bool = True):
+    def __init__(
+        self,
+        name: str,
+        operation: Callable[[np.ndarray, np.ndarray], None],
+        slice_=slice(-1, None),
+        ascending: bool = True,
+        allow_sibling_drops: bool = True,
+    ):
         self.ascending = ascending
         self.operation = operation
         self.allow_sibling_drops = allow_sibling_drops
@@ -1232,45 +1371,50 @@ class OneForOneFunction(Word):
         cache = {}
         for i, col in enumerate(inputs):
             sib = OneForOneFunctionColumn(
-                        col.header,
-                        siblings=siblings,
-                        input_stack=input_stack,
-                        operation=self.operation,
-                        cache=cache,
-                        input_column=col,
-                        ascending=self.ascending,
-                        allow_sibling_drops=self.allow_sibling_drops
-                        )
+                col.header,
+                siblings=siblings,
+                input_stack=input_stack,
+                operation=self.operation,
+                cache=cache,
+                input_column=col,
+                ascending=self.ascending,
+                allow_sibling_drops=self.allow_sibling_drops,
+            )
             siblings.add(sib)
             stack.append(sib)
 
+
 @dataclass(kw_only=True, eq=False)
 class OneForOneFunctionColumn(SiblingColumn):
-    operation: Callable[[np.ndarray,np.ndarray],None]
+    operation: Callable[[np.ndarray, np.ndarray], None]
     ascending: bool = True
 
     def calculate(self) -> None:
         cols_values = []
         for i, col in enumerate(self.input_stack):
             cols_values.append(col.values)
-        data =  np.concatenate(cols_values).reshape((len(self.range_),i+1),order='F')
+        data = np.concatenate(cols_values).reshape((len(self.range_), i + 1), order='F')
         if not self.ascending:
             data = data[::-1]
             self.operation(data, out=self.cache[self.range_][::-1])
         else:
             self.operation(data, out=self.cache[self.range_])
 
+
 class Roll(Word):
     def operate(self, stack: list[Column]) -> None:
-        stack.insert(0,stack.pop())
+        stack.insert(0, stack.pop())
+
 
 class Drop(Word):
     def operate(self, stack: list[Column]) -> None:
         stack.clear()
 
+
 class Reverse(Word):
     def operate(self, stack: list[Column]) -> None:
         stack.reverse()
+
 
 class Interleave(Word):
     def __call__(self, parts: int = 2) -> Word:
@@ -1278,21 +1422,24 @@ class Interleave(Word):
         return super().__call__()
 
     def operate(self, stack: list[Column]) -> None:
-        if len(stack) == 0: return
+        if len(stack) == 0:
+            return
         assert len(stack) % self.parts == 0, f'Stack not divisible by {self.parts}'
         count = len(stack) // self.parts
         last = 0
         lists = []
-        for i in range(len(stack)+1):
+        for i in range(len(stack) + 1):
             if i % count == 0 and i != 0:
-                lists.append(stack[i-count:i])
+                lists.append(stack[i - count : i])
                 last = i
-        del(stack[:last])
+        del stack[:last]
         stack += [val for tup in zip(*lists) for val in tup]
+
 
 class HSort(Word):
     def operate(self, stack: list[Column]) -> None:
         stack.sort(key=lambda c: c.header)
+
 
 class HeaderSet(Word):
     def __call__(self, *headers: str) -> Word:
@@ -1301,10 +1448,10 @@ class HeaderSet(Word):
 
     def operate(self, stack: list[Column]) -> None:
         start = len(stack) - len(self.headers)
-        assert start >= 0, \
-            f"Insufficient columns for hset('{",".join(self.headers)}')"
-        for i in range(start,len(stack)):
+        assert start >= 0, f"Insufficient columns for hset('{','.join(self.headers)}')"
+        for i in range(start, len(stack)):
             stack[i].header = self.headers[i - start]
+
 
 class HeaderSetAll(Word):
     def __call__(self, *headers: str) -> Word:
@@ -1315,6 +1462,7 @@ class HeaderSetAll(Word):
         for i in np.arange(len(stack)) - len(stack):
             stack[i].header = self.headers[i % len(self.headers)]
 
+
 class HeaderFormat(Word):
     def __call__(self, format_spec: str) -> Word:
         return super().__call__(locals())
@@ -1322,6 +1470,7 @@ class HeaderFormat(Word):
     def operate(self, stack: list[Column]) -> None:
         for col in stack:
             col.header = self.format_spec.format(col.header)
+
 
 class HeaderReplace(Word):
     def __call__(self, old: str, new: str = '') -> Word:
@@ -1331,13 +1480,15 @@ class HeaderReplace(Word):
         for col in stack:
             col.header = col.header.replace(self.old, self.new)
 
+
 class HeaderApply(Word):
-    def __call__(self, header_func: Callable[[str],str]) -> Word:
+    def __call__(self, header_func: Callable[[str], str]) -> Word:
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
         for col in stack:
             col.header = self.header_func(col.header)
+
 
 class HeaderAlphabetize(Word):
     @staticmethod
@@ -1359,6 +1510,7 @@ class HeaderAlphabetize(Word):
         for col in stack:
             col.header = next(gen)
 
+
 def rank(inputs: np.ndarray, out: np.ndarray) -> None:
     out[:] = inputs.argsort(axis=1).argsort(axis=1)
 
@@ -1367,26 +1519,34 @@ def zero_first_op(x: np.ndarray, out: np.ndarray) -> None:
     out[1:] = x[1:]
     out[0] = 0.0
 
+
 def zero_to_na_op(x: np.ndarray, out: np.ndarray) -> None:
-    out[:] = np.where(np.equal(x,0),np.nan,x)
+    out[:] = np.where(np.equal(x, 0), np.nan, x)
+
 
 def is_na_op(x: np.ndarray, out: np.ndarray) -> None:
     out[:] = np.where(np.isnan(x), 1, 0)
 
+
 def inc_op(x: np.ndarray, out: np.ndarray) -> None:
     out[:] = x + 1
+
 
 def dec_op(x: np.ndarray, out: np.ndarray) -> None:
     out[:] = x - 1
 
-def expanding_wrapper(func: Callable[[np.ndarray,np.ndarray],None]) \
-            -> Callable[[np.ndarray,np.ndarray],None]:
+
+def expanding_wrapper(
+    func: Callable[[np.ndarray, np.ndarray], None],
+) -> Callable[[np.ndarray, np.ndarray], None]:
     def wrapper(a, out, func=func):
         mask = np.all(~np.isnan(a), axis=1)
         if not np.all(~mask):
             out[mask] = func(a[mask])
         out[~mask] = np.nan
+
     return wrapper
+
 
 def expanding_mean(x: np.ndarray) -> np.ndarray:
     csum = np.cumsum(x, axis=0)
@@ -1397,6 +1557,7 @@ def expanding_mean(x: np.ndarray) -> np.ndarray:
     counts = counts.reshape(shape)
     return csum / counts
 
+
 def expanding_var(x: np.ndarray) -> np.ndarray:
     cumsumOfSquares = np.add.accumulate(x * x)
     cumsum = np.add.accumulate(x)
@@ -1405,19 +1566,27 @@ def expanding_var(x: np.ndarray) -> np.ndarray:
     shape = [1] * x.ndim
     shape[0] = N
     counts = counts.reshape(shape)
-    out = np.full(x.shape,np.nan)
-    np.divide(cumsumOfSquares - cumsum * cumsum / counts, counts - 1, out=out, where=counts - 1 > 0)
+    out = np.full(x.shape, np.nan)
+    np.divide(
+        cumsumOfSquares - cumsum * cumsum / counts,
+        counts - 1,
+        out=out,
+        where=counts - 1 > 0,
+    )
     return out
+
 
 def expanding_std(x: np.ndarray) -> np.ndarray:
     return np.sqrt(expanding_var(x))
 
+
 def expanding_lag(x: np.ndarray) -> np.ndarray:
-    return np.full(x.shape,x[0])
+    return np.full(x.shape, x[0])
+
 
 def expanding_ret(x: np.ndarray) -> np.ndarray:
-    mask = ~np.isnan(x)                
-    first_row_idx = mask.argmax(axis=0) 
+    mask = ~np.isnan(x)
+    first_row_idx = mask.argmax(axis=0)
     has_value = mask.any(axis=0)
     cols = np.arange(x.shape[1])
     first = np.where(has_value, x[first_row_idx, cols], np.nan)
@@ -1425,30 +1594,38 @@ def expanding_ret(x: np.ndarray) -> np.ndarray:
     np.divide(x, first, out=out, where=~np.isnan(first))
     return out - 1
 
+
 def expanding_diff(x: np.ndarray) -> np.ndarray:
     return x - x[0]
 
+
 def rolling_diff(x: np.ndarray, window: int) -> np.ndarray:
     window -= 1
-    return np.concat([np.full((window,x.shape[1]), np.nan), x[window:] - x[:-window]])
+    return np.concat([np.full((window, x.shape[1]), np.nan), x[window:] - x[:-window]])
+
 
 def rolling_lag(x: np.ndarray, window: int) -> np.ndarray:
     window -= 1
-    return np.concat([np.full((window,x.shape[1]), np.nan), x[:-window]])
+    return np.concat([np.full((window, x.shape[1]), np.nan), x[:-window]])
 
 
 def rolling_ret(x: np.ndarray, window: int) -> np.ndarray:
     window -= 1
-    return np.concat([np.full((window,x.shape[1]), np.nan), x[window:] / x[:-window] - 1])
+    return np.concat(
+        [np.full((window, x.shape[1]), np.nan), x[window:] / x[:-window] - 1]
+    )
+
 
 def rolling_cov(x: np.ndarray, window: int) -> np.ndarray:
     means = bn.move_mean(x, window, axis=0)
-    meanXY = bn.move_mean(np.multiply.reduce(x,axis=1), window)
-    return meanXY - np.multiply.reduce(means,axis=1)
+    meanXY = bn.move_mean(np.multiply.reduce(x, axis=1), window)
+    return meanXY - np.multiply.reduce(means, axis=1)
+
 
 def rolling_cor(x: np.ndarray, window: int) -> np.ndarray:
     vars_ = bn.move_var(x, window, axis=0)
-    return rolling_cov(x, window) /  np.multiply.reduce(vars_,axis=1)
+    return rolling_cov(x, window) / np.multiply.reduce(vars_, axis=1)
+
 
 def rolling_ewma(data: np.ndarray, window: int) -> np.ndarray:
     alpha = 2 / (window + 1.0)
@@ -1460,6 +1637,7 @@ def rolling_ewma(data: np.ndarray, window: int) -> np.ndarray:
     offset = data[0] * scale[1:]
     return np.add.accumulate(data * adj_scale) / scale[-2::-1] + offset
 
+
 def rolling_ewv(data: np.ndarray, window: int) -> np.ndarray:
     mean = rolling_ewma(data, window)
     delta = data - mean
@@ -1467,181 +1645,391 @@ def rolling_ewv(data: np.ndarray, window: int) -> np.ndarray:
     alpha = 2 / (window + 1.0)
     ws = (1 - alpha) ** np.arange(window)
     w_sum = ws.sum()
-    bias = (w_sum ** 2) / ((w_sum ** 2) - (ws ** 2).sum())
-    return rolling_ewma(delta ** 2, window) 
+    bias = (w_sum**2) / ((w_sum**2) - (ws**2).sum())
+    return rolling_ewma(delta**2, window)
+
 
 def rolling_ews(data: np.ndarray, window: int) -> np.ndarray:
     return np.sqrt(rolling_ewv(data, window))
 
+
 def rolling_zsc(data: np.ndarray, window: int) -> np.ndarray:
     std = bn.move_std(data, window=window, axis=0, min_count=2)
-    return np.divide((data - bn.move_mean(data, window=window, axis=0, min_count=2)),
-                    std, out=None, where=std != 0)
+    return np.divide(
+        (data - bn.move_mean(data, window=window, axis=0, min_count=2)),
+        std,
+        out=None,
+        where=std != 0,
+    )
 
-vocab: dict[str, tuple[str,str,Callable[[str],Word]]] = {}
+
+vocab: dict[str, tuple[str, str, Callable[[str], Word]]] = {}
 
 cat = 'Column Creation'
 vocab['c'] = (cat, 'Pushes constant columns for each of _values_', Constant)
-vocab['r'] = (cat, 'Pushes constant columns for each whole number from 0 to _n_ - 1', ConstantRange)
-vocab['nan'] = (cat, 'Pushes a constant nan-valued column', lambda name: Constant(name)(np.nan))
-vocab['randn'] = (cat, 'Pushes a column with values from a random normal distribution', RandomNormal)
-vocab['ts'] = (cat, 'Pushes a column with the timestamp of the end of the period', Timestamp)
+vocab['r'] = (
+    cat,
+    'Pushes constant columns for each whole number from 0 to _n_ - 1',
+    ConstantRange,
+)
+vocab['nan'] = (
+    cat,
+    'Pushes a constant nan-valued column',
+    lambda name: Constant(name)(np.nan),
+)
+vocab['randn'] = (
+    cat,
+    'Pushes a column with values from a random normal distribution',
+    RandomNormal,
+)
+vocab['ts'] = (
+    cat,
+    'Pushes a column with the timestamp of the end of the period',
+    Timestamp,
+)
 vocab['po'] = (cat, 'Pushes a column with the period ordinal', PeriodOrdinal)
 vocab['dc'] = (cat, 'Pushes a column with the number of days in the period', Daycount)
 vocab['saved'] = (cat, 'Pushes columns saved to internal DB as _key_', Saved)
-vocab['pandas'] = (cat,'Pushes columns from Pandas DataFrame or Series _pandas_', FromPandas)
+vocab['pandas'] = (
+    cat,
+    'Pushes columns from Pandas DataFrame or Series _pandas_',
+    FromPandas,
+)
 
 cat = 'Stack Manipulation'
 vocab['id'] = (cat, 'Identity/no-op', lambda name: Word(name))
-vocab['pull'] = (cat, 'Brings selected columns to the top', lambda name: Word(name, raise_on_empty=True))
-vocab['dup'] = (cat, 'Duplicates columns',
-                lambda name: Word(name, slice_=slice(-1,None), copy_selected=True, raise_on_empty=True))
-vocab['filter'] = (cat, 'Removes non-selected columns',
-                lambda name: Word(name, discard_excluded=True))
-vocab['drop'] = (cat, 'Removes selected columns',
-             lambda name: Word(name, inverse_selection=True,
-                            discard_excluded=True, copy_selected=False, slice_=slice(-1,None)))
-vocab['nip'] = (cat, 'Removes non-selected columns, defaulting selection to top',
-                lambda name: Word(name, discard_excluded=True, slice_=slice(-1,None)))
+vocab['pull'] = (
+    cat,
+    'Brings selected columns to the top',
+    lambda name: Word(name, raise_on_empty=True),
+)
+vocab['dup'] = (
+    cat,
+    'Duplicates columns',
+    lambda name: Word(
+        name, slice_=slice(-1, None), copy_selected=True, raise_on_empty=True
+    ),
+)
+vocab['filter'] = (
+    cat,
+    'Removes non-selected columns',
+    lambda name: Word(name, discard_excluded=True),
+)
+vocab['drop'] = (
+    cat,
+    'Removes selected columns',
+    lambda name: Word(
+        name,
+        inverse_selection=True,
+        discard_excluded=True,
+        copy_selected=False,
+        slice_=slice(-1, None),
+    ),
+)
+vocab['nip'] = (
+    cat,
+    'Removes non-selected columns, defaulting selection to top',
+    lambda name: Word(name, discard_excluded=True, slice_=slice(-1, None)),
+)
 vocab['roll'] = (cat, 'Permutes selected columns', Roll)
-vocab['swap'] = (cat, 'Swaps top and bottom selected columns', lambda name: Roll(name, slice(-2,None)))
+vocab['swap'] = (
+    cat,
+    'Swaps top and bottom selected columns',
+    lambda name: Roll(name, slice(-2, None)),
+)
 vocab['rev'] = (cat, 'Reverses the order of selected columns', Reverse)
-vocab['interleave'] = (cat, 'Divides columns in _parts_ groups and interleaves the groups', Interleave)
+vocab['interleave'] = (
+    cat,
+    'Divides columns in _parts_ groups and interleaves the groups',
+    Interleave,
+)
 vocab['hsort'] = (cat, 'Sorts columns by header', HSort)
 
-vocab['q'] = ('Quotation', 'Wraps the following words until *p* as a quotation, or ' \
-              + 'wraps _quoted_ expression as a quotation', Quotation)
+vocab['q'] = (
+    'Quotation',
+    'Wraps the following words until *p* as a quotation, or '
+    + 'wraps _quoted_ expression as a quotation',
+    Quotation,
+)
 
 cat = 'Header manipulation'
 vocab['hset'] = (cat, 'Set headers to _*headers_ ', HeaderSet)
-vocab['hsetall'] = (cat, 'Set headers to _*headers_ repeating, if necessary', HeaderSetAll)
+vocab['hsetall'] = (
+    cat,
+    'Set headers to _*headers_ repeating, if necessary',
+    HeaderSetAll,
+)
 vocab['hformat'] = (cat, 'Apply _format_spec_ to headers', HeaderFormat)
 vocab['hreplace'] = (cat, 'Replace _old_ with _new_ in headers', HeaderReplace)
 vocab['happly'] = (cat, 'Apply _header_func_ to headers_', HeaderApply)
 vocab['halpha'] = (cat, 'Set headers to alphabetical values', HeaderAlphabetize)
 
 cat = 'Combinators'
-vocab['call'] = (cat, 'Applies quotation',Call)
-vocab['map'] = (cat, 'Applies quotation in groups of _every_',Map)
-vocab['repeat'] = (cat, 'Applies quotation _times_ times',Repeat)
-vocab['hmap'] = (cat, 'Applies quotation to stacks created grouping columns by header',HMap)
-vocab['cleave'] = (cat, 'Applies all preceding quotations',Cleave)
-vocab['ifexists'] = (cat, 'Applies quotation if stack has at least _count_ columns',IfExists)
-vocab['ifexistselse'] = (cat, 'Applies top quotation if stack has at least _count_ columns' \
-                         + ', otherwise applies second quotation',IfExistsElse)
-vocab['ifheaders'] = (cat, 'Applies top quotation if list of column headers fulfills _predicate_',IfHeaders)
-vocab['ifheaderselse'] = (cat, 'Applies quotation if list of column headers fulfills _predicate_' \
-                         + ', otherwise applies second quotation', IfHeadersElse)
-vocab['partial'] = (cat, 'Pushes stack columns to the front of quotation',Partial)
+vocab['call'] = (cat, 'Applies quotation', Call)
+vocab['map'] = (cat, 'Applies quotation in groups of _every_', Map)
+vocab['repeat'] = (cat, 'Applies quotation _times_ times', Repeat)
+vocab['hmap'] = (
+    cat,
+    'Applies quotation to stacks created grouping columns by header',
+    HMap,
+)
+vocab['cleave'] = (cat, 'Applies all preceding quotations', Cleave)
+vocab['ifexists'] = (
+    cat,
+    'Applies quotation if stack has at least _count_ columns',
+    IfExists,
+)
+vocab['ifexistselse'] = (
+    cat,
+    'Applies top quotation if stack has at least _count_ columns'
+    + ', otherwise applies second quotation',
+    IfExistsElse,
+)
+vocab['ifheaders'] = (
+    cat,
+    'Applies top quotation if list of column headers fulfills _predicate_',
+    IfHeaders,
+)
+vocab['ifheaderselse'] = (
+    cat,
+    'Applies quotation if list of column headers fulfills _predicate_'
+    + ', otherwise applies second quotation',
+    IfHeadersElse,
+)
+vocab['partial'] = (cat, 'Pushes stack columns to the front of quotation', Partial)
 vocab['compose'] = (cat, 'Combines quotations', Compose)
 
 cat = 'Data cleanup'
-vocab['fill'] = (cat, 'Fills nans with _value_ ',Fill)
-vocab['ffill'] = (cat, 'Fills nans with previous values, looking back _lookback_ before range ' \
-                  + 'and leaving trailing nans unless not _leave_end_', FFill)
-vocab['fillfirst'] = (cat, 'Fills first row with previous non-nan value, looking back _lookback_ ' \
-                    + ' before range', FillFirst)
-vocab['sync'] = (cat, 'Align available data by setting all values to NaN when any values is NaN',
-                     lambda name: OneForOneFunction(name, expanding_wrapper(lambda a: a),
-                                                        slice_=slice(None)))
+vocab['fill'] = (cat, 'Fills nans with _value_ ', Fill)
+vocab['ffill'] = (
+    cat,
+    'Fills nans with previous values, looking back _lookback_ before range '
+    + 'and leaving trailing nans unless not _leave_end_',
+    FFill,
+)
+vocab['fillfirst'] = (
+    cat,
+    'Fills first row with previous non-nan value, looking back _lookback_ '
+    + ' before range',
+    FillFirst,
+)
+vocab['sync'] = (
+    cat,
+    'Align available data by setting all values to NaN when any values is NaN',
+    lambda name: OneForOneFunction(
+        name, expanding_wrapper(lambda a: a), slice_=slice(None)
+    ),
+)
 vocab['join'] = (cat, 'Joins two columns at _date_', Join)
-vocab['zero_first'] = (cat, 'Changes first value to zero',
-                    lambda name: OneForOneFunction(name, zero_first_op))
-vocab['zero_to_na'] = (cat, 'Changes zeros to nans',
-                    lambda name: OneForOneFunction(name, zero_to_na_op))
-vocab['resample_sum'] = (cat, 'Sets periodicity resampling method to sum',
-                    lambda name: Resample(name, ResampleMethod.SUM))
-vocab['resample_last'] = (cat, 'Sets periodicity resampling method to last',
-                    lambda name: Resample(name, ResampleMethod.LAST))
-vocab['resample_avg'] = (cat, 'Sets periodicity resampling method to avg',
-                    lambda name: Resample(name, ResampleMethod.AVG))
-vocab['resample_lastnofill'] = (cat, 'Sets periodicity resampling method to last with no fill',
-                    lambda name: Resample(name, ResampleMethod.LAST_NOFILL))
-vocab['per'] = (cat, 'Changes column periodicity to _periodicity_, then resamples', SetPeriodicity)
+vocab['zero_first'] = (
+    cat,
+    'Changes first value to zero',
+    lambda name: OneForOneFunction(name, zero_first_op),
+)
+vocab['zero_to_na'] = (
+    cat,
+    'Changes zeros to nans',
+    lambda name: OneForOneFunction(name, zero_to_na_op),
+)
+vocab['resample_sum'] = (
+    cat,
+    'Sets periodicity resampling method to sum',
+    lambda name: Resample(name, ResampleMethod.SUM),
+)
+vocab['resample_last'] = (
+    cat,
+    'Sets periodicity resampling method to last',
+    lambda name: Resample(name, ResampleMethod.LAST),
+)
+vocab['resample_avg'] = (
+    cat,
+    'Sets periodicity resampling method to avg',
+    lambda name: Resample(name, ResampleMethod.AVG),
+)
+vocab['resample_lastnofill'] = (
+    cat,
+    'Sets periodicity resampling method to last with no fill',
+    lambda name: Resample(name, ResampleMethod.LAST_NOFILL),
+)
+vocab['per'] = (
+    cat,
+    'Changes column periodicity to _periodicity_, then resamples',
+    SetPeriodicity,
+)
 vocab['start'] = (cat, 'Changes period start to _start_, then resamples', SetStart)
 
 
-
 _funcs = [
-    ('add',  'Addition', partial(bn.nansum, axis=1),
-                partial(bn.move_sum, axis=0), np.add.accumulate),
-    ('sub',  'Subtraction', partial(np.subtract.reduce, axis=1),
-                None, np.subtract.accumulate),
-    ('mul',  'Multiplication', partial(np.multiply.reduce, axis=1),
-                None, np.multiply.accumulate),
-    ('div',  'Division', partial(np.divide.reduce, axis=1),
-                None, None),
-    ('pow',  'Power', partial(np.power.reduce, axis=1),
-                None, None),
-    ('mod',  'Modulo', partial(np.mod.reduce, axis=1),
-                None, None),
-    ('avg',  'Arithmetic average', partial(bn.nanmean, axis=1),
-                partial(bn.move_mean, axis=0, min_count=2), expanding_mean),
-    ('std',  'Standard deviation', partial(bn.nanstd, axis=1),
-                partial(bn.move_std, axis=0), expanding_std),
-    ('var',  'Variance', partial(bn.nanvar, axis=1),
-                partial(bn.move_var, axis=0), expanding_var),
-    ('min',  'Minimum', partial(bn.nanmax, axis=1),
-                partial(bn.move_min, axis=0), np.minimum.accumulate),
-    ('max',  'Maximum', partial(bn.nanmin, axis=1),
-                partial(bn.move_max, axis=0), np.maximum.accumulate),
-    ('med',  'Median', partial(bn.nanmedian, axis=1),
-                partial(bn.move_median, axis=1), None),
-    ('lag',  'Lag', None, rolling_lag, expanding_lag),
-    ('dif',  'Lagged difference', None, rolling_diff, expanding_diff),
-    ('ret',  'Lagged return', None, rolling_ret, expanding_ret),
-    ('ewm',  'Exponentially-weighted moving average', None, rolling_ewma, None),
-    ('ewv',  'Exponentially-weighted variance', None, rolling_ewv, None),
-    ('ews',  'Exponentially-weighted standard deviation', None, rolling_ews, None),
-    ('zsc',  'Z-score', None, rolling_zsc, None),
-
-    ]
+    (
+        'add',
+        'Addition',
+        partial(bn.nansum, axis=1),
+        partial(bn.move_sum, axis=0),
+        np.add.accumulate,
+    ),
+    (
+        'sub',
+        'Subtraction',
+        partial(np.subtract.reduce, axis=1),
+        None,
+        np.subtract.accumulate,
+    ),
+    (
+        'mul',
+        'Multiplication',
+        partial(np.multiply.reduce, axis=1),
+        None,
+        np.multiply.accumulate,
+    ),
+    ('div', 'Division', partial(np.divide.reduce, axis=1), None, None),
+    ('pow', 'Power', partial(np.power.reduce, axis=1), None, None),
+    ('mod', 'Modulo', partial(np.mod.reduce, axis=1), None, None),
+    (
+        'avg',
+        'Arithmetic average',
+        partial(bn.nanmean, axis=1),
+        partial(bn.move_mean, axis=0, min_count=2),
+        expanding_mean,
+    ),
+    (
+        'std',
+        'Standard deviation',
+        partial(bn.nanstd, axis=1),
+        partial(bn.move_std, axis=0),
+        expanding_std,
+    ),
+    (
+        'var',
+        'Variance',
+        partial(bn.nanvar, axis=1),
+        partial(bn.move_var, axis=0),
+        expanding_var,
+    ),
+    (
+        'min',
+        'Minimum',
+        partial(bn.nanmax, axis=1),
+        partial(bn.move_min, axis=0),
+        np.minimum.accumulate,
+    ),
+    (
+        'max',
+        'Maximum',
+        partial(bn.nanmin, axis=1),
+        partial(bn.move_max, axis=0),
+        np.maximum.accumulate,
+    ),
+    (
+        'med',
+        'Median',
+        partial(bn.nanmedian, axis=1),
+        partial(bn.move_median, axis=1),
+        None,
+    ),
+    ('lag', 'Lag', None, rolling_lag, expanding_lag),
+    ('dif', 'Lagged difference', None, rolling_diff, expanding_diff),
+    ('ret', 'Lagged return', None, rolling_ret, expanding_ret),
+    ('ewm', 'Exponentially-weighted moving average', None, rolling_ewma, None),
+    ('ewv', 'Exponentially-weighted variance', None, rolling_ewv, None),
+    ('ews', 'Exponentially-weighted standard deviation', None, rolling_ews, None),
+    ('zsc', 'Z-score', None, rolling_zsc, None),
+]
 for code, desc, red, roll, scan in _funcs:
     if red:
-        vocab[code] = ('Row-wise Reduction', desc,
-                    lambda name, func=red: Reduction(name, func))
-        vocab[f'n{code}'] = ('Row-wise Reduction Ignoring NaNs', desc,
-                    lambda name, func=red: Reduction(name, func)(True))
+        vocab[code] = (
+            'Row-wise Reduction',
+            desc,
+            lambda name, func=red: Reduction(name, func),
+        )
+        vocab[f'n{code}'] = (
+            'Row-wise Reduction Ignoring NaNs',
+            desc,
+            lambda name, func=red: Reduction(name, func)(True),
+        )
     if roll:
-        vocab[f'r{code}'] = ('Rolling Window', desc,
-                     lambda name, func=roll: Rolling(name, func))
+        vocab[f'r{code}'] = (
+            'Rolling Window',
+            desc,
+            lambda name, func=roll: Rolling(name, func),
+        )
     if scan:
-        vocab[f'c{code}'] = ('Cumulative', desc,
-                     lambda name, func=scan: OneForOneFunction(name, expanding_wrapper(func)))
-        vocab[f'rc{code}'] = ('Reverse Cumulative', desc,
-                     lambda name, func=scan: OneForOneFunction(name,
-                                                        expandin_wrapper(func), ascending=False))
-vocab['rcov'] = ('Rolling Window', 'Covariance', 
-                 lambda name: RollingReduction(name, rolling_cov, slice_=slice(-2,None)))
-vocab['rcor'] = ('Rolling Window', 'Correlation', 
-                 lambda name: RollingReduction(name, rolling_cor, slice_=slice(-2,None)))
-vocab['rewm'] = ('Rolling Window', 'Exponentially-weighted average', 
-                 lambda name: Rolling(name, rolling_ewma))
+        vocab[f'c{code}'] = (
+            'Cumulative',
+            desc,
+            lambda name, func=scan: OneForOneFunction(name, expanding_wrapper(func)),
+        )
+        vocab[f'rc{code}'] = (
+            'Reverse Cumulative',
+            desc,
+            lambda name, func=scan: OneForOneFunction(
+                name, expandin_wrapper(func), ascending=False
+            ),
+        )
+vocab['rcov'] = (
+    'Rolling Window',
+    'Covariance',
+    lambda name: RollingReduction(name, rolling_cov, slice_=slice(-2, None)),
+)
+vocab['rcor'] = (
+    'Rolling Window',
+    'Correlation',
+    lambda name: RollingReduction(name, rolling_cor, slice_=slice(-2, None)),
+)
+vocab['rewm'] = (
+    'Rolling Window',
+    'Exponentially-weighted average',
+    lambda name: Rolling(name, rolling_ewma),
+)
 
 
 cat = 'One-for-one functions'
-vocab['neg'] = (cat, 'Additive inverse',lambda name: OneForOneFunction(name,np.negative))
-vocab['inv'] = (cat, 'Multiplicative inverse',lambda name: OneForOneFunction(name,np.reciprocal))
-vocab['abs'] = (cat, 'Absolute value',lambda name: OneForOneFunction(name,np.abs))
-vocab['sqrt'] = (cat, 'Square root',lambda name: OneForOneFunction(name,np.sqrt))
-vocab['log'] = (cat, 'Natural log',lambda name: OneForOneFunction(name,np.log))
-vocab['exp'] = (cat, 'Exponential',lambda name: OneForOneFunction(name,np.exp))
-vocab['lnot'] = (cat, 'Logical not',lambda name: OneForOneFunction(name, np.logical_not))
-vocab['expm1'] = (cat, 'Exponential minus one',lambda name: OneForOneFunction(name,np.expm1))
-vocab['log1p'] = (cat, 'Natural log of increment',lambda name: OneForOneFunction(name,np.log1p))
-vocab['sign'] = (cat, 'Sign',lambda name: OneForOneFunction(name, np.sign))
-vocab['rank'] = (cat, 'Row-wise rank',
-                 lambda name: OneForOneFunction(name, rank,
-                                    slice_=slice(None), allow_sibling_drops=False))
-vocab['inc'] = (cat, 'Increment',lambda name: OneForOneFunction(name, inc_op))
-vocab['dec'] = (cat, 'Decrement',lambda name: OneForOneFunction(name, dec_op))
+vocab['neg'] = (
+    cat,
+    'Additive inverse',
+    lambda name: OneForOneFunction(name, np.negative),
+)
+vocab['inv'] = (
+    cat,
+    'Multiplicative inverse',
+    lambda name: OneForOneFunction(name, np.reciprocal),
+)
+vocab['abs'] = (cat, 'Absolute value', lambda name: OneForOneFunction(name, np.abs))
+vocab['sqrt'] = (cat, 'Square root', lambda name: OneForOneFunction(name, np.sqrt))
+vocab['log'] = (cat, 'Natural log', lambda name: OneForOneFunction(name, np.log))
+vocab['exp'] = (cat, 'Exponential', lambda name: OneForOneFunction(name, np.exp))
+vocab['lnot'] = (
+    cat,
+    'Logical not',
+    lambda name: OneForOneFunction(name, np.logical_not),
+)
+vocab['expm1'] = (
+    cat,
+    'Exponential minus one',
+    lambda name: OneForOneFunction(name, np.expm1),
+)
+vocab['log1p'] = (
+    cat,
+    'Natural log of increment',
+    lambda name: OneForOneFunction(name, np.log1p),
+)
+vocab['sign'] = (cat, 'Sign', lambda name: OneForOneFunction(name, np.sign))
+vocab['rank'] = (
+    cat,
+    'Row-wise rank',
+    lambda name: OneForOneFunction(
+        name, rank, slice_=slice(None), allow_sibling_drops=False
+    ),
+)
+vocab['inc'] = (cat, 'Increment', lambda name: OneForOneFunction(name, inc_op))
+vocab['dec'] = (cat, 'Decrement', lambda name: OneForOneFunction(name, dec_op))
+
 
 def resolve(name: str, throw_exception: bool = True) -> Word | None:
-    if re.match(r'c\d[_\d]*',name) is not None:
-        return Constant('c')(float(name[1:].replace('_','.')))
-    elif re.match(r'c_\d[_\d]*',name) is not None:
-        return Constant('c')(-float(name[2:].replace('_','.')))
-    elif re.match(r'r\d+',name) is not None:
+    if re.match(r'c\d[_\d]*', name) is not None:
+        return Constant('c')(float(name[1:].replace('_', '.')))
+    elif re.match(r'c_\d[_\d]*', name) is not None:
+        return Constant('c')(-float(name[2:].replace('_', '.')))
+    elif re.match(r'r\d+', name) is not None:
         return Constant('c')(*range(int(name[1:])))
     elif name in vocab:
         return vocab[name][-1](name)
@@ -1649,5 +2037,4 @@ def resolve(name: str, throw_exception: bool = True) -> Word | None:
         if throw_exception:
             raise NameError(f"name '{name}' is not defined")
         else:
-            return 
-
+            return

@@ -37,3 +37,7 @@ Repository = "https://github.com/punkbrwstr/pynto"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["pynto*"]
+
+[tool.ruff.format]
+quote-style = "single"
+
