@@ -56,6 +56,10 @@ class ResampleMethod(Enum):
     SUM = 2
     AVG = 3
     LAST_NOFILL = 4
+    MIN = 5
+    MAX = 6
+    FIRST = 7
+    FIRST_NOFILL = 8
 
 
 @dataclass(eq=False)
@@ -486,6 +490,16 @@ def _resample(
             to_values[idx] = from_values[idx_input]
         case ResampleMethod.LAST_NOFILL:
             to_values[idx] = from_values[idx_input]
+        case ResampleMethod.FIRST_NOFILL:
+            idx_input = [0] + [x + 1 for x in idx_input[:-1]]
+            to_values[idx] = from_values[idx_input]
+        case ResampleMethod.FIRST:
+            x = from_values.ravel()[::-1]
+            where = np.where(~np.isnan(x), np.arange(len(x)), 0)
+            np.maximum.accumulate(where, out=where)
+            from_values[:] = x[where][::-1][:, None]
+            idx_input = [0] + [x + 1 for x in idx_input[:-1]]
+            to_values[idx] = from_values[idx_input]
         case ResampleMethod.SUM:
             sums = np.nancumsum(from_values)
             to_values[idx[0]] = from_values[idx_input[0]]
@@ -498,6 +512,18 @@ def _resample(
             to_values[idx[1:]] /= (counts[idx_input[1:]] - counts[idx_input[:-1]])[
                 :, None
             ]
+        case ResampleMethod.MIN:
+            x = from_values.ravel()[::-1]
+            where = np.where(~np.isnan(x), np.arange(len(x)), 0)
+            np.maximum.accumulate(where, out=where)
+            idx_input = [0] + [x + 1 for x in idx_input[:-1]]
+            to_values[idx] = np.minimum.reduceat(x[where][::-1], idx_input)[:, None]
+        case ResampleMethod.MAX:
+            x = from_values.ravel()[::-1]
+            where = np.where(~np.isnan(x), np.arange(len(x)), 0)
+            np.maximum.accumulate(where, out=where)
+            idx_input = [0] + [x + 1 for x in idx_input[:-1]]
+            to_values[idx] = np.maximum.reduceat(x[where][::-1], idx_input)[:, None]
 
 
 class Evaluator:
@@ -1638,15 +1664,49 @@ def rolling_ewma(data: np.ndarray, window: int) -> np.ndarray:
     return np.add.accumulate(data * adj_scale) / scale[-2::-1] + offset
 
 
-def rolling_ewv(data: np.ndarray, window: int) -> np.ndarray:
+def rolling_ewv(data: np.ndarray, window: int, bias_correct: bool = True) -> np.ndarray:
+    """
+    Exponentially-weighted variance using the same EWMA definition as rolling_ewma.
+    If bias_correct=True, applies the standard unbiased correction for weighted variance.
+    """
     mean = rolling_ewma(data, window)
-    delta = data - mean
+    delta2 = (data - mean) ** 2
+
+    # "Raw" EWM variance = EWMA of squared deviations
+    var = rolling_ewma(delta2, window)
+
+    if not bias_correct:
+        return var
 
     alpha = 2 / (window + 1.0)
-    ws = (1 - alpha) ** np.arange(window)
-    w_sum = ws.sum()
-    bias = (w_sum**2) / ((w_sum**2) - (ws**2).sum())
-    return rolling_ewma(delta**2, window)
+    n = data.shape[0]
+
+    # For early points, only t+1 observations exist; after that, cap at window.
+    m = np.minimum(np.arange(1, n + 1), window)  # 1..window
+
+    # Precompute sums of exponentially decaying weights up to window
+    j = np.arange(window)
+    ws = (1 - alpha) ** j
+    csum_w = np.cumsum(ws)
+    csum_w2 = np.cumsum(ws**2)
+
+    w_sum_t = csum_w[m - 1]
+    w2_sum_t = csum_w2[m - 1]
+
+    denom = (w_sum_t**2) - w2_sum_t
+
+    # Unbiased correction factor; undefined when denom == 0 (e.g., m == 1)
+    bias = np.divide(
+        (w_sum_t**2),
+        denom,
+        out=np.full_like(w_sum_t, np.nan, dtype=float),
+        where=denom > 0,
+    )
+
+    if data.ndim == 2:
+        bias = bias[:, None]
+
+    return var * bias
 
 
 def rolling_ews(data: np.ndarray, window: int) -> np.ndarray:
@@ -1831,6 +1891,7 @@ vocab['zero_to_na'] = (
     'Changes zeros to nans',
     lambda name: OneForOneFunction(name, zero_to_na_op),
 )
+cat = 'Resample methods'
 vocab['resample_sum'] = (
     cat,
     'Sets periodicity resampling method to sum',
@@ -1850,6 +1911,26 @@ vocab['resample_lastnofill'] = (
     cat,
     'Sets periodicity resampling method to last with no fill',
     lambda name: Resample(name, ResampleMethod.LAST_NOFILL),
+)
+vocab['resample_first'] = (
+    cat,
+    'Sets periodicity resampling method to first',
+    lambda name: Resample(name, ResampleMethod.FIRST),
+)
+vocab['resample_firstnofill'] = (
+    cat,
+    'Sets periodicity resampling method to first',
+    lambda name: Resample(name, ResampleMethod.FIRST_NOFILL),
+)
+vocab['resample_min'] = (
+    cat,
+    'Sets periodicity resampling method to min',
+    lambda name: Resample(name, ResampleMethod.MIN),
+)
+vocab['resample_max'] = (
+    cat,
+    'Sets periodicity resampling method to max',
+    lambda name: Resample(name, ResampleMethod.MAX),
 )
 vocab['per'] = (
     cat,
@@ -1962,7 +2043,7 @@ for code, desc, red, roll, scan in _funcs:
             'Reverse Cumulative',
             desc,
             lambda name, func=scan: OneForOneFunction(
-                name, expandin_wrapper(func), ascending=False
+                name, expanding_wrapper(func), ascending=False
             ),
         )
 vocab['rcov'] = (

@@ -70,7 +70,7 @@ class DataTypeMixin:
 
 class DataType(DataTypeMixin, Enum):
     F = '<f8', np.nan, 8
-    I = '<i8', 0, 8
+    N = '<i8', 0, 8
     B = '|b1', False, 1
 
     def __str__(self):

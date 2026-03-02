@@ -1,5 +1,3 @@
-import re
-import sys
 from .vocabulary import Word, Column, resolve, toggle_debug, vocab
 from .periods import Range, Periodicity, datelike
 from .database import get_client
@@ -14,7 +12,9 @@ class _Definer:
 
 define = _Definer()
 
-now = lambda: Periodicity.B.current()[-1]
+
+def now():
+    return Periodicity.B.current()[-1]
 
 
 def __getattr__(name: str):
@@ -24,3 +24,23 @@ def __getattr__(name: str):
         if name not in globals():
             raise AttributeError
         return globals()[name]
+
+
+__all__ = [
+    # vocabulary exports
+    'Word',
+    'Column',
+    'resolve',
+    'toggle_debug',
+    'vocab',
+    # periods exports
+    'Range',
+    'Periodicity',
+    'datelike',
+    # database exports / instances
+    'get_client',
+    'db',
+    # convenience helpers
+    'define',
+    'now',
+]

@@ -235,7 +235,7 @@ class TestCombinators(unittest.TestCase):
     def test_if(self):
         expr = (
             pt.r10.hset('a,b,a,a,b,a,a,b')
-            .q.q.c100.mul.p.ifheaders(lambda l: len(l) >= 3)
+            .q.q.c100.mul.p.ifheaders(lambda length: len(length) >= 3)
             .add[:]
             .p.hmap.hsort
         )
@@ -245,7 +245,7 @@ class TestCombinators(unittest.TestCase):
     def test_ifelse(self):
         expr = (
             pt.r10.hset('a,b,a,a,b,a,a,b')
-            .q.q.c100.div.p.q.c100.mul.p.ifheaderselse(lambda l: len(l) >= 3)
+            .q.q.c100.div.p.q.c100.mul.p.ifheaderselse(lambda length: len(length) >= 3)
             .add[:]
             .p.hmap.hsort
         )

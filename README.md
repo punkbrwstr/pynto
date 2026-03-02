@@ -15,14 +15,15 @@ _Words_ add, remove or modify columns.  They can operate on the entire stack or 
 Here's a program to calculate deviations from moving average for each column in a table using the _combinator_/_quotation_ pattern.
 ```
 >>> import pynto as pt 
->>> ma_dev = pt.saved('stock_prices') \     # append columns to stack from the build-in database
->>>     .q                            \     # start a quotation 
->>>         .dup                      \     # push a copy of the top (leftmost) column of the stack
->>>         .ravg(20)                 \     # calculate 20-period moving average
->>>         .sub                      \     # subtract top column from second column 
->>>     .p                            \     # close the quotation
->>>     .map                          \     # use the map combinator to apply the quotation
->>>                                         # to each column in the stack
+>>> ma_dev = (                        # create a pynto expression by concatenating words to
+>>>     pt.saved('stock_prices')      # append columns to stack from the build-in database
+>>>     .q                            # start a quotation 
+>>>         .dup                      # push a copy of the top (leftmost) column of the stack
+>>>         .ravg(20)                 # calculate 20-period moving average
+>>>         .sub                      # subtract top column from second column 
+>>>     .p                            # close the quotation
+>>>     .map                          # use the map combinator to apply the quotation
+>>> )                                 # to each column in the stack
 >>>
 >>> df = ma_dev.rows['2021-06-01':]         # evaluate over a range of rows to get a DataFrame
 >>> pt.db['stocks_ma_dev'] = df             # save the results back to the database   
@@ -128,185 +129,328 @@ pynto has built-in database functionality that lets you save DataFrames and Seri
 
 
 
-## Column Creation
+### Column Creation
 
-| Word | Description | Parameters | Column Indexer |
-|------|-------------|------------|----------------|
-| c | Pushes constant columns for each of _values_ | values: list[float] | [-1:0] |
-| dc | Pushes a column with the number of days in the period |  | [-1:0] |
-| nan | Pushes a constant nan-valued column | values: list[float] | [-1:0] |
-| pandas | Pushes columns from Pandas DataFrame or Series _pandas_ | pandas: pd.DataFrame \| pd.Series, round_: bool = False | [:] |
-| po | Pushes a column with the period ordinal |  | [-1:0] |
-| r | Pushes constant columns for each whole number from 0 to _n_ - 1 | n: int | [-1:0] |
-| randn | Pushes a column with values from a random normal distribution |  | [-1:0] |
-| saved | Pushes columns saved to internal DB as _key_ | key: str | [-1:0] |
-| ts | Pushes a column with the timestamp of the end of the period |  | [-1:0] |
+Word | Default Selector | Parameters | Description
+:---|:---|:---|:---
 
-## Combinators
+c|[-1:]|_values_|Pushes constant columns for each of _values_
 
-| Word | Description | Parameters | Column Indexer |
-|------|-------------|------------|----------------|
-| call | Applies quotation |  | [:] |
-| cleave | Applies all preceding quotations | num_quotations: int = -1 | [:] |
-| compose | Combines quotations | num_quotations: int = 2 | [:] |
-| hmap | Applies quotation to stacks created grouping columns by header |  | [:] |
-| ifexists | Applies quotation if stack has at least _count_ columns | count: int = 1 | [:] |
-| ifexistselse | Applies top quotation if stack has at least _count_ columns, otherwise applies second quotation | count: int = 1 | [:] |
-| ifheaders | Applies top quotation if list of column headers fulfills _predicate_ | predicate: Callable[[list[str]], bool] | [:] |
-| ifheaderselse | Applies quotation if list of column headers fulfills _predicate_, otherwise applies second quotation | predicate: Callable[[list[str]], bool] | [:] |
-| map | Applies quotation in groups of _every_ | every: int = 1 | [:] |
-| partial | Pushes stack columns to the front of quotation | quoted: Word \| None = None | [-1:] |
-| repeat | Applies quotation _times_ times | times: int = 2 | [:] |
+dc|[-1:]||Pushes a column with the number of days in the period
 
-## Cumulative
+nan|[-1:]|_values_|Pushes a constant nan-valued column
 
-| Word | Description | Parameters | Column Indexer |
-|------|-------------|------------|----------------|
-| cadd | Addition |  | [-1:] |
-| cavg | Arithmetic average |  | [-1:] |
-| cdif | Lagged difference |  | [-1:] |
-| clag | Lag |  | [-1:] |
-| cmax | Maximum |  | [-1:] |
-| cmin | Minimum |  | [-1:] |
-| cmul | Multiplication |  | [-1:] |
-| cret | Lagged return |  | [-1:] |
-| cstd | Standard deviation |  | [-1:] |
-| csub | Subtraction |  | [-1:] |
-| cvar | Variance |  | [-1:] |
+pandas|[:]|_pandas_, _round__|Pushes columns from Pandas DataFrame or Series _pandas_
 
-## Data cleanup
+po|[-1:]||Pushes a column with the period ordinal
 
-| Word | Description | Parameters | Column Indexer |
-|------|-------------|------------|----------------|
-| ffill | Fills nans with previous values, looking back _lookback_ before range and leaving trailing nans unless not _leave_end_ | lookback: int = 10, leave_end: bool = True | [:] |
-| fill | Fills nans with _value_  | value: float | [:] |
-| join | Joins two columns at _date_ | date: datelike | [-2:] |
-| per | Changes column periodicity to _periodicity_, then resamples | periodicity: str \| Periodicity | [-1:] |
-| resample_avg | Sets periodicity resampling method to avg |  | [:] |
-| resample_last | Sets periodicity resampling method to last |  | [:] |
-| resample_sum | Sets periodicity resampling method to sum |  | [:] |
-| start | Changes period start to _start_, then resamples | start: datelike, round_: bool = False | [:] |
-| zero_first | Changes first value to zero |  | [-1:] |
-| zero_to_na | Changes zeros to nans |  | [-1:] |
+r|[-1:]|_n_|Pushes constant columns for each whole number from 0 to _n_ - 1
 
-## Header manipulation
+randn|[-1:]||Pushes a column with values from a random normal distribution
 
-| Word | Description | Parameters | Column Indexer |
-|------|-------------|------------|----------------|
-| halpha | Set headers to alphabetical values |  | [:] |
-| happly | Apply _header_func_ to headers_ | header_func: Callable[[str], str] | [:] |
-| hformat | Apply _format_spec_ to headers | format_spec: str | [:] |
-| hreplace | Replace _old_ with _new_ in headers | old: str, new: str = '' | [:] |
-| hset | Set headers to _*headers_  | headers: str | [:] |
-| hsetall | Set headers to _*headers_ repeating, if necessary | headers: str | [:] |
+saved|[-1:]||Pushes columns saved to internal DB as _key_
 
-## One-for-one functions
+ts|[-1:]||Pushes a column with the timestamp of the end of the period
 
-| Word | Description | Parameters | Column Indexer |
-|------|-------------|------------|----------------|
-| abs | Absolute value |  | [-1:] |
-| dec | Decrement |  | [-1:] |
-| exp | Exponential |  | [-1:] |
-| expm1 | Exponential minus one |  | [-1:] |
-| inc | Increment |  | [-1:] |
-| inv | Multiplicative inverse |  | [-1:] |
-| lnot | Logical not |  | [-1:] |
-| log | Natural log |  | [-1:] |
-| log1p | Natural log of increment |  | [-1:] |
-| neg | Additive inverse |  | [-1:] |
-| rank | Row-wise rank |  | [:] |
-| sign | Sign |  | [-1:] |
-| sqrt | Square root |  | [-1:] |
+### Stack Manipulation
 
-## Quotation
+Word | Default Selector | Parameters | Description
+:---|:---|:---|:---
 
-| Word | Description | Parameters | Column Indexer |
-|------|-------------|------------|----------------|
-| q | Wraps the following words until *p* as a quotation, or wraps _quoted_ expression as a quotation | quoted: Word \| None = None | [-1:0] |
+drop|[-1:]||Removes selected columns
 
-## Reverse Cumulative
+dup|[-1:]||Duplicates columns
 
-| Word | Description | Parameters | Column Indexer |
-|------|-------------|------------|----------------|
-| rcadd | Addition |  | [-1:] |
-| rcavg | Arithmetic average |  | [-1:] |
-| rcdif | Lagged difference |  | [-1:] |
-| rclag | Lag |  | [-1:] |
-| rcmax | Maximum |  | [-1:] |
-| rcmin | Minimum |  | [-1:] |
-| rcmul | Multiplication |  | [-1:] |
-| rcret | Lagged return |  | [-1:] |
-| rcstd | Standard deviation |  | [-1:] |
-| rcsub | Subtraction |  | [-1:] |
-| rcvar | Variance |  | [-1:] |
+filter|[:]||Removes non-selected columns
 
-## Rolling Window
+hsort|[:]||Sorts columns by header
 
-| Word | Description | Parameters | Column Indexer |
-|------|-------------|------------|----------------|
-| radd | Addition | window: int = 2 | [-1:] |
-| ravg | Arithmetic average | window: int = 2 | [-1:] |
-| rcor | Correlation | window: int = 2 | [-2:] |
-| rcov | Covariance | window: int = 2 | [-2:] |
-| rdif | Lagged difference | window: int = 2 | [-1:] |
-| rewm | Exponentially-weighted average | window: int = 2 | [-1:] |
-| rews | Exponentially-weighted standard deviation | window: int = 2 | [-1:] |
-| rewv | Exponentially-weighted variance | window: int = 2 | [-1:] |
-| rlag | Lag | window: int = 2 | [-1:] |
-| rmax | Maximum | window: int = 2 | [-1:] |
-| rmed | Median | window: int = 2 | [-1:] |
-| rmin | Minimum | window: int = 2 | [-1:] |
-| rret | Lagged return | window: int = 2 | [-1:] |
-| rstd | Standard deviation | window: int = 2 | [-1:] |
-| rvar | Variance | window: int = 2 | [-1:] |
-| rzsc | Z-score | window: int = 2 | [-1:] |
+id|[:]||Identity/no-op
 
-## Row-wise Reduction
+interleave|[:]|_parts_|Divides columns in _parts_ groups and interleaves the groups
 
-| Word | Description | Parameters | Column Indexer |
-|------|-------------|------------|----------------|
-| add | Addition | ignore_nans: bool = False | [-2:] |
-| avg | Arithmetic average | ignore_nans: bool = False | [-2:] |
-| div | Division | ignore_nans: bool = False | [-2:] |
-| max | Maximum | ignore_nans: bool = False | [-2:] |
-| med | Median | ignore_nans: bool = False | [-2:] |
-| min | Minimum | ignore_nans: bool = False | [-2:] |
-| mod | Modulo | ignore_nans: bool = False | [-2:] |
-| mul | Multiplication | ignore_nans: bool = False | [-2:] |
-| pow | Power | ignore_nans: bool = False | [-2:] |
-| std | Standard deviation | ignore_nans: bool = False | [-2:] |
-| sub | Subtraction | ignore_nans: bool = False | [-2:] |
-| var | Variance | ignore_nans: bool = False | [-2:] |
+nip|[-1:]||Removes non-selected columns, defaulting selection to top
 
-## Row-wise Reduction Ignoring NaNs
+pull|[:]||Brings selected columns to the top
 
-| Word | Description | Parameters | Column Indexer |
-|------|-------------|------------|----------------|
-| nadd | Addition | ignore_nans: bool = False | [-2:] |
-| navg | Arithmetic average | ignore_nans: bool = False | [-2:] |
-| ndiv | Division | ignore_nans: bool = False | [-2:] |
-| nmax | Maximum | ignore_nans: bool = False | [-2:] |
-| nmed | Median | ignore_nans: bool = False | [-2:] |
-| nmin | Minimum | ignore_nans: bool = False | [-2:] |
-| nmod | Modulo | ignore_nans: bool = False | [-2:] |
-| nmul | Multiplication | ignore_nans: bool = False | [-2:] |
-| npow | Power | ignore_nans: bool = False | [-2:] |
-| nstd | Standard deviation | ignore_nans: bool = False | [-2:] |
-| nsub | Subtraction | ignore_nans: bool = False | [-2:] |
-| nvar | Variance | ignore_nans: bool = False | [-2:] |
+rev|[:]||Reverses the order of selected columns
 
-## Stack Manipulation
+roll|[:]||Permutes selected columns
 
-| Word | Description | Parameters | Column Indexer |
-|------|-------------|------------|----------------|
-| drop | Removes selected columns |  | [-1:] |
-| dup | Duplicates columns |  | [-1:] |
-| filter | Removes non-selected columns |  | [:] |
-| hsort | Sorts columns by header |  | [:] |
-| id | Identity/no-op |  | [:] |
-| interleave | Divides columns in _parts_ groups and interleaves the groups | parts: int = 2 | [:] |
-| nip | Removes non-selected columns, defaulting selection to top |  | [-1:] |
-| pull | Brings selected columns to the top |  | [:] |
-| rev | Reverses the order of selected columns |  | [:] |
-| roll | Permutes selected columns |  | [:] |
-| swap | Swaps top and bottom selected columns |  | [-2:] |
+swap|[-2:]||Swaps top and bottom selected columns
+
+### Quotation
+
+Word | Default Selector | Parameters | Description
+:---|:---|:---|:---
+
+q|[-1:]|_quoted_, _this_|Wraps the following words until *p* as a quotation, or wraps _quoted_ expression as a quotation
+
+### Header manipulation
+
+Word | Default Selector | Parameters | Description
+:---|:---|:---|:---
+
+halpha|[:]||Set headers to alphabetical values
+
+happly|[:]|_header_func_|Apply _header_func_ to headers_
+
+hformat|[:]|_format_spec_|Apply _format_spec_ to headers
+
+hreplace|[:]|_old_, _new_|Replace _old_ with _new_ in headers
+
+hset|[:]|_headers_|Set headers to _*headers_ 
+
+hsetall|[:]|_headers_|Set headers to _*headers_ repeating, if necessary
+
+### Combinators
+
+Word | Default Selector | Parameters | Description
+:---|:---|:---|:---
+
+call|[:]||Applies quotation
+
+cleave|[:]|_num_quotations_|Applies all preceding quotations
+
+compose|[:]|_num_quotations_|Combines quotations
+
+hmap|[:]||Applies quotation to stacks created grouping columns by header
+
+ifexists|[:]|_count_|Applies quotation if stack has at least _count_ columns
+
+ifexistselse|[:]|_count_|Applies top quotation if stack has at least _count_ columns, otherwise applies second quotation
+
+ifheaders|[:]|_predicate_|Applies top quotation if list of column headers fulfills _predicate_
+
+ifheaderselse|[:]|_predicate_|Applies quotation if list of column headers fulfills _predicate_, otherwise applies second quotation
+
+map|[:]|_every_|Applies quotation in groups of _every_
+
+partial|[-1:]|_quoted_, _this_|Pushes stack columns to the front of quotation
+
+repeat|[:]|_times_|Applies quotation _times_ times
+
+### Data cleanup
+
+Word | Default Selector | Parameters | Description
+:---|:---|:---|:---
+
+ffill|[:]|_lookback_, _leave_end_|Fills nans with previous values, looking back _lookback_ before range and leaving trailing nans unless not _leave_end_
+
+fill|[:]||Fills nans with _value_ 
+
+fillfirst|[-1:]|_lookback_|Fills first row with previous non-nan value, looking back _lookback_  before range
+
+join|[-2:]|_date_|Joins two columns at _date_
+
+sync|[:]||Align available data by setting all values to NaN when any values is NaN
+
+zero_first|[-1:]||Changes first value to zero
+
+zero_to_na|[-1:]||Changes zeros to nans
+
+### Resample methods
+
+Word | Default Selector | Parameters | Description
+:---|:---|:---|:---
+
+per|[-1:]|_periodicity_|Changes column periodicity to _periodicity_, then resamples
+
+resample_avg|[:]||Sets periodicity resampling method to avg
+
+resample_first|[:]||Sets periodicity resampling method to first
+
+resample_firstnofill|[:]||Sets periodicity resampling method to first
+
+resample_last|[:]||Sets periodicity resampling method to last
+
+resample_lastnofill|[:]||Sets periodicity resampling method to last with no fill
+
+resample_max|[:]||Sets periodicity resampling method to max
+
+resample_min|[:]||Sets periodicity resampling method to min
+
+resample_sum|[:]||Sets periodicity resampling method to sum
+
+start|[-1:]|_start_|Changes period start to _start_, then resamples
+
+### Row-wise Reduction
+
+Word | Default Selector | Parameters | Description
+:---|:---|:---|:---
+
+add|[-2:]|_ignore_nans_|Addition
+
+avg|[-2:]|_ignore_nans_|Arithmetic average
+
+div|[-2:]|_ignore_nans_|Division
+
+max|[-2:]|_ignore_nans_|Maximum
+
+med|[-2:]|_ignore_nans_|Median
+
+min|[-2:]|_ignore_nans_|Minimum
+
+mod|[-2:]|_ignore_nans_|Modulo
+
+mul|[-2:]|_ignore_nans_|Multiplication
+
+pow|[-2:]|_ignore_nans_|Power
+
+std|[-2:]|_ignore_nans_|Standard deviation
+
+sub|[-2:]|_ignore_nans_|Subtraction
+
+var|[-2:]|_ignore_nans_|Variance
+
+### Row-wise Reduction Ignoring NaNs
+
+Word | Default Selector | Parameters | Description
+:---|:---|:---|:---
+
+nadd|[-2:]|_ignore_nans_|Addition
+
+navg|[-2:]|_ignore_nans_|Arithmetic average
+
+ndiv|[-2:]|_ignore_nans_|Division
+
+nmax|[-2:]|_ignore_nans_|Maximum
+
+nmed|[-2:]|_ignore_nans_|Median
+
+nmin|[-2:]|_ignore_nans_|Minimum
+
+nmod|[-2:]|_ignore_nans_|Modulo
+
+nmul|[-2:]|_ignore_nans_|Multiplication
+
+npow|[-2:]|_ignore_nans_|Power
+
+nstd|[-2:]|_ignore_nans_|Standard deviation
+
+nsub|[-2:]|_ignore_nans_|Subtraction
+
+nvar|[-2:]|_ignore_nans_|Variance
+
+### Rolling Window
+
+Word | Default Selector | Parameters | Description
+:---|:---|:---|:---
+
+radd|[-1:]|_window_|Addition
+
+ravg|[-1:]|_window_|Arithmetic average
+
+rcor|[-2:]|_window_|Correlation
+
+rcov|[-2:]|_window_|Covariance
+
+rdif|[-1:]|_window_|Lagged difference
+
+rewm|[-1:]|_window_|Exponentially-weighted average
+
+rews|[-1:]|_window_|Exponentially-weighted standard deviation
+
+rewv|[-1:]|_window_|Exponentially-weighted variance
+
+rlag|[-1:]|_window_|Lag
+
+rmax|[-1:]|_window_|Maximum
+
+rmed|[-1:]|_window_|Median
+
+rmin|[-1:]|_window_|Minimum
+
+rret|[-1:]|_window_|Lagged return
+
+rstd|[-1:]|_window_|Standard deviation
+
+rvar|[-1:]|_window_|Variance
+
+rzsc|[-1:]|_window_|Z-score
+
+### Cumulative
+
+Word | Default Selector | Parameters | Description
+:---|:---|:---|:---
+
+cadd|[-1:]||Addition
+
+cavg|[-1:]||Arithmetic average
+
+cdif|[-1:]||Lagged difference
+
+clag|[-1:]||Lag
+
+cmax|[-1:]||Maximum
+
+cmin|[-1:]||Minimum
+
+cmul|[-1:]||Multiplication
+
+cret|[-1:]||Lagged return
+
+cstd|[-1:]||Standard deviation
+
+csub|[-1:]||Subtraction
+
+cvar|[-1:]||Variance
+
+### Reverse Cumulative
+
+Word | Default Selector | Parameters | Description
+:---|:---|:---|:---
+
+rcadd|[-1:]||Addition
+
+rcavg|[-1:]||Arithmetic average
+
+rcdif|[-1:]||Lagged difference
+
+rclag|[-1:]||Lag
+
+rcmax|[-1:]||Maximum
+
+rcmin|[-1:]||Minimum
+
+rcmul|[-1:]||Multiplication
+
+rcret|[-1:]||Lagged return
+
+rcstd|[-1:]||Standard deviation
+
+rcsub|[-1:]||Subtraction
+
+rcvar|[-1:]||Variance
+
+### One-for-one functions
+
+Word | Default Selector | Parameters | Description
+:---|:---|:---|:---
+
+abs|[-1:]||Absolute value
+
+dec|[-1:]||Decrement
+
+exp|[-1:]||Exponential
+
+expm1|[-1:]||Exponential minus one
+
+inc|[-1:]||Increment
+
+inv|[-1:]||Multiplicative inverse
+
+lnot|[-1:]||Logical not
+
+log|[-1:]||Natural log
+
+log1p|[-1:]||Natural log of increment
+
+neg|[-1:]||Additive inverse
+
+rank|[:]||Row-wise rank
+
+sign|[-1:]||Sign
+
+sqrt|[-1:]||Square root
+

@@ -1,3 +1,4 @@
+from .vocabulary import vocab
 
 
 def print_vocab():
@@ -7,12 +8,12 @@ def print_vocab():
     this_cat = ''
     cat_order = {}
     i = 0
-    for cat, _, _ in main.vocab.values():
+    for cat, _, _ in vocab.values():
         if cat not in cat_order:
             cat_order[cat] = str(i).zfill(2)
             i += 1
     for name, (cat, desc, factory) in sorted(
-        main.vocab.items(), key=lambda i: cat_order[i[1][0]] + i[0]
+        vocab.items(), key=lambda i: cat_order[i[1][0]] + i[0]
     ):
         if cat != this_cat:
             print('### ' + cat + '\n')
