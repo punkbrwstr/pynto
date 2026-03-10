@@ -7,7 +7,7 @@ name = "pynto"
 version = "2.3.0"
 description = "Data analysis using a concatenative paradigm"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -16,8 +16,6 @@ authors = [
 keywords = ["data analysis", "quantitative", "tabular", "concatenative", "functional"]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11", 
     "Programming Language :: Python :: 3.12",
     "Operating System :: OS Independent",
 ]

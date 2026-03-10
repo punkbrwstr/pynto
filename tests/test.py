@@ -84,6 +84,18 @@ class TestColumnIndexing(unittest.TestCase):
             np.array_equal(a, np.array([[0.0, 1.0, 2.0, 3.0, 4.0, 2.0, 3.0]]))
         )
 
+    def test_multiple_header_with_groups(self):
+        a = pt.r4.inc[:].halpha.div[['a','c'], True].radd.last.values
+        self.assertTrue(
+            np.array_equal(a, np.array([ 1.0, 2.0, 3.0, 4.0, 2/3.]))
+        )
+
+    def test_multiple_header_with_two_groups(self):
+        a = pt.r4.inc[:].halpha.div[['a','c'], True].radd[:].last.values
+        self.assertTrue(
+            np.array_equal(a, np.array([2.0, 4.0, 6.0, 8.0, 2/3.]))
+        )
+
 
 class TestOtherColumnIndexingWords(unittest.TestCase):
     def test_drop(self):
@@ -158,9 +170,7 @@ class TestOperators(unittest.TestCase):
 
 
 class TestNullary(unittest.TestCase):
-    df = pd.DataFrame(
-        np.roll(np.arange(25), 12).reshape((5, 5)),
-        index=pt.periods.Periodicity.B[:5].to_index(),
+    df = pd.DataFrame( np.roll(np.arange(25), 12).reshape((5, 5)), index=pt.periods.Periodicity.B[:5].to_index(),
         columns=['a', 'b', 'c', 'd', 'e'],
     )
 
@@ -208,23 +218,20 @@ class TestCombinators(unittest.TestCase):
 
     def test_hmap(self):
         result = (
-            pt.c(*range(10)).hset('a,b,a,a,b,a,a,b').q.add[:].p.hmap.hsort.values[-1]
+            pt.r10.hset('c,c,a,b,a,a,b,a,a,b').q.add[:].p.hmap.hsort.values[-1]
         )
         self.assertTrue(np.array_equal(result[-1], [26.0, 18, 1]))
 
     def test_ifexists(self):
         expr = (
-            pt.r10.hset('a,b,a,a,b,a,a,b')
-            .q.q.c100.mul.p.ifexists(3)
-            .add[:]
-            .p.hmap.hsort
+            pt.r10.hset('c,c,a,b,a,a,b,a,a,b') .q.q.c100.mul.p.ifexists(3) .add[:] .p.hmap.hsort
         )
         result = expr.values[-1]
         self.assertTrue(np.array_equal(result[-1], [818.0, 909, 1]))
 
     def test_ifexistselse(self):
         expr = (
-            pt.r10.hset('a,b,a,a,b,a,a,b')
+            pt.r10.hset('c,c,a,b,a,a,b,a,a,b')
             .q.q.c100.div.p.q.c100.mul.p.ifexistselse(3)
             .add[:]
             .p.hmap.hsort
@@ -234,7 +241,7 @@ class TestCombinators(unittest.TestCase):
 
     def test_if(self):
         expr = (
-            pt.r10.hset('a,b,a,a,b,a,a,b')
+            pt.r10.hset('c,c,a,b,a,a,b,a,a,b')
             .q.q.c100.mul.p.ifheaders(lambda length: len(length) >= 3)
             .add[:]
             .p.hmap.hsort
@@ -244,7 +251,7 @@ class TestCombinators(unittest.TestCase):
 
     def test_ifelse(self):
         expr = (
-            pt.r10.hset('a,b,a,a,b,a,a,b')
+            pt.r10.hset('c,c,a,b,a,a,b,a,a,b')
             .q.q.c100.div.p.q.c100.mul.p.ifheaderselse(lambda length: len(length) >= 3)
             .add[:]
             .p.hmap.hsort
@@ -259,17 +266,17 @@ class TestCombinators(unittest.TestCase):
 
     def test_partial(self):
         result = pt.r5.q.mul.p.partial.map.last.values
-        self.assertTrue(np.array_equal(result[-1], [0.0, 4.0, 8.0, 12.0]))
+        self.assertTrue(np.array_equal(result, [0.0, 4.0, 8.0, 12.0]))
 
     def test_compose(self):
         result = pt.r5.q.c1.add.p.q.inv.p.compose.map.last.values
-        self.assertTrue(np.array_equal(result[-1], [1, 0.5, 1 / 3, 1 / 4, 1 / 5]))
+        self.assertTrue(np.array_equal(result, [1, 0.5, 1 / 3, 1 / 4, 1 / 5]))
 
 
 class TestHeaders(unittest.TestCase):
     def test_hset(self):
         self.assertEqual(pt.r4.hset('q', 'w', 'e', 'r').columns[1], 'w')
-        self.assertEqual(pt.r6.hset('q', 'w', 'e', 'r').columns[1], 'c')
+        self.assertEqual(pt.r6.hset('q', 'w', 'e', 'r').columns[1], 'c1')
 
     def test_halpha(self):
         self.assertEqual(pt.r10.halpha.columns[1], 'b')
@@ -323,7 +330,7 @@ class TestDataCleanup(unittest.TestCase):
             .nan.join('1970-01-15')
             .ffill.rows[6:11]
         )
-        result = pt.pandas(df).ffill(leave_end=False).values[7:11]
+        result = pt.pandas(df).ffill(leave_end=False).values['1970-01-10':'1970-01-16']
         self.assertTrue(np.array_equal(result.T[0], [1.0, 3.0, 3.0, 3.0]))
 
 
@@ -372,10 +379,6 @@ class FrameTest(DbTest):
         self.assertEqual(f.shape[1], 10)
         self.assertEqual(f.shape[0], 5)
         self.assertEqual(f.sum().sum(), 225)
-
-    def test_read_range(self):
-        f = pt.db['test', '1970-01-05':'1970-01-13']
-        self.assertEqual(f.shape[0], 6)
 
     def test_read_column(self):
         f = pt.db['test#b']

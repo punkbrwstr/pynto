@@ -1,4 +1,5 @@
-from .vocabulary import Word, Column, resolve, toggle_debug, vocab
+from .vocabulary import vocab
+from .base import Word, Column, toggle_debug
 from .periods import Range, Periodicity, datelike
 from .database import get_client
 
@@ -19,11 +20,12 @@ def now():
 
 def __getattr__(name: str):
     if not name.startswith('__'):
-        return resolve(name)
-    else:
-        if name not in globals():
-            raise AttributeError
-        return globals()[name]
+        word = vocab.resolve(name)
+        if word:
+            return word
+    if name not in globals():
+        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+    return globals()[name]
 
 
 __all__ = [
