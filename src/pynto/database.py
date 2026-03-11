@@ -41,17 +41,17 @@ def get_client() -> Db:
     return _CLIENT
 
 
-def _trim_values(series: pd.Series) -> pd.Series:
+def _trim_values(series: pd.Series) -> pd.Series | None:
     if series.values.dtype.kind == 'f':
         nz = (~np.isnan(series.to_numpy())).nonzero()[0]
         if len(nz) == 0:  # don't save if all nans
-            series = None
+            return None
         else:
             series = series.iloc[nz.min() : nz.max() + 1]
     return series
 
 
-def _check_dups(index: np.ndarray, type_='column') -> np.ndarray:
+def _check_dups(index: np.ndarray, type_: str = 'column') -> np.ndarray:
     unq, unq_cnt = np.unique(index, return_counts=True)
     if len(unq) != len(index):
         dups = unq[unq_cnt > 1].tolist()
@@ -167,9 +167,11 @@ class Db:
     def connection(self):
         return redis.Redis(connection_pool=self._pool)
 
-    def split_key(self, key: str) -> str:
+    def split_key(self, key: str) -> tuple[str, str, str]:
         pattern = r'([^#]+)(?:#([^$]*))?(?:\$(.*))?'
-        return re.match(pattern, key).groups()
+        m = re.match(pattern, key)
+        assert m is not None
+        return m.groups()  # type: ignore[return-value]
 
     def make_safe(self, frame: str, column: str, row: str) -> str:
         key = struct.pack('<256s', frame.encode())
@@ -201,7 +203,7 @@ class Db:
     def all_series(self) -> dict[str, list[tuple[str, str]]]:
         mds = [Metadata.unpack(p) for p in self.connection.zrange(INDEX, 0, -1)]
         mds.sort(key=attrgetter('ordinal'))
-        keys = {}
+        keys: dict[str, list[tuple[str, str]]] = {}
         for md in mds:
             if md.key not in keys:
                 keys[md.key] = []
@@ -216,16 +218,16 @@ class Db:
             cols.append(col)
         return pd.concat(cols, axis=1)
 
-    def delete_all(self) -> list[Metadata]:
+    def delete_all(self) -> None:
         p = self.connection.pipeline()
         for packed in self.connection.zrange(INDEX, 0, -1):
             p.delete(Metadata.unpack(packed).data_key)
             p.zrem(INDEX, packed)
         p.execute()
 
-    def __setitem__(self, key: str, pandas: pd.Series | pd.DataFrame):
-        saved: dict[tuple[str, str], Metadata] = {}
-        series: list[tuple[str, str, np.ndarray]] = []
+    def __setitem__(self, key: str, pandas: pd.Series | pd.DataFrame) -> None:
+        saved: dict[tuple[str, str], Any] = {}
+        series: list[tuple[str, str, pd.Series]] = []
         frame, column, row = self.split_key(key)
         assert (
             column is None or isinstance(pandas, pd.Series) or pandas.shape[1] == 1
@@ -235,14 +237,14 @@ class Db:
             md = Metadata.unpack(p)
             saved[(md.col_header, md.row_header)] = (md, p)
         if isinstance(pandas, pd.Series):
-            series.append((column or pandas.name or '', row or '', pandas))
+            series.append((column or pandas.name or '', row or '', pandas))  # type: ignore[arg-type]
         else:
             columns = _check_dups(pandas.columns.values)
             if isinstance(pandas.index, pd.MultiIndex):
                 assert len(pandas.index.levels) == 2, 'Too many axes.'
                 # rows = _check_dups(pandas.loc[pandas.index[0][0]].index.values, 'Rows')
                 rows = _check_dups(
-                    list(pandas.index.get_level_values(1).unique()), 'Rows'
+                    np.array(list(pandas.index.get_level_values(1).unique())), 'Rows'
                 )
                 index = pandas.index.remove_unused_levels().levels[0]
                 flat = pandas.values.reshape(len(index), len(columns) * len(rows))
@@ -253,18 +255,20 @@ class Db:
                         (str(col), str(row), pd.Series(flat[:, i], index=index))
                     )
             else:
-                series.extend([(column or h, '', s) for h, s in pandas.items()])
+                series.extend([(column or str(h), '', s) for h, s in pandas.items()])
         p = self.connection.pipeline()
         toadd, todel = [], []
         for col, row, s in series:
             assert not isinstance(s.dtype, pd.api.extensions.ExtensionDtype)
             type_ = DataType.from_dtype(s.dtype.str)
             md_tuple = saved.get((col, row))
+            s_trimmed: pd.Series | None = None
             if not md_tuple:
-                s = _trim_values(s)
-                if s is None:
+                s_trimmed = _trim_values(s)
+                if s_trimmed is None:
                     continue
-            range_ = Range.from_index(s.index)
+                s = s_trimmed
+            range_ = Range.from_index(s.index)  # type: ignore[arg-type]
             data = s.to_numpy()
             if not md_tuple:
                 data_offset = 0
@@ -314,7 +318,7 @@ class Db:
             p.zadd(INDEX, {m.pack(): 0.0 for m in toadd})
         p.execute()
 
-    def __delitem__(self, key: str):
+    def __delitem__(self, key: str) -> None:
         key = self.make_safe(*self.split_key(key))
         p = self.connection.pipeline()
         for packed in self.connection.zrangebylex(INDEX, f'[{key}', f'[{key}\xff'):
@@ -322,7 +326,7 @@ class Db:
             p.zrem(INDEX, packed)
         p.execute()
 
-    def __getitem__(self, args: str | tuple[str, slice]) -> pd.Frame:
+    def __getitem__(self, args: str | tuple[str, slice]) -> pd.DataFrame:
         if isinstance(args, str):
             key = args
             start, stop = None, None
@@ -363,11 +367,11 @@ class Db:
             for md in mds:
                 rows[md.row_header] = None
                 columns[md.col_header] = None
-            row_index = list(rows.keys())
+            row_index_list = list(rows.keys())
             row_index = pd.CategoricalIndex(
-                row_index, categories=row_index, ordered=True
+                row_index_list, categories=row_index_list, ordered=True
             )
-            index = pd.MultiIndex.from_product([index, row_index])
+            index = pd.MultiIndex.from_product([index, row_index])  # type: ignore[assignment]
             # index = pd.MultiIndex.from_product([index, list(rows.keys())])
             ary = ary.reshape(ary.shape[0] * len(rows), len(columns))
             cols = np.array(columns.keys())

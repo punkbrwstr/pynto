@@ -1,16 +1,17 @@
 import random
 import inspect
+from typing import Any
 from pynto.vocabulary import vocab
 
 
 class SkipListNode:
     """Node in a skip list with multiple forward references."""
 
-    def __init__(self, element=None, score=None, level=0):
+    def __init__(self, element: Any = None, score: Any = None, level: int = 0):
         self.element = element
         self.score = score
         # Array of forward references for each level
-        self.forward = [None] * (level + 1)
+        self.forward: list[Any] = [None] * (level + 1)
 
 
 class SkipList:
@@ -46,7 +47,7 @@ class SkipList:
             self.delete(element)
 
         # Array to keep track of update points at each level
-        update = [None] * (self.MAX_LEVEL + 1)
+        update: list[Any] = [None] * (self.MAX_LEVEL + 1)
         # Current node for traversal
         x = self.header
 
@@ -87,7 +88,7 @@ class SkipList:
             return 0
 
         # Array to keep track of update points at each level
-        update = [None] * (self.MAX_LEVEL + 1)
+        update: list[Any] = [None] * (self.MAX_LEVEL + 1)
         # Current node for traversal
         x = self.header
 
@@ -439,7 +440,7 @@ def print_vocab_tables():
     Creates separate tables for each category (first element in value tuples).
     """
     # Group vocab entries by category
-    categories = {}
+    categories: dict[str, list[Any]] = {}
     for word, (category, description, callable_obj) in vocab.items():
         if category not in categories:
             categories[category] = []

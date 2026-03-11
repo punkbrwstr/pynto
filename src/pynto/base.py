@@ -8,7 +8,7 @@ import sys
 from collections import deque
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .vocabulary import Vocabulary
@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 from . import database as db
-from .periods import Range, Periodicity, datelike
+from .periods import Range, Period, Periodicity, datelike
 
 DEBUG = False
 
@@ -53,10 +53,11 @@ def debug_stack(stack: list[Column], title: str = '', offset: int = 4) -> str:
         for c in stack:
             repr_ += debug_col_repr(c, offset) + '\n'
             repr_ += debug_stack(c.shared.open_inputs, 'open inputs', offset + 4)
-            repr_ += (
-                debug_stack(
-                    c.group.closed_inputs.get(c.range_), 'group inputs', offset + 4
-                )
+            key = c.range_
+            repr_ += debug_stack(
+                (c.group.closed_inputs.get(key) if key is not None else None) or [],
+                'group inputs',
+                offset + 4,
             )
         return repr_ + '\n'
     else:
@@ -114,7 +115,7 @@ class Column:
     resampler: ResampleMethod = ResampleMethod.LAST
     id_: int = field(default_factory=_IDs.get_next)
     name: str | None = None
-    _is_copy: boolean = False
+    _is_copy: bool = False
 
     def __post_init__(self):
         if not self._is_copy:
@@ -129,6 +130,7 @@ class Column:
         return None
 
     def compute(self) -> None:
+        assert self.range_ is not None
         self.group.outputs[(self.range_, self.resampler)] = np.empty(
             (len(self.range_), len(self.group.members)), order='F'
         )
@@ -137,8 +139,11 @@ class Column:
             del self.group.closed_inputs[self.range_]
 
     @property
-    def inputs(self) -> bool:
-        return self.group.closed_inputs.get(self.range_) or self.shared.open_inputs
+    def inputs(self) -> list[Column]:
+        key = self.range_
+        return (
+            self.group.closed_inputs.get(key) if key is not None else None
+        ) or self.shared.open_inputs
 
     @property
     def computed(self) -> bool:
@@ -146,7 +151,10 @@ class Column:
 
     @property
     def group_values(self) -> np.ndarray:
-        return self.group.outputs[(self.range_, self.resampler)]
+        assert self.range_ is not None
+        result = self.group.outputs[(self.range_, self.resampler)]
+        assert result is not None
+        return result
 
     @property
     def values(self) -> np.ndarray:
@@ -165,18 +173,20 @@ class Column:
             self.group.closed_inputs[(range_)] = inputs
 
     def set_input_range(self, inputs: list[Column]) -> None:
+        assert self.range_ is not None
         for col in inputs:
             col.set_range(self.range_)
 
     @property
     def input_values(self) -> np.ndarray:
-        assert self.range_, 'Cannot get input values before range set.'
+        assert self.range_ is not None, 'Cannot get input values before range set.'
         inputs = self.group.closed_inputs[self.range_]
         assert len(inputs) > 0, 'Empty inputs.'
         assert len(set([c.range_ for c in inputs])) == 1, (
             'All input ranges must be the same to use input_values funtion'
         )
-        return np.concatenate([c.values for c in inputs]).reshape(
+        assert inputs[0].range_ is not None
+        return np.concatenate([c.values for c in inputs]).reshape(  # type: ignore[no-any-return]
             (len(inputs[0].range_), len(inputs)), order='F'
         )
 
@@ -192,7 +202,9 @@ class Column:
     def __hash__(self):
         return hash(self.id_)
 
-    def __eq__(self, other: Column):
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Column):
+            return NotImplemented
         return self.id_ == other.id_
 
     def __del__(self):
@@ -230,21 +242,23 @@ class Word:
         self.prev: Word | None = None
         self.open_quotes: int = 0
         self.called: bool = False
+        self.quoted: Word | None = None
 
     def operate(self, stack: list[Column]) -> None:
         if self.raise_on_empty and len(stack) == 0:
             raise IndexError(f'Empty stack for {self.name}')
         pass
 
-    def __call__(self, kwargs=None) -> Word:
+    def __call__(self, *args: Any, **kwargs: Any) -> Word:
         self.called = True
-        if kwargs:
-            for key, value in kwargs.items():
+        locals_dict = args[0] if args else None
+        if locals_dict:
+            for key, value in locals_dict.items():
                 if key not in ['__class__', 'self']:
                     setattr(self, key, value)
         return self
 
-    def __add__(self, addend: Word, copy_addend=True) -> Word:
+    def __add__(self, addend: Word, copy_addend: bool = True) -> Word:
         this = self.copy_expression()
         if copy_addend:
             addend_tail = addend.copy_expression()
@@ -265,13 +279,13 @@ class Word:
     def concat(self, other: Word) -> Word:
         return self.__add__(other)
 
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> Any:
 
         if name == 'vocab':
             return self.__getattribute__('vocab')
         word = self.vocab.resolve(name)
         if word is not None:
-            return self.__add__(word, copy_addend=False)
+            return self.__add__(word, False)
         else:
             return self.__getattribute__(name)
 
@@ -318,6 +332,7 @@ class Word:
             current = current.prev
         current.open_quotes -= 1
         assert isinstance(current, Quotation), 'something wrong'
+        assert current.next_ is not None
         current.next_.prev = None
         current = current(current.next_._tail())
         current.next_ = None
@@ -333,7 +348,7 @@ class Word:
             prefix = 0
         else:
             prefix = 8
-        current = self._head()
+        current: Word | None = self._head()
         logger.debug(f'{" " * prefix}Evaluating words')
         while current is not None:
             if not current.called:  # need to set defaults (if any)
@@ -395,11 +410,11 @@ class Word:
         return [col.header for col in self.stack]
 
     @property
-    def last(self) -> pd.Series:
+    def last(self) -> Any:
         return Evaluator(self)[-1:].iloc[-1]
 
     @property
-    def all(self) -> pd.DataFrame:
+    def all(self) -> Any:
         return Evaluator(self)[:]
 
     @property
@@ -407,7 +422,7 @@ class Word:
         return Evaluator(self)
 
     @property
-    def values(self) -> np.ndarray:
+    def values(self) -> Evaluator:
         return Evaluator(self, True)
 
     def __copy__(self) -> Word:
@@ -440,7 +455,7 @@ class Word:
 
     @property
     def local(self) -> Word:
-        return Quotation('q', self.vocab)(self).call[-1:0]
+        return Quotation('q', self.vocab)(self).call[-1:0]  # type: ignore[no-any-return]
 
     def __str__(self) -> str:
         ignore = (
@@ -481,7 +496,7 @@ class Word:
 
 
 class Quotation(Word):
-    def __init__(self, name: str, vocab: Vocabulary, slice_=slice(-1, 0)):
+    def __init__(self, name: str, vocab: Vocabulary, slice_: slice = slice(-1, 0)):
         super().__init__(name, vocab, slice_)
 
     def __call__(self, quoted: Word | None = None) -> Word:
@@ -556,7 +571,7 @@ class Evaluator:
         self.word = word
         self.values_only = values_only
 
-    def __getitem__(self, key: slice | int | str | Range) -> pd.DataFrame:
+    def __getitem__(self, key: slice | int | str | Range) -> Any:
         _IDs.reset()
         stack = self.word.build_stack()
         min_, max_, per = None, None, None
@@ -573,7 +588,9 @@ class Evaluator:
             range_ = key
         elif isinstance(key, datelike) or isinstance(key, int):
             p = per if per else Periodicity.B
-            range_ = p[key].to_range()
+            _per = p[key]
+            assert isinstance(_per, Period)
+            range_ = _per.to_range()
         elif isinstance(key, slice):
             start, stop, step = key.start, key.stop, key.step
             p = Periodicity[step] if step else per if per else Periodicity.B
@@ -581,16 +598,18 @@ class Evaluator:
                 if start < 0:
                     start = p[max_] + start
                 else:
+                    assert min_ is not None
                     start = p[min_] + start
             if isinstance(stop, int) and max_ is not None:
                 if stop < 0:
                     stop = p[max_] + stop
                 else:
+                    assert min_ is not None
                     stop = p[min_] + stop
-            range_ = p[start or min_ : stop or max_]
+            range_ = p[start or min_ : stop or max_]  # type: ignore[misc]
         else:
             raise TypeError('Unsupported indexer')
-        logger.debug(f'Setting ranges')
+        logger.debug('Setting ranges')
         for col in stack:
             try:
                 col.set_range(range_)
@@ -599,7 +618,7 @@ class Evaluator:
                 raise e
         logger.debug(f'Stack\n{debug_stack(stack)}')
         working = stack[:]
-        flat = deque()
+        flat: deque[Column] = deque()
         while working:
             col = working.pop()
             flat.append(col)
@@ -608,27 +627,30 @@ class Evaluator:
         saveds = [col for col in flat if isinstance(col, SavedColumn)]
         if saveds:
             p = db.get_client().connection.pipeline()
-            offsets, needed_saveds, resample = [], [], []
+            offsets: list[int] = []
+            needed_saveds: list[SavedColumn] = []
+            resample_ranges: list[Range | None] = []
             for col in saveds:
                 if col.range_ and not col.computed:
                     col.operate()  # initialize array
                     if col.range_.periodicity != col.md.periodicity:
                         r = col.range_.change_periodicity(col.md.periodicity)
-                        resample.append(r)
+                        resample_ranges.append(r)
                     else:
                         r = col.range_
-                        resample.append(None)
+                        resample_ranges.append(None)
                     offsets.append(db.get_client()._req(col.md, r.start, r.stop, p))
                     needed_saveds.append(col)
-            for col, offset, bytes_, r in zip(
-                needed_saveds, offsets, p.execute(), resample
+            for col, offset, bytes_, r_ in zip(
+                needed_saveds, offsets, p.execute(), resample_ranges
             ):
                 if len(bytes_) > 0:
                     data = np.frombuffer(bytes_, col.md.type_.dtype)
-                    if r is not None:
-                        from_values = np.full((len(r), 1), np.nan, order='F')
+                    if r_ is not None:
+                        assert col.range_ is not None
+                        from_values = np.full((len(r_), 1), np.nan, order='F')
                         from_values[offset : offset + len(data), 0] = data
-                        resample(col.range_, col.values, r, from_values, col.resampler)
+                        resample(col.range_, col.values, r_, from_values, col.resampler)
                     else:
                         col.values[offset : offset + len(data), 0] = data
         logger.debug('Processing flat')

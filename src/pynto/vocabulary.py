@@ -4,9 +4,9 @@ import logging
 import re
 import sys
 from functools import partial
-from typing import Callable
+from typing import Any, Callable
 
-import bottleneck as bn
+import bottleneck as bn  # type: ignore[import-untyped]
 import numpy as np
 
 from .base import Word, ResampleMethod
@@ -85,9 +85,11 @@ logging.basicConfig(
 
 
 def expanding_wrapper(
-    func: Callable[[np.ndarray, np.ndarray], None],
+    func: Callable[..., Any],
 ) -> Callable[[np.ndarray, np.ndarray], None]:
-    def wrapper(a, out, func=func):
+    def wrapper(
+        a: np.ndarray, out: np.ndarray, func: Callable[..., Any] = func
+    ) -> None:
         mask = np.all(~np.isnan(a), axis=1)
         if not np.all(~mask):
             out[mask] = func(a[mask])
@@ -96,7 +98,7 @@ def expanding_wrapper(
     return wrapper
 
 
-type Entry = tuple[str, str, Callable[[str, Vocabulary], Word]]
+type Entry = tuple[str, str, Callable[..., Word]]
 
 
 class Vocabulary(dict[str, Entry]):

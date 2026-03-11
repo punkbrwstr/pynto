@@ -6,16 +6,16 @@ import zoneinfo
 from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable
+from typing import Callable, TypeAlias, overload
 
 import pandas as pd
 
-datelike = str | datetime.date | datetime.datetime | pd.Timestamp
+datelike: TypeAlias = str | datetime.date | datetime.datetime | pd.Timestamp
 
 
 def parse_date(date: datelike) -> datetime.date:
     if isinstance(date, pd._libs.tslibs.timestamps.Timestamp):
-        return date.date()  # type: ignore[no-any-return]
+        return date.date()
     elif isinstance(date, datetime.date):
         return date
     elif isinstance(date, datetime.datetime):
@@ -256,6 +256,13 @@ class Periodicity(PeriodicityMixin, Enum):
         _str_y,
     )
 
+    @overload
+    def __getitem__(
+        self, index: str | datetime.date | datetime.datetime | Period | int
+    ) -> Period: ...
+    @overload
+    def __getitem__(self, index: slice) -> Range: ...
+
     def __getitem__(self, index: datelike | Period | int | slice) -> Period | Range:
         if isinstance(index, datelike):
             ordinal = self._count(self.epoque, self._round(parse_date(index)))
@@ -305,7 +312,9 @@ class Periodicity(PeriodicityMixin, Enum):
         ny_date = ny.date()
         if ny.hour >= 17:
             ny_date += datetime.timedelta(days=1)
-        return self[ny_date]
+        result = self[ny_date]
+        assert isinstance(result, Period)
+        return result
 
     def current(self) -> Period:
         return self.next() - 1
@@ -326,7 +335,7 @@ class Periodicity(PeriodicityMixin, Enum):
     @classmethod
     def from_ordinal(cls, ordinal: int) -> Periodicity:
         for p in cls:
-            if p.ordinal == ordinal:
+            if p.ordinal == ordinal:  # type: ignore[attr-defined]
                 return p
         raise ValueError()
 
@@ -398,21 +407,27 @@ class Range:
     @classmethod
     def from_index(cls, date_range: pd.DatetimeIndex) -> Range:
         assert date_range.freq is not None, 'Index must have freq.'
-        return Periodicity.from_offset_code(date_range.freq.name)[
+        result = Periodicity.from_offset_code(date_range.freq.name)[
             date_range[0] : date_range[-1]
-        ].expand(1)
+        ]
+        assert isinstance(result, Range)
+        return result.expand(1)
 
     def change_periodicity(self, periodicity: Periodicity | str) -> Range:
         if isinstance(periodicity, str):
             periodicity = Periodicity[periodicity.upper()]
-        return periodicity[self[0][0] : self[-1][-1]].expand()
+        result = periodicity[self[0][0] : self[-1][-1]]  # type: ignore[misc]
+        assert isinstance(result, Range)
+        return result.expand()
 
     def resample_indicies(
         self, range_: Range, round_: bool = True
-    ) -> tuple[int, list[int]]:
-        my_ordinals, target_ordinals = [], []
+    ) -> tuple[list[int], list[int]]:
+        my_ordinals: list[int] = []
+        target_ordinals: list[int] = []
         for i, target_per in enumerate(range_):
             my_per = self.periodicity[target_per]
+            assert isinstance(my_per, Period)
             if (
                 my_per.ordinal >= self.start
                 and my_per.ordinal < self.stop
@@ -428,7 +443,12 @@ class Range:
             yield self[i]
             i += 1
 
-    def __getitem__(self, index: int | slice) -> Period:
+    @overload
+    def __getitem__(self, index: int) -> Period: ...
+    @overload
+    def __getitem__(self, index: slice) -> Range: ...
+
+    def __getitem__(self, index: int | slice) -> Period | Range:
         if isinstance(index, int):
             if index >= 0:
                 if index >= self.stop - self.start:
@@ -459,10 +479,10 @@ class Range:
         )
         return self.stop - self.start
 
-    def __add__(self, by: int) -> Period:
+    def __add__(self, by: int) -> Range:
         return Range(self.start + by, self.stop + by, self.periodicity)
 
-    def __sub__(self, by: int) -> Period:
+    def __sub__(self, by: int) -> Range:
         return Range(self.start - by, self.stop - by, self.periodicity)
 
     def __repr__(self) -> str:
@@ -490,7 +510,7 @@ class Range:
             expanded.start += by
         return expanded
 
-    def offset(self, by) -> Range:
+    def offset(self, by: int) -> Range:
         return Range(self.start + by, self.stop + by, self.periodicity)
 
     def to_index(self) -> pd.DatetimeIndex:

@@ -51,12 +51,13 @@ class GeneratorColumn(Column):
     generator: Generator
 
     def operate(self) -> None:
+        assert self.range_ is not None
         self.generator(self.range_, self.values)
 
 
 class RandomNormal(GeneratorWord):
     @staticmethod
-    def generate(range_: Range, values: np.ndarray):
+    def generate(range_: Range, values: np.ndarray) -> None:
         values[:] = np.random.randn(len(range_))[:, None]
 
     def __init__(self, name: str, vocab: Vocabulary):
@@ -65,8 +66,8 @@ class RandomNormal(GeneratorWord):
 
 class Timestamp(GeneratorWord):
     @staticmethod
-    def generate(range_: Range, values: np.ndarray):
-        values[:] = range_.to_index().view('int').astype(np.float64)[:, None]
+    def generate(range_: Range, values: np.ndarray) -> None:
+        values[:] = range_.to_index().view('int').astype(np.float64)[:, None]  # type: ignore[call-overload]
 
     def __init__(self, name: str, vocab: Vocabulary):
         super().__init__(name, vocab, self.generate)
@@ -74,7 +75,7 @@ class Timestamp(GeneratorWord):
 
 class PeriodOrdinal(GeneratorWord):
     @staticmethod
-    def generate(range_: Range, values: np.ndarray):
+    def generate(range_: Range, values: np.ndarray) -> None:
         values[:] = np.arange(range_.start, range_.stop).astype(np.float64)[:, None]
 
     def __init__(self, name: str, vocab: Vocabulary):
@@ -83,7 +84,7 @@ class PeriodOrdinal(GeneratorWord):
 
 class Daycount(GeneratorWord):
     @staticmethod
-    def generate(range_: Range, values: np.ndarray):
+    def generate(range_: Range, values: np.ndarray) -> None:
         values[:] = np.array(range_.day_counts(), dtype=np.float64)[:, None]
 
     def __init__(self, name: str, vocab: Vocabulary):
@@ -92,13 +93,13 @@ class Daycount(GeneratorWord):
 
 class Constant(GeneratorWord):
     @staticmethod
-    def generate(constant: float, range_: Range, values: np.ndarray):
+    def generate(constant: float, range_: Range, values: np.ndarray) -> None:
         values[:] = constant
 
     def __init__(self, name: str, vocab: Vocabulary):
-        super().__init__(name, vocab, self.generate)
+        super().__init__(name, vocab, self.generate)  # type: ignore[arg-type]
 
-    def __call__(self, *values: list[float]) -> Word:
+    def __call__(self, *values: float) -> Word:
         self.constants = values
         return super().__call__()
 
@@ -115,7 +116,7 @@ class Constant(GeneratorWord):
 
 
 class ConstantRange(Constant):
-    def __call__(self, n: int) -> Word:
+    def __call__(self, n: int) -> Word:  # type: ignore[override]
         return super().__call__(*range(n))
 
 
@@ -127,9 +128,10 @@ class PandasColumn(Column):
 
     def __post_init__(self):
         super().__post_init__()
-        self.pandas_range = Range.from_index(self.pandas.index)
+        self.pandas_range = Range.from_index(self.pandas.index)  # type: ignore[arg-type]
 
     def get_bounds(self) -> tuple[datetime.date, datetime.date, Periodicity] | None:
+        assert self.pandas_range is not None
         return (
             self.pandas_range[0][-1],
             self.pandas_range.expand()[-1][-1],
@@ -137,25 +139,30 @@ class PandasColumn(Column):
         )
 
     def operate(self) -> None:
+        assert self.pandas_range is not None
+        assert self.range_ is not None
         self.values[:] = np.nan
         idx, idx_input = self.pandas_range.resample_indicies(self.range_, self.round_)
         self.group_values[idx, :] = self.pandas.values[idx_input, :]
 
 
 class FromPandas(Word):
+    pandas: pd.DataFrame
+    round_: bool
+
     def __call__(self, pandas: pd.DataFrame | pd.Series, round_: bool = False) -> Word:
         if isinstance(pandas, pd.Series):
-            self.pandas = self.pandas.toframe()
+            self.pandas = self.pandas.toframe()  # type: ignore[operator]
         else:
             self.pandas = pandas
-        if self.pandas.index.freq is None:
-            self.pandas.index.freq = pd.infer_freq(self.pandas.index)
+        if self.pandas.index.freq is None:  # type: ignore[attr-defined]
+            self.pandas.index.freq = pd.infer_freq(self.pandas.index)  # type: ignore[attr-defined,arg-type]
         self.round_ = round_
         return super().__call__()
 
     def operate(self, stack):
-        if self.pandas.index.freq is None:
-            self.pandas.index.freq = pd.infer_freq(self.pandas.index)
+        if self.pandas.index.freq is None:  # type: ignore[attr-defined]
+            self.pandas.index.freq = pd.infer_freq(self.pandas.index)  # type: ignore[attr-defined,arg-type]
         group = GroupShared()
         for header in self.pandas.columns:
             stack.append(
@@ -195,11 +202,12 @@ class Combinator(Word):
         super().__init__(name, vocab, slice_)
 
     def get_quotations(self) -> list[Word]:
-        quotations = []
+        quotations: list[Word] = []
         current = self.prev
         needed = self.num_quotations
         while needed != 0 and current and isinstance(current, Quotation):
-            quotations.append(current.quoted)
+            if current.quoted is not None:
+                quotations.append(current.quoted)
             needed -= 1
             current = current.prev
         assert needed <= 0, 'Missing quotation for combinator'
@@ -258,7 +266,7 @@ class IfHeadersElse(Combinator):
 
 
 class Map(Combinator):
-    def __call__(self, every: int = 1):
+    def __call__(self, every: int = 1) -> Word:
         self.every = every
         return super().__call__()
 
@@ -308,7 +316,7 @@ class Cleave(Combinator):
     def __init__(self, name: str, vocab: Vocabulary):
         super().__init__(name, vocab, num_quotations=-1)
 
-    def __call__(self, num_quotations: int = -1):
+    def __call__(self, num_quotations: int = -1) -> Word:
         self.num_quotations = num_quotations
         return super().__call__()
 
@@ -353,7 +361,7 @@ class Compose(Quotation, Combinator):
     def __init__(self, name: str, vocab: Vocabulary):
         Combinator.__init__(self, name, vocab, num_quotations=2)
 
-    def __call__(self, num_quotations: int = 2):
+    def __call__(self, num_quotations: int = 2) -> Word:  # type: ignore[override]
         self.num_quotations = num_quotations
         return super().__call__()
 
@@ -365,6 +373,7 @@ class Compose(Quotation, Combinator):
             if i == 0:
                 self.quoted = quoted
             else:
+                assert self.quoted is not None
                 self.quoted += quoted
 
 
@@ -383,9 +392,12 @@ class PeriodicityColumn(Column):
     periodicity: Periodicity
 
     def set_input_range(self, inputs: list[Column]) -> None:
+        assert self.range_ is not None
         inputs[0].set_range(self.range_.change_periodicity(self.periodicity))
 
     def operate(self) -> None:
+        assert self.range_ is not None
+        assert self.inputs[0].range_ is not None
         self.values[:] = np.nan
         resample(
             self.range_,
@@ -422,6 +434,7 @@ class StartColumn(Column):
     offset: int | None = None
 
     def set_input_range(self, inputs: list[Column]) -> None:
+        assert self.range_ is not None
         if isinstance(self.start, int):
             self.offset = self.start
         else:
@@ -435,6 +448,7 @@ class StartColumn(Column):
             col.set_range(input_range)
 
     def operate(self) -> None:
+        assert self.offset is not None
         if self.offset <= 0:
             self.values[:] = self.input_values[-self.offset :]
         else:
@@ -468,6 +482,7 @@ class FillFirstColumn(Column):
     lookback: int
 
     def set_input_range(self, inputs: list[Column]) -> None:
+        assert self.range_ is not None
         self.lookback = -abs(self.lookback)
         input_range = self.range_.expand(self.lookback)
         for col in inputs:
@@ -536,6 +551,7 @@ class FFillColumn(Column):
     leave_end: bool
 
     def set_input_range(self, inputs: list[Column]) -> None:
+        assert self.range_ is not None
         input_range = self.range_.expand(int(-self.lookback))
         for col in inputs:
             col.set_range(input_range)
@@ -573,6 +589,7 @@ class JoinColumn(Column):
     date: datelike
 
     def set_input_range(self, inputs: list[Column]) -> None:
+        assert self.range_ is not None
         r = self.range_
         cutover_index = r.periodicity[self.date].ordinal
         if r.stop <= cutover_index:
@@ -644,7 +661,7 @@ class Reduction(Word):
         if inputs:
             col = ReductionColumn(
                 inputs[0].header,
-                operation=self.operation,
+                operation=self.operation,  # type: ignore[arg-type]
                 ignore_nans=self.ignore_nans,
                 name=self.name,
             )
@@ -660,12 +677,14 @@ class RollingColumn(Column):
     lookback: int | None = None
 
     def set_input_range(self, inputs: list[Column]) -> None:
+        assert self.range_ is not None
         self.lookback = max(5, int(self.window * 1.25))
         input_range = self.range_.expand(-self.lookback)
         for col in inputs:
             col.set_range(input_range)
 
     def operate(self) -> None:
+        assert self.lookback is not None
         data = self.input_values
         mask = ~np.any(np.isnan(data), axis=1)
         idx = np.where(mask)[0]
@@ -686,7 +705,11 @@ class RollingColumn(Column):
 
 class Rolling(Word):
     def __init__(
-        self, name: str, vocab: Vocabulary, operation: np.ufunc, slice_=slice(-1, None)
+        self,
+        name: str,
+        vocab: Vocabulary,
+        operation: Callable[[np.ndarray, int], np.ndarray],
+        slice_: slice = slice(-1, None),
     ):
         self.operation = operation
         super().__init__(name, vocab, slice_=slice_)
@@ -729,7 +752,7 @@ class GroupOperator(Word):
         name: str,
         vocab: Vocabulary,
         operation: Callable[[np.ndarray, np.ndarray], None],
-        slice_=slice(-1, None),
+        slice_: slice = slice(-1, None),
         ascending: bool = True,
         allow_group_drops: bool = True,
     ):
@@ -764,9 +787,9 @@ class GroupOperatorColumn(Column):
         data = self.input_values
         if not self.ascending:
             data = data[::-1]
-            self.operation(data, out=self.group_values[::-1])
+            self.operation(data, out=self.group_values[::-1])  # type: ignore[call-arg]
         else:
-            self.operation(data, out=self.group_values)
+            self.operation(data, out=self.group_values)  # type: ignore[call-arg]
 
 
 class Roll(Word):

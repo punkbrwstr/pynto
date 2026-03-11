@@ -1,5 +1,5 @@
 import numpy as np
-import bottleneck as bn
+import bottleneck as bn  # type: ignore[import-untyped]
 
 
 def rank(inputs: np.ndarray, out: np.ndarray) -> None:
@@ -34,7 +34,7 @@ def expanding_mean(x: np.ndarray) -> np.ndarray:
     shape = [1] * x.ndim
     shape[0] = N
     counts = counts.reshape(shape)
-    return csum / counts
+    return csum / counts  # type: ignore[no-any-return]
 
 
 def expanding_var(x: np.ndarray) -> np.ndarray:
@@ -56,7 +56,7 @@ def expanding_var(x: np.ndarray) -> np.ndarray:
 
 
 def expanding_std(x: np.ndarray) -> np.ndarray:
-    return np.sqrt(expanding_var(x))
+    return np.sqrt(expanding_var(x))  # type: ignore[no-any-return]
 
 
 def expanding_lag(x: np.ndarray) -> np.ndarray:
@@ -75,7 +75,7 @@ def expanding_ret(x: np.ndarray) -> np.ndarray:
 
 
 def expanding_diff(x: np.ndarray) -> np.ndarray:
-    return x - x[0]
+    return x - x[0]  # type: ignore[no-any-return]
 
 
 def rolling_diff(x: np.ndarray, window: int) -> np.ndarray:
@@ -98,12 +98,12 @@ def rolling_ret(x: np.ndarray, window: int) -> np.ndarray:
 def rolling_cov(x: np.ndarray, window: int) -> np.ndarray:
     means = bn.move_mean(x, window, axis=0)
     meanXY = bn.move_mean(np.multiply.reduce(x, axis=1), window)
-    return meanXY - np.multiply.reduce(means, axis=1)
+    return meanXY - np.multiply.reduce(means, axis=1)  # type: ignore[no-any-return]
 
 
 def rolling_cor(x: np.ndarray, window: int) -> np.ndarray:
     vars_ = bn.move_var(x, window, axis=0)
-    return rolling_cov(x, window) / np.multiply.reduce(vars_, axis=1)
+    return rolling_cov(x, window) / np.multiply.reduce(vars_, axis=1)  # type: ignore[no-any-return]
 
 
 def rolling_ewma(data: np.ndarray, window: int) -> np.ndarray:
@@ -114,7 +114,7 @@ def rolling_ewma(data: np.ndarray, window: int) -> np.ndarray:
         adj_scale = adj_scale[:, None]
         scale = scale[:, None]
     offset = data[0] * scale[1:]
-    return np.add.accumulate(data * adj_scale) / scale[-2::-1] + offset
+    return np.add.accumulate(data * adj_scale) / scale[-2::-1] + offset  # type: ignore[no-any-return]
 
 
 def rolling_ewv(data: np.ndarray, window: int, bias_correct: bool = True) -> np.ndarray:
@@ -159,16 +159,16 @@ def rolling_ewv(data: np.ndarray, window: int, bias_correct: bool = True) -> np.
     if data.ndim == 2:
         bias = bias[:, None]
 
-    return var * bias
+    return var * bias  # type: ignore[no-any-return]
 
 
 def rolling_ews(data: np.ndarray, window: int) -> np.ndarray:
-    return np.sqrt(rolling_ewv(data, window))
+    return np.sqrt(rolling_ewv(data, window))  # type: ignore[no-any-return]
 
 
 def rolling_zsc(data: np.ndarray, window: int) -> np.ndarray:
     std = bn.move_std(data, window=window, axis=0, min_count=2)
-    return np.divide(
+    return np.divide(  # type: ignore[no-any-return]
         (data - bn.move_mean(data, window=window, axis=0, min_count=2)),
         std,
         out=None,

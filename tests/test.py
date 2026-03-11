@@ -85,16 +85,12 @@ class TestColumnIndexing(unittest.TestCase):
         )
 
     def test_multiple_header_with_groups(self):
-        a = pt.r4.inc[:].halpha.div[['a','c'], True].radd.last.values
-        self.assertTrue(
-            np.array_equal(a, np.array([ 1.0, 2.0, 3.0, 4.0, 2/3.]))
-        )
+        a = pt.r4.inc[:].halpha.div[['a', 'c'], True].radd.last.values
+        self.assertTrue(np.array_equal(a, np.array([1.0, 2.0, 3.0, 4.0, 2 / 3.0])))
 
     def test_multiple_header_with_two_groups(self):
-        a = pt.r4.inc[:].halpha.div[['a','c'], True].radd[:].last.values
-        self.assertTrue(
-            np.array_equal(a, np.array([2.0, 4.0, 6.0, 8.0, 2/3.]))
-        )
+        a = pt.r4.inc[:].halpha.div[['a', 'c'], True].radd[:].last.values
+        self.assertTrue(np.array_equal(a, np.array([2.0, 4.0, 6.0, 8.0, 2 / 3.0])))
 
 
 class TestOtherColumnIndexingWords(unittest.TestCase):
@@ -170,7 +166,9 @@ class TestOperators(unittest.TestCase):
 
 
 class TestNullary(unittest.TestCase):
-    df = pd.DataFrame( np.roll(np.arange(25), 12).reshape((5, 5)), index=pt.periods.Periodicity.B[:5].to_index(),
+    df = pd.DataFrame(
+        np.roll(np.arange(25), 12).reshape((5, 5)),
+        index=pt.periods.Periodicity.B[:5].to_index(),
         columns=['a', 'b', 'c', 'd', 'e'],
     )
 
@@ -217,14 +215,15 @@ class TestCombinators(unittest.TestCase):
         self.assertEqual(result.iloc[0, -2], 6)
 
     def test_hmap(self):
-        result = (
-            pt.r10.hset('c,c,a,b,a,a,b,a,a,b').q.add[:].p.hmap.hsort.values[-1]
-        )
+        result = pt.r10.hset('c,c,a,b,a,a,b,a,a,b').q.add[:].p.hmap.hsort.values[-1]
         self.assertTrue(np.array_equal(result[-1], [26.0, 18, 1]))
 
     def test_ifexists(self):
         expr = (
-            pt.r10.hset('c,c,a,b,a,a,b,a,a,b') .q.q.c100.mul.p.ifexists(3) .add[:] .p.hmap.hsort
+            pt.r10.hset('c,c,a,b,a,a,b,a,a,b')
+            .q.q.c100.mul.p.ifexists(3)
+            .add[:]
+            .p.hmap.hsort
         )
         result = expr.values[-1]
         self.assertTrue(np.array_equal(result[-1], [818.0, 909, 1]))

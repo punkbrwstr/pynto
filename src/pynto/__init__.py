@@ -1,3 +1,4 @@
+from typing import Any
 from .vocabulary import vocab
 from .base import Word, Column, toggle_debug
 from .periods import Range, Periodicity, datelike
@@ -8,7 +9,7 @@ db = get_client()
 
 class _Definer:
     def __setitem__(self, name: str, word: Word) -> None:
-        vocab[name] = ('Ad-hoc', name, lambda name: Word(name) + word)
+        vocab[name] = ('Ad-hoc', name, lambda n, v, w=word: Word(n, v) + w)
 
 
 define = _Definer()
@@ -18,7 +19,7 @@ def now():
     return Periodicity.B.current()[-1]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if not name.startswith('__'):
         word = vocab.resolve(name)
         if word:
