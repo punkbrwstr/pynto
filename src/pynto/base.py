@@ -632,7 +632,7 @@ class Evaluator:
             resample_ranges: list[Range | None] = []
             for col in saveds:
                 if col.range_ and not col.computed:
-                    col.operate()  # initialize array
+                    col.compute()  # initialize array
                     if col.range_.periodicity != col.md.periodicity:
                         r = col.range_.change_periodicity(col.md.periodicity)
                         resample_ranges.append(r)
