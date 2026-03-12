@@ -135,15 +135,15 @@ vocab['randn'] = (
     'Pushes a column with values from a random normal distribution',
     RandomNormal,
 )
-vocab['ts'] = (
+vocab['timestamp'] = (
     cat,
     'Pushes a column with the timestamp of the end of the period',
     Timestamp,
 )
-vocab['po'] = (cat, 'Pushes a column with the period ordinal', PeriodOrdinal)
-vocab['dc'] = (cat, 'Pushes a column with the number of days in the period', Daycount)
-vocab['saved'] = (cat, 'Pushes columns saved to internal DB as _key_', Saved)
-vocab['pandas'] = (
+vocab['period_ordinal'] = (cat, 'Pushes a column with the period ordinal', PeriodOrdinal)
+vocab['day_count'] = (cat, 'Pushes a column with the number of days in the period', Daycount)
+vocab['load'] = (cat, 'Pushes columns saved to internal DB as _key_', Saved)
+vocab['from_pandas'] = (
     cat,
     'Pushes columns from Pandas DataFrame or Series _pandas_',
     FromPandas,
@@ -163,7 +163,7 @@ vocab['dup'] = (
         name, vocab, slice_=slice(-1, None), copy_selected=True, raise_on_empty=True
     ),
 )
-vocab['filter'] = (
+vocab['keep'] = (
     cat,
     'Removes non-selected columns',
     lambda name, vocab: Word(name, vocab, discard_excluded=True),
@@ -328,12 +328,12 @@ vocab['resample_max'] = (
     'Sets periodicity resampling method to max',
     lambda name, vocab: Resample(name, vocab, ResampleMethod.MAX),
 )
-vocab['per'] = (
+vocab['set_periodicity'] = (
     cat,
     'Changes column periodicity to _periodicity_, then resamples',
     SetPeriodicity,
 )
-vocab['start'] = (cat, 'Changes period start to _start_, then resamples', SetStart)
+vocab['set_start'] = (cat, 'Changes period start to _start_, then resamples', SetStart)
 
 
 _funcs = [
@@ -458,11 +458,9 @@ vocab['rcor'] = (
         name, vocab, rolling_cor, slice_=slice(-2, None)
     ),
 )
-vocab['rewm'] = (
-    'Rolling Window',
-    'Exponentially-weighted average',
-    lambda name, vocab: Rolling(name, vocab, rolling_ewma),
-)
+vocab['ewm_mean'] = vocab.pop('rewm')
+vocab['ewm_var'] = vocab.pop('rewv')
+vocab['ewm_std'] = vocab.pop('rews')
 
 
 cat = 'One-for-one functions'

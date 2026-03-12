@@ -644,6 +644,7 @@ class Evaluator:
             for col, offset, bytes_, r_ in zip(
                 needed_saveds, offsets, p.execute(), resample_ranges
             ):
+                col.values[:] = np.nan
                 if len(bytes_) > 0:
                     data = np.frombuffer(bytes_, col.md.type_.dtype)
                     if r_ is not None:

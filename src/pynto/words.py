@@ -647,7 +647,7 @@ class Reduction(Word):
         self,
         name: str,
         vocab: Vocabulary,
-        operation: Callable[[np.ndarray, np.ndarray], None],
+        operation: Callable[[np.ndarray], np.ndarray],
     ):
         self.operation = operation
         super().__init__(name, vocab, slice(-2, None))
@@ -661,7 +661,7 @@ class Reduction(Word):
         if inputs:
             col = ReductionColumn(
                 inputs[0].header,
-                operation=self.operation,  # type: ignore[arg-type]
+                operation=self.operation,
                 ignore_nans=self.ignore_nans,
                 name=self.name,
             )

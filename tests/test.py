@@ -98,8 +98,8 @@ class TestOtherColumnIndexingWords(unittest.TestCase):
         a = pt.c(*range(5)).hset('a,d,c,d,e').drop['d'].rows[0]
         self.assertTrue(np.array_equal(a, np.array([[0.0, 2.0, 4.0]])))
 
-    def test_filter(self):
-        a = pt.c(*range(5)).hset('a,d,c,d,e').filter['d'].rows[0]
+    def test_keep(self):
+        a = pt.c(*range(5)).hset('a,d,c,d,e').keep['d'].rows[0]
         self.assertTrue(
             np.array_equal(
                 a,
@@ -160,7 +160,7 @@ class TestOperators(unittest.TestCase):
             index=pt.periods.Periodicity.B[:5].to_index(),
             columns=['a', 'b', 'c', 'd', 'e'],
         )
-        a = pt.pandas(df).rank.values[:]
+        a = pt.from_pandas(df).rank.values[:]
         self.assertTrue(np.array_equal(a[2], np.array([3.0, 4.0, 0.0, 1.0, 2.0])))
         self.assertTrue(np.array_equal(a[3], np.array([0.0, 1.0, 2.0, 3.0, 4.0])))
 
@@ -172,13 +172,13 @@ class TestNullary(unittest.TestCase):
         columns=['a', 'b', 'c', 'd', 'e'],
     )
 
-    def test_pandas(self):
-        a = pt.pandas(self.df).values[:]
+    def test_from_pandas(self):
+        a = pt.from_pandas(self.df).values[:]
         self.assertEqual(a.shape[0], 5)
         self.assertEqual(a.shape[1], 5)
 
-    def test_dc(self):
-        a = pt.dc.values[:5]
+    def test_day_count(self):
+        a = pt.day_count.values[:5]
         self.assertTrue(np.array_equal(a.T, np.array([[1.0, 1.0, 3.0, 1.0, 1.0]])))
 
 
@@ -186,6 +186,20 @@ class TestStackManipulation(unittest.TestCase):
     def test_interleave(self):
         a = pt.c(*range(6)).interleave.values[0]
         self.assertTrue(np.array_equal(a, np.array([[0.0, 3.0, 1.0, 4.0, 2.0, 5.0]])))
+
+    def test_id(self):
+        a = pt.c(*range(5)).id.values[0]
+        self.assertTrue(np.array_equal(a, np.array([[0.0, 1.0, 2.0, 3.0, 4.0]])))
+
+    def test_nip(self):
+        # nip keeps only the top column
+        a = pt.c(*range(5)).nip.values[0]
+        self.assertTrue(np.array_equal(a, np.array([[4.0]])))
+
+    def test_swap(self):
+        # swap swaps the top two columns
+        a = pt.c(*range(5)).swap.values[0]
+        self.assertTrue(np.array_equal(a, np.array([[0.0, 1.0, 2.0, 4.0, 3.0]])))
 
 
 class TestCombinators(unittest.TestCase):
@@ -271,6 +285,11 @@ class TestCombinators(unittest.TestCase):
         result = pt.r5.q.c1.add.p.q.inv.p.compose.map.last.values
         self.assertTrue(np.array_equal(result, [1, 0.5, 1 / 3, 1 / 4, 1 / 5]))
 
+    def test_repeat(self):
+        # Applies q(c1.add) three times: 0 + 1 + 1 + 1 = 3
+        result = pt.c0.q(pt.c1.add).repeat(3).rows[0]
+        self.assertEqual(result.iloc[0, -1], 3.0)
+
 
 class TestHeaders(unittest.TestCase):
     def test_hset(self):
@@ -287,6 +306,14 @@ class TestHeaders(unittest.TestCase):
         self.assertEqual(
             pt.r5.halpha.q.happly(lambda h: h.upper()).p.map.columns[1], 'B'
         )
+
+    def test_hsetall(self):
+        # hsetall repeats the given headers cyclically
+        cols = pt.r6.hsetall('x', 'y').columns
+        self.assertEqual(cols[0], 'x')
+        self.assertEqual(cols[1], 'y')
+        self.assertEqual(cols[2], 'x')
+        self.assertEqual(cols[4], 'x')
 
 
 class TestDataCleanup(unittest.TestCase):
@@ -329,8 +356,128 @@ class TestDataCleanup(unittest.TestCase):
             .nan.join('1970-01-15')
             .ffill.rows[6:11]
         )
-        result = pt.pandas(df).ffill(leave_end=False).values['1970-01-10':'1970-01-16']
+        result = pt.from_pandas(df).ffill(leave_end=False).values['1970-01-10':'1970-01-16']
         self.assertTrue(np.array_equal(result.T[0], [1.0, 3.0, 3.0, 3.0]))
+
+    def test_fillfirst(self):
+        # fillfirst fills the first row of the evaluated range with the most recent
+        # non-NaN value from the lookback window before the range start.
+        # rows[7:8] starts at Jan 12 (first B day after Jan 10 join boundary).
+        # fillfirst(5) looks back 5 B days and finds Jan 9 = 1.0.
+        result = pt.c1.nan.join('1970-01-10').fillfirst(5).rows[7:8]
+        self.assertEqual(result.iloc[0, 0], 1.0)
+        # Without fillfirst, row 7 (Jan 12) is NaN (past the join point)
+        result_raw = pt.c1.nan.join('1970-01-10').rows[7:8]
+        self.assertTrue(np.isnan(result_raw.iloc[0, 0]))
+
+    def test_sync(self):
+        # sync sets the entire row to NaN when any column has NaN
+        result = pt.c1.nan.join('1970-01-10').c3.sync.values[6:8]
+        # Row 6 (Jan 9): col1=1.0, col2=3.0 — both non-NaN, unchanged
+        self.assertEqual(result[0, 0], 1.0)
+        self.assertEqual(result[0, 1], 3.0)
+        # Row 7 (Jan 12): col1=NaN — entire row becomes NaN
+        self.assertTrue(np.isnan(result[1, 0]))
+        self.assertTrue(np.isnan(result[1, 1]))
+
+    def test_zero_first(self):
+        # zero_first replaces the first (oldest) value with 0, rest unchanged
+        result = pt.c5.zero_first.values[:2]
+        self.assertEqual(result[0, 0], 0.0)
+        self.assertEqual(result[1, 0], 5.0)
+
+    def test_zero_to_na(self):
+        # zero_to_na replaces zeros with NaN
+        result = pt.c0.zero_to_na.values[0]
+        self.assertTrue(np.isnan(result[0, 0]))
+
+
+class TestUnaryOps(unittest.TestCase):
+    def test_lnot(self):
+        self.assertTrue(bool(pt.c0.lnot.values[0][0, 0]))   # not 0 = True
+        self.assertFalse(bool(pt.c1.lnot.values[0][0, 0]))  # not 1 = False
+
+    def test_sign(self):
+        result = pt.c(5).c(-3).c0.sign[:].values[0]
+        self.assertTrue(np.array_equal(result, [[1.0, -1.0, 0.0]]))
+
+    def test_expm1(self):
+        # exp(0) - 1 = 0
+        result = pt.c0.expm1.values[0]
+        self.assertAlmostEqual(result[0, 0], 0.0)
+
+    def test_log1p(self):
+        # ln(1 + 0) = 0
+        result = pt.c0.log1p.values[0]
+        self.assertAlmostEqual(result[0, 0], 0.0)
+
+    def test_inc(self):
+        result = pt.c5.inc.values[0]
+        self.assertEqual(result[0, 0], 6.0)
+
+    def test_dec(self):
+        result = pt.c5.dec.values[0]
+        self.assertEqual(result[0, 0], 4.0)
+
+
+class TestNanIgnoring(unittest.TestCase):
+    def test_nadd(self):
+        # add[:] with any NaN in row → NaN output
+        add_result = pt.c1.nan.add[:].values[0]
+        self.assertTrue(np.isnan(add_result[0, 0]))
+        # nadd[:] ignores NaN — only outputs NaN when ALL inputs are NaN
+        nadd_result = pt.c1.nan.nadd[:].values[0]
+        self.assertEqual(nadd_result[0, 0], 1.0)
+
+
+class TestReverseCumulative(unittest.TestCase):
+    def test_rcadd(self):
+        # Reverse cumulative sum of constant 1: each row = number of remaining periods
+        result = pt.c1.rcadd.values[-5:]
+        self.assertEqual(result[0, 0], 5.0)   # oldest of last 5 has 5 remaining
+        self.assertEqual(result[-1, 0], 1.0)  # most recent has only itself
+
+
+class TestRollingSpecial(unittest.TestCase):
+    # 20 rows of hardcoded random data (two columns x, y).
+    # Expected values were derived by running rolling_cov / rolling_cor / rolling_ewma
+    # on the same 7-row window that pynto uses (lookback = max(5, int(5*1.25)) = 6).
+    DATA = np.array([
+        [ 0.304717, -1.039984], [ 0.750451,  0.940565], [-1.951035, -1.302180],
+        [ 0.127840, -0.316243], [-0.016801, -0.853044], [ 0.879398,  0.777792],
+        [ 0.066031,  1.127241], [ 0.467509, -0.859292], [ 0.368751, -0.958883],
+        [ 0.878450, -0.049926], [-0.184862, -0.680930], [ 1.222541, -0.154529],
+        [-0.428328, -0.352134], [ 0.532309,  0.365444], [ 0.412733,  0.430821],
+        [ 2.141648, -0.406415], [-0.512243, -0.813773], [ 0.615979,  1.128972],
+        [-0.113947, -0.840156], [-0.824481,  0.650593],
+    ])
+    WINDOW = 5
+    # Expected outputs at the last row, computed with rolling_cov/cor/ewma on the
+    # 7-row lookback window (rows 13..19):
+    COV_EXPECTED = -0.025080091449840018
+    COR_EXPECTED = -0.034949284471091864
+    EWM_EXPECTED = -0.05362102194787367
+
+    def _df(self, cols=None):
+        idx = pt.periods.Periodicity.B[:20].to_index()
+        d = self.DATA if cols is None else self.DATA[:, cols]
+        c = ['x', 'y'] if cols is None else [['x', 'y'][i] for i in cols]
+        return pd.DataFrame(d, columns=c, index=idx)
+
+    def test_rcov(self):
+        last = self._df().index[-1]
+        result = pt.from_pandas(self._df()).rcov(self.WINDOW).values[last]
+        self.assertAlmostEqual(result[0, 0], self.COV_EXPECTED, places=10)
+
+    def test_rcor(self):
+        last = self._df().index[-1]
+        result = pt.from_pandas(self._df()).rcor(self.WINDOW).values[last]
+        self.assertAlmostEqual(result[0, 0], self.COR_EXPECTED, places=10)
+
+    def test_ewm_mean(self):
+        last = self._df([0]).index[-1]
+        result = pt.from_pandas(self._df([0])).ewm_mean(self.WINDOW).values[last]
+        self.assertAlmostEqual(result[0, 0], self.EWM_EXPECTED, places=10)
 
 
 class TestCornerCases(unittest.TestCase):
@@ -338,7 +485,7 @@ class TestCornerCases(unittest.TestCase):
         result = (
             pt.c1.c2.neg[:]
             .hset('a,b')
-            .radd.roll.cadd.start('2025-01-01')
+            .radd.roll.cadd.set_start('2025-01-01')
             .values['2025-05-14']
         )
         self.assertTrue(np.array_equal(result[-1], [-4.0, -96.0], equal_nan=True))
@@ -347,7 +494,7 @@ class TestCornerCases(unittest.TestCase):
         result = (
             pt.c1.c2.neg[:]
             .hset('a,b')
-            .radd.roll.cadd.start('2025-01-01')
+            .radd.roll.cadd.set_start('2025-01-01')
             .rank.drop.values['2025-05-14']
         )
         self.assertEqual(result[0, 0], 1.0)
@@ -486,6 +633,86 @@ class MultiIndexFrameTest(DbTest):
         )
         f = pt.db['test']
         f.loc['2019-01-07'].shape == (5, 3)
+
+
+class TestResample(DbTest):
+    # resample_* methods act on saved (Redis) columns when the stored periodicity
+    # differs from the requested output periodicity.
+    #
+    # Dataset: Jan + Feb 1970, B-frequency.
+    #   Jan (22 B days): values 1..21 for Jan1..Jan29, NaN for Jan30 (last B day).
+    #   Feb (20 B days): values 1..20 for all Feb days (no NaNs).
+    KEY = 'resample_test'
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        jan_idx = pt.periods.Periodicity.B[:22].to_index()   # Jan 1 – Jan 30
+        feb_idx = pt.periods.Periodicity.B[22:42].to_index() # Feb 2 – Feb 27
+        jan_vals = list(range(1, 22)) + [np.nan]  # 1..21, then NaN on Jan 30
+        feb_vals = list(range(1, 21))              # 1..20
+        idx = jan_idx.append(feb_idx)
+        vals = jan_vals + feb_vals
+        s = pd.Series(vals, index=idx, name='v', dtype='float64')
+        pt.db[cls.KEY] = s
+
+    @classmethod
+    def tearDownClass(cls):
+        del pt.db[cls.KEY]
+
+    def test_per_last(self):
+        # LAST fills forward: Jan 30 is NaN so the filled value is Jan 29 = 21.
+        result = pt.load(self.KEY).set_periodicity('M').rows[0:1:'M']
+        self.assertEqual(result.iloc[0, 0], 21.0)
+
+    def test_per_lastnofill(self):
+        # LAST_NOFILL: takes the raw value at Jan 30 = NaN (no forward fill).
+        result = pt.load(self.KEY).resample_lastnofill.set_periodicity('M').rows[0:1:'M']
+        self.assertTrue(np.isnan(result.iloc[0, 0]))
+
+    def test_per_sum(self):
+        # Feb values 1..20: sum = 210.
+        # (First-period SUM uses from_values[last_B_of_Jan] = NaN, so test Feb.)
+        result = pt.load(self.KEY).resample_sum.set_periodicity('M').rows[1:2:'M']
+        self.assertEqual(result.iloc[0, 0], 210.0)
+
+    def test_per_avg(self):
+        # Feb mean of 1..20 = 10.5.
+        result = pt.load(self.KEY).resample_avg.set_periodicity('M').rows[1:2:'M']
+        self.assertAlmostEqual(result.iloc[0, 0], 10.5)
+
+    def test_per_first(self):
+        # First B day of Feb = 1.
+        result = pt.load(self.KEY).resample_first.set_periodicity('M').rows[1:2:'M']
+        self.assertEqual(result.iloc[0, 0], 1.0)
+
+    def test_per_min(self):
+        # Feb min of 1..20 = 1.
+        result = pt.load(self.KEY).resample_min.set_periodicity('M').rows[1:2:'M']
+        self.assertEqual(result.iloc[0, 0], 1.0)
+
+    def test_per_max(self):
+        # Feb max of 1..20 = 20. Request both months so the B range covers
+        # only the correct data for each month.
+        result = pt.load(self.KEY).resample_max.set_periodicity('M').rows[0:2:'M']
+        self.assertEqual(result.iloc[1, 0], 20.0)
+
+
+class TestSaved(DbTest):
+    KEY = 'saved_word_test'
+
+    def setUp(self):
+        pt.db[self.KEY] = pt.r5.halpha.rows[:5]
+
+    def tearDown(self):
+        del pt.db[self.KEY]
+
+    def test_load(self):
+        # load() pushes columns from the DB onto the stack
+        result = pt.load(self.KEY).rows[:5]
+        self.assertEqual(result.shape, (5, 5))
+        self.assertEqual(result.columns[0], 'a')
+        self.assertEqual(result.iloc[-1, -1], 4.0)
 
 
 if __name__ == '__main__':

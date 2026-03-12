@@ -136,21 +136,21 @@ Word | Default Selector | Parameters | Description
 
 c|[-1:]|_values_|Pushes constant columns for each of _values_
 
-dc|[-1:]||Pushes a column with the number of days in the period
+day_count|[-1:]||Pushes a column with the number of days in the period
+
+from_pandas|[:]|_pandas_, _round__|Pushes columns from Pandas DataFrame or Series _pandas_
+
+load|[-1:]||Pushes columns saved to internal DB as _key_
 
 nan|[-1:]|_values_|Pushes a constant nan-valued column
 
-pandas|[:]|_pandas_, _round__|Pushes columns from Pandas DataFrame or Series _pandas_
-
-po|[-1:]||Pushes a column with the period ordinal
+period_ordinal|[-1:]||Pushes a column with the period ordinal
 
 r|[-1:]|_n_|Pushes constant columns for each whole number from 0 to _n_ - 1
 
 randn|[-1:]||Pushes a column with values from a random normal distribution
 
-saved|[-1:]||Pushes columns saved to internal DB as _key_
-
-ts|[-1:]||Pushes a column with the timestamp of the end of the period
+timestamp|[-1:]||Pushes a column with the timestamp of the end of the period
 
 ### Stack Manipulation
 
@@ -161,13 +161,13 @@ drop|[-1:]||Removes selected columns
 
 dup|[-1:]||Duplicates columns
 
-filter|[:]||Removes non-selected columns
-
 hsort|[:]||Sorts columns by header
 
 id|[:]||Identity/no-op
 
 interleave|[:]|_parts_|Divides columns in _parts_ groups and interleaves the groups
+
+keep|[:]||Removes non-selected columns
 
 nip|[-1:]||Removes non-selected columns, defaulting selection to top
 
@@ -254,8 +254,6 @@ zero_to_na|[-1:]||Changes zeros to nans
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
 
-per|[-1:]|_periodicity_|Changes column periodicity to _periodicity_, then resamples
-
 resample_avg|[:]||Sets periodicity resampling method to avg
 
 resample_first|[:]||Sets periodicity resampling method to first
@@ -272,7 +270,9 @@ resample_min|[:]||Sets periodicity resampling method to min
 
 resample_sum|[:]||Sets periodicity resampling method to sum
 
-start|[-1:]|_start_|Changes period start to _start_, then resamples
+set_periodicity|[-1:]|_periodicity_|Changes column periodicity to _periodicity_, then resamples
+
+set_start|[-1:]|_start_|Changes period start to _start_, then resamples
 
 ### Row-wise Reduction
 
@@ -337,6 +337,12 @@ nvar|[-2:]|_ignore_nans_|Variance
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
 
+ewm_mean|[-1:]|_window_|Exponentially-weighted moving average
+
+ewm_std|[-1:]|_window_|Exponentially-weighted standard deviation
+
+ewm_var|[-1:]|_window_|Exponentially-weighted variance
+
 radd|[-1:]|_window_|Addition
 
 ravg|[-1:]|_window_|Arithmetic average
@@ -346,12 +352,6 @@ rcor|[-2:]|_window_|Correlation
 rcov|[-2:]|_window_|Covariance
 
 rdif|[-1:]|_window_|Lagged difference
-
-rewm|[-1:]|_window_|Exponentially-weighted average
-
-rews|[-1:]|_window_|Exponentially-weighted standard deviation
-
-rewv|[-1:]|_window_|Exponentially-weighted variance
 
 rlag|[-1:]|_window_|Lag
 

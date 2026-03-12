@@ -167,13 +167,16 @@ class Db:
     def connection(self):
         return redis.Redis(connection_pool=self._pool)
 
-    def split_key(self, key: str) -> tuple[str, str, str]:
+    def split_key(self, key: str) -> tuple[str, str | None, str | None]:
         pattern = r'([^#]+)(?:#([^$]*))?(?:\$(.*))?'
         m = re.match(pattern, key)
         assert m is not None
-        return m.groups()  # type: ignore[return-value]
+        frame: str = m.group(1)
+        column: str | None = m.group(2)
+        row: str | None = m.group(3)
+        return frame, column, row
 
-    def make_safe(self, frame: str, column: str, row: str) -> str:
+    def make_safe(self, frame: str, column: str | None, row: str | None) -> str:
         key = struct.pack('<256s', frame.encode())
         if column:
             key += struct.pack('<128s', column.encode())

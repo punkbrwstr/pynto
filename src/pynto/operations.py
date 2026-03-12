@@ -70,7 +70,7 @@ def expanding_ret(x: np.ndarray) -> np.ndarray:
     cols = np.arange(x.shape[1])
     first = np.where(has_value, x[first_row_idx, cols], np.nan)
     out = np.full(x.shape, np.nan)
-    np.divide(x, first, out=out, where=~np.isnan(first))
+    np.divide(x, first, out=out, where=~np.isnan(first) & (first != 0))
     return out - 1
 
 

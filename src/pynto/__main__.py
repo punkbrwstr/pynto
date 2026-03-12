@@ -19,13 +19,13 @@ def print_vocab():
             print('### ' + cat + '\n')
             print(header)
             this_cat = cat
-        word = factory(name)
+        word = factory(name, vocab)
         s = word.slice_
         params = ', '.join(
             [
                 f'_{c}_'
                 for c in word.__call__.__code__.co_varnames
-                if c not in ['self', 'kwargs', 'key', 'value']
+                if c not in ['self', 'kwargs', 'key', 'value', 'args', 'locals_dict']
             ]
         )
         sel = f'[{s.start if s.start else ""}:{s.stop if s.stop else ""}]'
