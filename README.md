@@ -133,324 +133,194 @@ pynto has built-in database functionality that lets you save DataFrames and Seri
 
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
-
 c|[-1:]|_values_|Pushes constant columns for each of _values_
-
 day_count|[-1:]||Pushes a column with the number of days in the period
-
 from_pandas|[:]|_pandas_, _round__|Pushes columns from Pandas DataFrame or Series _pandas_
-
 load|[-1:]||Pushes columns of a DataFrame saved to internal DB as _key_
-
 nan|[-1:]|_values_|Pushes a constant nan-valued column
-
 period_ordinal|[-1:]||Pushes a column with the period ordinal
-
 r|[-1:]|_n_|Pushes constant columns for each whole number from 0 to _n_ - 1
-
 randn|[-1:]||Pushes a column with values from a random normal distribution
-
 timestamp|[-1:]||Pushes a column with the timestamp of the end of the period
 
 ### Stack Manipulation
 
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
-
 drop|[-1:]||Removes selected columns
-
 dup|[-1:]||Duplicates columns
-
 hsort|[:]||Sorts columns by header
-
 id|[:]||Identity/no-op
-
 interleave|[:]|_parts_|Divides columns in _parts_ groups and interleaves the groups
-
 keep|[:]||Removes non-selected columns
-
 nip|[-1:]||Removes non-selected columns, defaulting selection to top
-
 pull|[:]||Brings selected columns to the top
-
 rev|[:]||Reverses the order of selected columns
-
 roll|[:]||Permutes selected columns
-
 swap|[-2:]||Swaps top and bottom selected columns
 
 ### Quotation
 
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
-
 q|[-1:]|_quoted_, _this_|Wraps the following words until *p* as a quotation, or wraps _quoted_ expression as a quotation
 
 ### Header manipulation
 
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
-
 halpha|[:]||Set headers to alphabetical values
-
 happly|[:]|_header_func_|Apply _header_func_ to headers_
-
 hformat|[:]|_format_spec_|Apply _format_spec_ to headers
-
 hreplace|[:]|_old_, _new_|Replace _old_ with _new_ in headers
-
 hset|[:]|_headers_|Set headers to _*headers_ 
-
 hsetall|[:]|_headers_|Set headers to _*headers_ repeating, if necessary
 
 ### Combinators
 
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
-
 call|[:]||Applies quotation
-
 cleave|[:]|_num_quotations_|Applies all preceding quotations
-
 compose|[:]|_num_quotations_|Combines quotations
-
 hmap|[:]||Applies quotation to stacks created grouping columns by header
-
 ifexists|[:]|_count_|Applies quotation if stack has at least _count_ columns
-
 ifexistselse|[:]|_count_|Applies top quotation if stack has at least _count_ columns, otherwise applies second quotation
-
 ifheaders|[:]|_predicate_|Applies top quotation if list of column headers fulfills _predicate_
-
 ifheaderselse|[:]|_predicate_|Applies quotation if list of column headers fulfills _predicate_, otherwise applies second quotation
-
 map|[:]|_every_|Applies quotation in groups of _every_
-
 partial|[-1:]|_quoted_, _this_|Pushes stack columns to the front of quotation
-
 repeat|[:]|_times_|Applies quotation _times_ times
 
 ### Data cleanup
 
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
-
 ffill|[:]|_lookback_, _leave_end_|Fills nans with previous values, looking back _lookback_ before range and leaving trailing nans unless not _leave_end_
-
 fill|[:]||Fills nans with _value_ 
-
 fillfirst|[-1:]|_lookback_|Fills first row with previous non-nan value, looking back _lookback_  before range
-
 join|[-2:]|_date_|Joins two columns at _date_
-
 sync|[:]||Align available data by setting all values to NaN when any values is NaN
-
 zero_first|[-1:]||Changes first value to zero
-
 zero_to_na|[-1:]||Changes zeros to nans
 
 ### Resample methods
 
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
-
 resample_avg|[:]||Sets periodicity resampling method to avg
-
 resample_first|[:]||Sets periodicity resampling method to first
-
 resample_firstnofill|[:]||Sets periodicity resampling method to first
-
 resample_last|[:]||Sets periodicity resampling method to last
-
 resample_lastnofill|[:]||Sets periodicity resampling method to last with no fill
-
 resample_max|[:]||Sets periodicity resampling method to max
-
 resample_min|[:]||Sets periodicity resampling method to min
-
 resample_sum|[:]||Sets periodicity resampling method to sum
-
 set_periodicity|[-1:]|_periodicity_|Changes column periodicity to _periodicity_, then resamples
-
 set_start|[-1:]|_start_|Changes period start to _start_, then resamples
 
 ### Row-wise Reduction
 
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
-
 add|[-2:]|_ignore_nans_|Addition
-
 avg|[-2:]|_ignore_nans_|Arithmetic average
-
 div|[-2:]|_ignore_nans_|Division
-
 max|[-2:]|_ignore_nans_|Maximum
-
 med|[-2:]|_ignore_nans_|Median
-
 min|[-2:]|_ignore_nans_|Minimum
-
 mod|[-2:]|_ignore_nans_|Modulo
-
 mul|[-2:]|_ignore_nans_|Multiplication
-
 pow|[-2:]|_ignore_nans_|Power
-
 std|[-2:]|_ignore_nans_|Standard deviation
-
 sub|[-2:]|_ignore_nans_|Subtraction
-
 var|[-2:]|_ignore_nans_|Variance
 
 ### Row-wise Reduction Ignoring NaNs
 
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
-
 nadd|[-2:]|_ignore_nans_|Addition
-
 navg|[-2:]|_ignore_nans_|Arithmetic average
-
 ndiv|[-2:]|_ignore_nans_|Division
-
 nmax|[-2:]|_ignore_nans_|Maximum
-
 nmed|[-2:]|_ignore_nans_|Median
-
 nmin|[-2:]|_ignore_nans_|Minimum
-
 nmod|[-2:]|_ignore_nans_|Modulo
-
 nmul|[-2:]|_ignore_nans_|Multiplication
-
 npow|[-2:]|_ignore_nans_|Power
-
 nstd|[-2:]|_ignore_nans_|Standard deviation
-
 nsub|[-2:]|_ignore_nans_|Subtraction
-
 nvar|[-2:]|_ignore_nans_|Variance
 
 ### Rolling Window
 
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
-
 ewm_mean|[-1:]|_window_|Exponentially-weighted moving average
-
 ewm_std|[-1:]|_window_|Exponentially-weighted standard deviation
-
 ewm_var|[-1:]|_window_|Exponentially-weighted variance
-
 radd|[-1:]|_window_|Addition
-
 ravg|[-1:]|_window_|Arithmetic average
-
 rcor|[-2:]|_window_|Correlation
-
 rcov|[-2:]|_window_|Covariance
-
 rdif|[-1:]|_window_|Lagged difference
-
 rlag|[-1:]|_window_|Lag
-
 rmax|[-1:]|_window_|Maximum
-
 rmed|[-1:]|_window_|Median
-
 rmin|[-1:]|_window_|Minimum
-
 rret|[-1:]|_window_|Lagged return
-
 rstd|[-1:]|_window_|Standard deviation
-
 rvar|[-1:]|_window_|Variance
-
 rzsc|[-1:]|_window_|Z-score
 
 ### Cumulative
 
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
-
 cadd|[-1:]||Addition
-
 cavg|[-1:]||Arithmetic average
-
 cdif|[-1:]||Lagged difference
-
 clag|[-1:]||Lag
-
 cmax|[-1:]||Maximum
-
 cmin|[-1:]||Minimum
-
 cmul|[-1:]||Multiplication
-
 cret|[-1:]||Lagged return
-
 cstd|[-1:]||Standard deviation
-
 csub|[-1:]||Subtraction
-
 cvar|[-1:]||Variance
 
 ### Reverse Cumulative
 
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
-
 rcadd|[-1:]||Addition
-
 rcavg|[-1:]||Arithmetic average
-
 rcdif|[-1:]||Lagged difference
-
 rclag|[-1:]||Lag
-
 rcmax|[-1:]||Maximum
-
 rcmin|[-1:]||Minimum
-
 rcmul|[-1:]||Multiplication
-
 rcret|[-1:]||Lagged return
-
 rcstd|[-1:]||Standard deviation
-
 rcsub|[-1:]||Subtraction
-
 rcvar|[-1:]||Variance
 
 ### One-for-one functions
 
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
-
 abs|[-1:]||Absolute value
-
 dec|[-1:]||Decrement
-
 exp|[-1:]||Exponential
-
 expm1|[-1:]||Exponential minus one
-
 inc|[-1:]||Increment
-
 inv|[-1:]||Multiplicative inverse
-
 lnot|[-1:]||Logical not
-
 log|[-1:]||Natural log
-
 log1p|[-1:]||Natural log of increment
-
 neg|[-1:]||Additive inverse
-
 rank|[:]||Row-wise rank
-
 sign|[-1:]||Sign
-
 sqrt|[-1:]||Square root
 

@@ -16,8 +16,8 @@ def print_vocab():
         vocab.items(), key=lambda i: cat_order[i[1][0]] + i[0]
     ):
         if cat != this_cat:
-            print('### ' + cat + '\n')
-            print(header)
+            print('\n### ' + cat + '\n')
+            print(header, end='')
             this_cat = cat
         word = factory(name, vocab)
         s = word.slice_
@@ -29,7 +29,7 @@ def print_vocab():
             ]
         )
         sel = f'[{s.start if s.start else ""}:{s.stop if s.stop else ""}]'
-        print(f'{name}|{sel}|{params}|{desc}\n')
+        print(f'{name}|{sel}|{params}|{desc}')
 
 
 if __name__ == '__main__':
