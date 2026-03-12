@@ -16,7 +16,7 @@ Here's a program to calculate deviations from moving average for each column in 
 ```
 >>> import pynto as pt 
 >>> ma_dev = (                        # create a pynto expression by concatenating words to
->>>     pt.saved('stock_prices')      # append columns to stack from the build-in database
+>>>     pt.load('stock_prices')      # append columns to stack from the build-in database
 >>>     .q                            # start a quotation 
 >>>         .dup                      # push a copy of the top (leftmost) column of the stack
 >>>         .ravg(20)                 # calculate 20-period moving average
@@ -119,7 +119,7 @@ pynto has built-in database functionality that lets you save DataFrames and Seri
 
 ```
 >>> pt.db['my_df'] = expr.rows['2021-06-01':'2021-06-03']
->>> pt.saved('my_df').rows[:]
+>>> pt.load('my_df').rows[:]
               constant  constant
 2021-06-01      81.0     100.0
 2021-06-02      81.0     100.0
@@ -140,7 +140,7 @@ day_count|[-1:]||Pushes a column with the number of days in the period
 
 from_pandas|[:]|_pandas_, _round__|Pushes columns from Pandas DataFrame or Series _pandas_
 
-load|[-1:]||Pushes columns saved to internal DB as _key_
+load|[-1:]||Pushes columns of a DataFrame saved to internal DB as _key_
 
 nan|[-1:]|_values_|Pushes a constant nan-valued column
 
