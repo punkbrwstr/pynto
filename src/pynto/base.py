@@ -41,7 +41,7 @@ def toggle_debug():
 def debug_col_repr(c: Column, n: int) -> str:
     return (
         f'{" " * n}c{c.id_}/s{str(id(c.shared))[-4:]}'
-        + f' g{str(id(c.group))[-4:]}({",".join([f"c{g.id_}" for g in c.group.members])})'
+        + f' g{str(id(c.group))[-4:]}({",".join([f"s{str(id(s))[-4:]}" for s in c.group.members])})'
         + f'-{c.name} "{c.header}" [{c.range_}]'
     )
 
@@ -90,16 +90,17 @@ class ResampleMethod(Enum):
     FIRST_NOFILL = 8
 
 
-@dataclass
-class ReplicaShared:
+@dataclass(eq=False)
+class Shared:
     ordinal: int = 0
     open_inputs: list[Column] = field(default_factory=list)
+    columns: set[Column] = field(default_factory=set)
 
 
 @dataclass
 class GroupShared:
     allow_drops: bool = True
-    members: dict[Column, None] = field(default_factory=dict)
+    members: dict[Shared, None] = field(default_factory=dict)
     outputs: dict[tuple[Range, ResampleMethod], None | np.ndarray] = field(
         default_factory=dict
     )
@@ -110,7 +111,7 @@ class GroupShared:
 class Column:
     header: str = ''
     range_: Range | None = None
-    shared: ReplicaShared = field(default_factory=ReplicaShared)
+    shared: Shared = field(default_factory=Shared)
     group: GroupShared = field(default_factory=GroupShared)
     resampler: ResampleMethod = ResampleMethod.LAST
     id_: int = field(default_factory=_IDs.get_next)
@@ -118,8 +119,9 @@ class Column:
     _is_copy: bool = False
 
     def __post_init__(self):
+        self.shared.columns.add(self)
         if not self._is_copy:
-            self.group.members[self] = None
+            self.group.members[self.shared] = None
             if not self.name:
                 self.name = self.__class__.__name__
 
@@ -166,9 +168,10 @@ class Column:
         logger.debug(f'   c{self.id_} -> {range_}')
         if range_ not in self.group.closed_inputs:
             inputs = []
-            for i, col in enumerate(self.group.members.keys()):
-                inputs.extend([copy.copy(in_) for in_ in col.shared.open_inputs])
-                col.shared.ordinal = i
+            for i, shared in enumerate(self.group.members.keys()):
+                inputs.extend([copy.copy(in_) for in_ in shared.open_inputs])
+                for col in shared.columns:
+                    col.shared.ordinal = i
             self.set_input_range(inputs)
             self.group.closed_inputs[(range_)] = inputs
 
@@ -191,8 +194,9 @@ class Column:
         )
 
     def drop(self):
-        if self.group.allow_drops:
-            del self.group.members[self]
+        self.shared.columns.remove(self)
+        if self.group.allow_drops and len(self.shared.columns) == 0:
+            del self.group.members[self.shared]
 
     def __copy__(self):
         id_ = _IDs.get_next()
@@ -366,7 +370,7 @@ class Word:
             if current.inverse_selection:
                 selected = list(set(range(len(stack))) - set(selected))
             logger.debug(
-                f'{" " * (prefix + 6)}selected=[{",".join([f"#{stack[i].id_}" for i in selected])}]'
+                f'{" " * (prefix + 6)}selected=[{",".join([f"c{stack[i].id_}" for i in selected])}]'
             )
             current_stack = []
             to_delete = set()

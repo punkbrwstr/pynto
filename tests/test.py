@@ -16,46 +16,46 @@ def get_test_data():
 class TestRowIndexing(unittest.TestCase):
     def test_int_index(self):
         with self.subTest('Positive index'):
-            self.assertEqual(pt.c(*range(5)).rows[0].shape[0], 1)
+            self.assertEqual(pt.r5.rows[0].shape[0], 1)
         with self.subTest('Negative index'):
-            self.assertEqual(pt.c(*range(5)).rows[-1].shape[0], 1)
+            self.assertEqual(pt.r5.rows[-1].shape[0], 1)
         with self.subTest('Date index'):
-            self.assertEqual(pt.c(*range(5)).rows['2024-05-02'].shape[0], 1)
+            self.assertEqual(pt.r5.rows['2024-05-02'].shape[0], 1)
         with self.subTest('Int range'):
-            self.assertEqual(pt.c(*range(5)).rows[2:5].shape[0], 3)
+            self.assertEqual(pt.r5.rows[2:5].shape[0], 3)
         with self.subTest('Int range neg'):
-            self.assertEqual(pt.c(*range(5)).rows[-5:-2].shape[0], 3)
+            self.assertEqual(pt.r5.rows[-5:-2].shape[0], 3)
         with self.subTest('Int range open start'):
-            self.assertEqual(pt.c(*range(5)).rows[:5].shape[0], 5)
+            self.assertEqual(pt.r5.rows[:5].shape[0], 5)
         with self.subTest('Int range open stop'):
-            self.assertEqual(pt.c(*range(5)).rows[-5:].shape[0], 5)
+            self.assertEqual(pt.r5.rows[-5:].shape[0], 5)
         with self.subTest('Date range'):
             self.assertEqual(
-                pt.c(*range(5)).rows['2023-04-01':'2023-04-05'].shape[0], 2
+                pt.r5.rows['2023-04-01':'2023-04-05'].shape[0], 2
             )
         with self.subTest('Date range pre epoque'):
             self.assertEqual(
-                pt.c(*range(5)).rows['1969-12-15':'1970-01-08'].shape[0], 18
+                pt.r5.rows['1969-12-15':'1970-01-08'].shape[0], 18
             )
         with self.subTest('Date range open'):
-            self.assertEqual(pt.c(*range(5)).rows[:'1970-01-08'].shape[0], 5)
+            self.assertEqual(pt.r5.rows[:'1970-01-08'].shape[0], 5)
         with self.subTest('Specify per'):
             self.assertEqual(
-                pt.c(*range(5)).rows[:1:'M'].index[0].date(), datetime.date(1970, 1, 30)
+                pt.r5.rows[:1:'M'].index[0].date(), datetime.date(1970, 1, 30)
             )
 
 
 class TestColumnIndexing(unittest.TestCase):
     def test_int_index(self):
-        a = pt.c(*range(5)).pull[0].values[0]
+        a = pt.r5.pull[0].values[0]
         self.assertTrue(np.array_equal(a, np.array([[1.0, 2.0, 3.0, 4.0, 0.0]])))
 
     def test_int_slice(self):
-        a = pt.c(*range(5)).pull[0:2].values[0]
+        a = pt.r5.pull[0:2].values[0]
         self.assertTrue(np.array_equal(a, np.array([[2.0, 3.0, 4.0, 0.0, 1.0]])))
 
     def test_copy(self):
-        a = pt.c(*range(5)).pull[2:4, True].halpha.neg.rows[0]
+        a = pt.r5.pull[2:4, True].halpha.neg.rows[0]
         self.assertTrue(
             np.array_equal(a.values, np.array([[0.0, 1.0, 2.0, 3.0, 4.0, 2.0, -3.0]]))
         )
@@ -63,23 +63,31 @@ class TestColumnIndexing(unittest.TestCase):
         self.assertEqual(a.columns[-2], 'f')
 
     def test_discard(self):
-        a = pt.c(*range(5)).pull[2:4, False, True].values[0]
+        a = pt.r5.pull[2:4, False, True].values[0]
         self.assertTrue(np.array_equal(a, np.array([[2.0, 3.0]])))
 
+    def test_discard_original(self):
+        a = pt.c1.dup.keep[1].last
+        self.assertEqual(a.values[0],1.)
+
+    def test_discard_copy(self):
+        a = pt.c1.dup.keep[0].last
+        self.assertEqual(a.values[0],1.)
+
     def test_copy_safety(self):
-        a = pt.c(*range(5)).pull[2:4, True].neg.values[0]
+        a = pt.r5.pull[2:4, True].neg.values[0]
         self.assertEqual(a[0, 3], 3.0)
 
     def test_header_filter(self):
-        a = pt.c(*range(5)).hset('a,b,c,d,e').pull['d'].values[0]
+        a = pt.r5.hset('a,b,c,d,e').pull['d'].values[0]
         self.assertEqual(a[0, -1], 3.0)
 
     def test_header_filter_duplicate(self):
-        a = pt.c(*range(5)).hset('a,d,c,d,e').pull[['d'], False, True].rows[-1]
+        a = pt.r5.hset('a,d,c,d,e').pull[['d'], False, True].rows[-1]
         self.assertTrue(np.array_equal(a, np.array([[1.0, 3.0]])))
 
     def test_multiple_header_filter(self):
-        a = pt.c(*range(5)).hset('a,b,c,d,e').pull[['c', 'd'], True].values[0]
+        a = pt.r5.hset('a,b,c,d,e').pull[['c', 'd'], True].values[0]
         self.assertTrue(
             np.array_equal(a, np.array([[0.0, 1.0, 2.0, 3.0, 4.0, 2.0, 3.0]]))
         )
@@ -95,11 +103,11 @@ class TestColumnIndexing(unittest.TestCase):
 
 class TestOtherColumnIndexingWords(unittest.TestCase):
     def test_drop(self):
-        a = pt.c(*range(5)).hset('a,d,c,d,e').drop['d'].rows[0]
+        a = pt.r5.hset('a,d,c,d,e').drop['d'].rows[0]
         self.assertTrue(np.array_equal(a, np.array([[0.0, 2.0, 4.0]])))
 
     def test_keep(self):
-        a = pt.c(*range(5)).hset('a,d,c,d,e').keep['d'].rows[0]
+        a = pt.r5.hset('a,d,c,d,e').keep['d'].rows[0]
         self.assertTrue(
             np.array_equal(
                 a,
@@ -115,7 +123,7 @@ class TestOtherColumnIndexingWords(unittest.TestCase):
         )
 
     def test_dup(self):
-        a = pt.c(*range(5)).hset('a,d,c,d,e').dup['d'].rows[0]
+        a = pt.r5.hset('a,d,c,d,e').dup['d'].rows[0]
         self.assertTrue(
             np.array_equal(a, np.array([[0.0, 1.0, 2.0, 3, 4.0, 1.0, 3.0]]))
         )
@@ -123,15 +131,15 @@ class TestOtherColumnIndexingWords(unittest.TestCase):
 
 class TestOperators(unittest.TestCase):
     def test_binary_add(self):
-        a = pt.c(*range(5)).add.values[0]
+        a = pt.r5.add.values[0]
         self.assertTrue(np.array_equal(a, np.array([[0.0, 1.0, 2.0, 7.0]])))
 
     def test_cross_add(self):
-        a = pt.c(*range(5)).add[:].values[0]
+        a = pt.r5.add[:].values[0]
         self.assertTrue(np.array_equal(a, np.array([[10.0]])))
 
     def test_rolling_add(self):
-        a = pt.c(*range(5)).radd(3).values[0]
+        a = pt.r5.radd(3).values[0]
         self.assertTrue(np.array_equal(a, np.array([[0.0, 1.0, 2.0, 3.0, 12.0]])))
 
     def test_rolling_std(self):
@@ -143,7 +151,7 @@ class TestOperators(unittest.TestCase):
         self.assertTrue(abs(a[-1] - 1) < 0.01)
 
     def test_accumulate_add(self):
-        a = pt.c(*range(5)).cadd.values[-5:]
+        a = pt.r5.cadd.values[-5:]
         self.assertTrue(np.array_equal(a[-1], np.array([0.0, 1.0, 2.0, 3.0, 20.0])))
 
     def test_unary(self):
@@ -184,21 +192,21 @@ class TestNullary(unittest.TestCase):
 
 class TestStackManipulation(unittest.TestCase):
     def test_interleave(self):
-        a = pt.c(*range(6)).interleave.values[0]
+        a = pt.r6.interleave.values[0]
         self.assertTrue(np.array_equal(a, np.array([[0.0, 3.0, 1.0, 4.0, 2.0, 5.0]])))
 
     def test_id(self):
-        a = pt.c(*range(5)).id.values[0]
+        a = pt.r5.id.values[0]
         self.assertTrue(np.array_equal(a, np.array([[0.0, 1.0, 2.0, 3.0, 4.0]])))
 
     def test_nip(self):
         # nip keeps only the top column
-        a = pt.c(*range(5)).nip.values[0]
+        a = pt.r5.nip.values[0]
         self.assertTrue(np.array_equal(a, np.array([[4.0]])))
 
     def test_swap(self):
         # swap swaps the top two columns
-        a = pt.c(*range(5)).swap.values[0]
+        a = pt.r5.swap.values[0]
         self.assertTrue(np.array_equal(a, np.array([[0.0, 1.0, 2.0, 4.0, 3.0]])))
 
 
@@ -212,13 +220,13 @@ class TestCombinators(unittest.TestCase):
         self.assertEqual(result, 11)
 
     def test_nested_quotes(self):
-        result = pt.c(*range(9)).q.q.c100.sub.p.call.p.map(every=3).rows[-1]
+        result = pt.r9.q.q.c100.sub.p.call.p.map(every=3).rows[-1]
         self.assertTrue(
             np.array_equal(result.values[-1], [0, 1.0, -98, 3, 4, -95, 6, 7, -92])
         )
 
     def test_nested_mix(self):
-        result = pt.c(*range(9)).q.q(pt.c100.sub).call.p.map(every=3).rows[-1]
+        result = pt.r9.q.q(pt.c100.sub).call.p.map(every=3).rows[-1]
         self.assertTrue(
             np.array_equal(result.values[-1], [0, 1.0, -98, 3, 4, -95, 6, 7, -92])
         )

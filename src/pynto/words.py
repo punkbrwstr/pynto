@@ -490,7 +490,7 @@ class FillFirstColumn(Column):
 
     def operate(self) -> None:
         data = self.input_values
-        out = self.values
+        out = self.group_values
         first_part = data[: -self.lookback + 1]
         row_ok = ~np.isnan(first_part).any(axis=1)
         good_idxs = np.flatnonzero(row_ok)
