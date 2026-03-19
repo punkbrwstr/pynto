@@ -165,7 +165,8 @@ class Column:
 
     def set_range(self, range_: Range) -> None:
         self.range_ = range_
-        logger.debug(f'   c{self.id_} -> {range_}')
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f'   c{self.id_} -> {range_}')
         if range_ not in self.group.closed_inputs:
             inputs = []
             for i, shared in enumerate(self.group.members.keys()):
@@ -200,7 +201,8 @@ class Column:
 
     def __copy__(self):
         id_ = _IDs.get_next()
-        logger.debug(f'*Copying c{self.id_} -> c{id_}')
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f'*Copying c{self.id_} -> c{id_}')
         return replace(self, id_=id_, _is_copy=True)
 
     def __hash__(self):
@@ -357,7 +359,8 @@ class Word:
         while current is not None:
             if not current.called:  # need to set defaults (if any)
                 current()
-            logger.debug(f'{" " * (prefix + 3)}{current} slice {current.slice_}')
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f'{" " * (prefix + 3)}{current} slice {current.slice_}')
             selected = list(range(len(stack))[current.slice_])
             if current.filters:
                 filtered = []
@@ -369,9 +372,10 @@ class Word:
                 selected = filtered
             if current.inverse_selection:
                 selected = list(set(range(len(stack))) - set(selected))
-            logger.debug(
-                f'{" " * (prefix + 6)}selected=[{",".join([f"c{stack[i].id_}" for i in selected])}]'
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    f'{" " * (prefix + 6)}selected=[{",".join([f"c{stack[i].id_}" for i in selected])}]'
+                )
             current_stack = []
             to_delete = set()
             already_selected = set()
@@ -387,22 +391,25 @@ class Word:
             if current.discard_excluded:
                 excluded = set(range(len(stack))) - set(selected)
                 for i in excluded:
-                    logger.debug(
-                        f'{" " * (prefix + 6)}dropping {debug_col_repr(stack[i], 4)}'
-                    )
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            f'{" " * (prefix + 6)}dropping {debug_col_repr(stack[i], 4)}'
+                        )
                     stack[i].drop()  # no longer needed as siblings
                 to_delete.update(excluded)
             for i in sorted(to_delete, reverse=True):
-                logger.debug(
-                    f'{" " * (prefix + 6)}remove from stack {debug_col_repr(stack[i], 4)}'
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        f'{" " * (prefix + 6)}remove from stack {debug_col_repr(stack[i], 4)}'
+                    )
                 del stack[i]
             current.operate(current_stack)
             stack.extend(current_stack)
             current = current.next_
-            logger.debug(
-                f'{" " * (prefix + 3)}stack=[{",".join([f"c{c.id_}" for c in stack])}]'
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    f'{" " * (prefix + 3)}stack=[{",".join([f"c{c.id_}" for c in stack])}]'
+                )
         return stack
 
     @property
@@ -620,7 +627,8 @@ class Evaluator:
             except Exception as e:
                 logger.error(f'Error setting range for {col}')
                 raise e
-        logger.debug(f'Stack\n{debug_stack(stack)}')
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f'Stack\n{debug_stack(stack)}')
         working = stack[:]
         flat: deque[Column] = deque()
         while working:
@@ -662,10 +670,12 @@ class Evaluator:
         while flat:
             col = flat.popleft()
             if col.computed or not col.range_:
-                logger.debug('    skip' + debug_col_repr(col, 1))
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug('    skip' + debug_col_repr(col, 1))
                 continue
             try:
-                logger.debug('    calc' + debug_col_repr(col, 1))
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug('    calc' + debug_col_repr(col, 1))
                 col.compute()
             except Exception as e:
                 raise ValueError(f'Unable to operate {col!r}') from e
