@@ -147,8 +147,8 @@ class PandasColumn(Column):
 
 
 class FromPandas(Word):
-    pandas: pd.DataFrame
-    round_: bool
+    def __init__(self, name: str, vocab: Vocabulary):
+        super().__init__(name, vocab, slice(-1, 0))
 
     def __call__(self, pandas: pd.DataFrame | pd.Series, round_: bool = False) -> Word:
         if isinstance(pandas, pd.Series):
@@ -163,7 +163,7 @@ class FromPandas(Word):
     def operate(self, stack):
         if self.pandas.index.freq is None:  # type: ignore[attr-defined]
             self.pandas.index.freq = pd.infer_freq(self.pandas.index)  # type: ignore[attr-defined,arg-type]
-        group = GroupShared()
+        group = GroupShared(allow_drops=False)
         for header in self.pandas.columns:
             stack.append(
                 PandasColumn(
