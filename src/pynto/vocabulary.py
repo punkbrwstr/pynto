@@ -149,8 +149,16 @@ vocab['timestamp'] = (
     'Pushes a column with the timestamp of the end of the period',
     Timestamp,
 )
-vocab['period_ordinal'] = (cat, 'Pushes a column with the period ordinal', PeriodOrdinal)
-vocab['day_count'] = (cat, 'Pushes a column with the number of days in the period', Daycount)
+vocab['period_ordinal'] = (
+    cat,
+    'Pushes a column with the period ordinal',
+    PeriodOrdinal,
+)
+vocab['day_count'] = (
+    cat,
+    'Pushes a column with the number of days in the period',
+    Daycount,
+)
 vocab['load'] = (cat, 'Pushes columns saved to internal DB as _key_', Saved)
 vocab['from_pandas'] = (
     cat,

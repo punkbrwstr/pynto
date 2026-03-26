@@ -225,6 +225,27 @@ class SavedColumn(Column):
         return (self.md[0][-1], self.md.expand()[-1][-1], self.md.periodicity)
 
 
+class _ColsAccessor:
+    def __init__(self, word: Word):
+        self._word = word
+
+    def __getitem__(self, key: int | slice | str | list[str]) -> Word:
+        if isinstance(key, int):
+            if key == -1:
+                self._word.slice_ = slice(key, None)
+            else:
+                self._word.slice_ = slice(key, key + 1)
+        elif isinstance(key, slice):
+            self._word.slice_ = key
+        elif isinstance(key, str):
+            self._word.filters = [key]
+        elif isinstance(key, list):
+            self._word.filters = key
+        else:
+            raise IndexError('Invalid column indexer')
+        return self._word
+
+
 class Word:
     def __init__(
         self,
@@ -246,9 +267,7 @@ class Word:
         self.filters: list[str] | None = None
         self.next_: Word | None = None
         self.prev: Word | None = None
-        self.open_quotes: int = 0
         self.called: bool = False
-        self.quoted: Word | None = None
 
     def operate(self, stack: list[Column]) -> None:
         if self.raise_on_empty and len(stack) == 0:
@@ -264,7 +283,11 @@ class Word:
                     setattr(self, key, value)
         return self
 
-    def __add__(self, addend: Word, copy_addend: bool = True) -> Word:
+    def __add__(self, addend: Word | int | float, copy_addend: bool = True) -> Word:
+        if isinstance(addend, (int, float)):
+            from .words import Constant
+
+            addend = Constant('c', self.vocab)(addend)
         this = self.copy_expression()
         if copy_addend:
             addend_tail = addend.copy_expression()
@@ -274,81 +297,42 @@ class Word:
         if this is not None:
             this.next_ = addend_head
             addend_head.prev = this
-            if this.open_quotes != 0:
-                current = addend_head
-                while current.next_ is not None:
-                    current.open_quotes += this.open_quotes
-                    current = current.next_
-                current.open_quotes += this.open_quotes
         return addend_tail
 
-    def concat(self, other: Word) -> Word:
-        return self.__add__(other)
+    def __radd__(self, addend: int | float) -> Word:
+        if isinstance(addend, (int, float)):
+            from .words import Constant
 
-    def __getattr__(self, name: str) -> Any:
+            const = Constant('c', self.vocab)(addend)
+            return const.__add__(self)
+        return NotImplemented
 
-        if name == 'vocab':
-            return self.__getattribute__('vocab')
-        word = self.vocab.resolve(name)
-        if word is not None:
-            return self.__add__(word, False)
-        else:
-            return self.__getattribute__(name)
+    def __invert__(self) -> Word:
+        if (
+            isinstance(self, Quotation)
+            and hasattr(self, 'quoted')
+            and self.prev is None
+        ):
+            return self.quoted.copy_expression()
+        q = Quotation('q', self.vocab)
+        q.quoted = self.copy_expression()
+        return q
 
-    def __getitem__(
-        self,
-        key: int
-        | tuple[int, bool]
-        | slice
-        | tuple[slice, bool]
-        | str
-        | tuple[str, bool]
-        | list[str]
-        | tuple[list[str], bool],
-    ) -> Word:
-        if isinstance(key, tuple):
-            assert isinstance(key[1], bool), 'Second argument must be boolean'
-            self.copy_selected = key[1]
-            if len(key) == 3:
-                assert isinstance(key[2], bool), 'Third argument must be boolean'
-                self.discard_excluded = key[2]
-            key = key[0]
-        if isinstance(key, int):
-            if key == -1:
-                self.slice_ = slice(key, None)
-            else:
-                self.slice_ = slice(key, key + 1)
-        elif isinstance(key, slice):
-            self.slice_ = key
-        elif isinstance(key, str):
-            self.filters = [key]
-        elif isinstance(key, list):
-            self.filters = key
-        else:
-            raise IndexError('Invalid column indexer')
+    @property
+    def cols(self) -> _ColsAccessor:
+        return _ColsAccessor(self)
+
+    @property
+    def copy(self) -> Word:
+        self.copy_selected = True
         return self
 
     @property
-    def p(self):
-        assert self.open_quotes > 0, 'No quote to close.'
-        current = self
-        open_quotes = self.open_quotes
-        while current.prev is not None and current.prev.open_quotes == open_quotes:
-            current.open_quotes = 0
-            current = current.prev
-        current.open_quotes -= 1
-        assert isinstance(current, Quotation), 'something wrong'
-        assert current.next_ is not None
-        current.next_.prev = None
-        current = current(current.next_._tail())
-        current.next_ = None
-        return current
-
-    def __dir__(self):
-        return sorted(set(self.vocab.keys()))
+    def discard(self) -> Word:
+        self.discard_excluded = True
+        return self
 
     def build_stack(self, stack: list[Column] | None = None) -> list[Column]:
-        assert self.open_quotes == 0, 'Unclosed quotation.  Cannot evaluate'
         if stack is None:
             stack = []
             prefix = 0
@@ -466,12 +450,15 @@ class Word:
 
     @property
     def local(self) -> Word:
-        return Quotation('q', self.vocab)(self).call[-1:0]  # type: ignore[no-any-return]
+        call_word = self.vocab.resolve('call')
+        assert call_word is not None
+        call_word.slice_ = slice(-1, 0)
+        return (~self) + call_word
 
     def __str__(self) -> str:
         ignore = (
             'prev next_ closed called generator slice_ filters copy_selected'
-            + ' discard_excluded inverse_selection operation open_quotes'
+            + ' discard_excluded inverse_selection operation'
             + ' name allow_sibling_drops ascending raise_on_empty vocab'
         )
         str_args = []
@@ -487,9 +474,9 @@ class Word:
         if str_args:
             s += f'({", ".join(str_args)})'
         if self.filters:
-            s += f'[{self.filters}]'
+            s += f'.cols[{self.filters}]'
         else:
-            s += f'[{self.slice_.start or ""}:{self.slice_.stop or ""}:{self.slice_.step or ""}]'
+            s += f'.cols[{self.slice_.start or ""}:{self.slice_.stop or ""}:{self.slice_.step or ""}]'
         return s
 
     def __repr__(self) -> str:
@@ -500,7 +487,7 @@ class Word:
             if current.prev is None:
                 break
             else:
-                s = '\n    .' + s
+                s = '\n    + ' + s
                 current = current.prev
         s = 'pt.' + s
         return s
@@ -517,11 +504,6 @@ class Quotation(Word):
             this = self.copy_expression()
             this.quoted = quoted
             return this
-
-    def __add__(self, other: Word, copy_addend: bool = True) -> Word:
-        if not hasattr(self, 'quoted') or self.quoted is None:
-            self.open_quotes += 1
-        return super().__add__(other, copy_addend)
 
 
 def resample(

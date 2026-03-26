@@ -349,7 +349,7 @@ class Partial(Quotation, Combinator):
     def __init__(self, name: str, vocab: Vocabulary):
         super().__init__(name, vocab, slice(-1, None))
 
-    def __add__(self, other: Word, copy_addend: bool = True) -> Word:
+    def __add__(self, other: Word | int | float, copy_addend: bool = True) -> Word:
         return Word.__add__(self, other, copy_addend)
 
     def operate(self, stack: list[Column]) -> None:
@@ -365,7 +365,7 @@ class Compose(Quotation, Combinator):
         self.num_quotations = num_quotations
         return super().__call__()
 
-    def __add__(self, other: Word, copy_addend: bool = True) -> Word:
+    def __add__(self, other: Word | int | float, copy_addend: bool = True) -> Word:
         return Word.__add__(self, other, copy_addend)
 
     def operate(self, stack: list[Column]) -> None:

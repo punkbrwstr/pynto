@@ -2,38 +2,34 @@
 
 ## pynto: Data analysis in Python using stack-based programming
 
-pynto is a Python package that lets you manipulate a data frame as a stack of columns, using the the expressiveness of the [concatenative](https://en.wikipedia.org/wiki/Concatenative_programming_language)/[stack-oriented](https://en.wikipedia.org/wiki/Stack-oriented_programming) paradigm.  
+pynto is a Python package that lets you manipulate a data frame as a stack of columns, using the the expressiveness of the [concatenative](https://en.wikipedia.org/wiki/Concatenative_programming_language)/[stack-oriented](https://en.wikipedia.org/wiki/Stack-oriented_programming) paradigm.
 
 ## How does it work?
 
 With pynto you chain together functions called _words_ to formally specify how to calculate each column of your data frame.  The composed _words_ can be lazily evaluated over any range of rows to create your data frame.
 
-_Words_ add, remove or modify columns.  They can operate on the entire stack or be limited to a certain columns using a _column indexer_.  Composed _words_ will operate in left-to-right order, with operators following their operands in _postfix_ (Reverse Polish Notation) style.  More complex operations can be specified using _quotations_, anonymous blocks of _words_ that do not operate immediately, and _combinators_, higher-order words that control the execution of _quotations_.
+_Words_ add, remove or modify columns.  They can operate on the entire stack or be limited to certain columns using a _column indexer_.  Composed _words_ will operate in left-to-right order, with operators following their operands in _postfix_ (Reverse Polish Notation) style.  More complex operations can be specified using _quotations_, anonymous blocks of _words_ that do not operate immediately, and _combinators_, higher-order words that control the execution of _quotations_.
 
 
 ## What does it look like?
 Here's a program to calculate deviations from moving average for each column in a table using the _combinator_/_quotation_ pattern.
 ```
->>> import pynto as pt 
->>> ma_dev = (                        # create a pynto expression by concatenating words to
->>>     pt.load('stock_prices')      # append columns to stack from the build-in database
->>>     .q                            # start a quotation 
->>>         .dup                      # push a copy of the top (leftmost) column of the stack
->>>         .ravg(20)                 # calculate 20-period moving average
->>>         .sub                      # subtract top column from second column 
->>>     .p                            # close the quotation
->>>     .map                          # use the map combinator to apply the quotation
->>> )                                 # to each column in the stack
+>>> import pynto as pt
+>>> ma_dev = (                             # create a pynto expression by concatenating words
+>>>     pt.load('stock_prices')            # append columns to stack from the built-in database
+>>>     + ~(pt.dup + pt.ravg(20) + pt.sub) # quotation: copy column, calc moving avg, subtract
+>>>     + pt.map                           # use the map combinator to apply the quotation
+>>> )                                      # to each column in the stack
 >>>
->>> df = ma_dev.rows['2021-06-01':]         # evaluate over a range of rows to get a DataFrame
->>> pt.db['stocks_ma_dev'] = df             # save the results back to the database   
+>>> df = ma_dev.rows['2021-06-01':]        # evaluate over a range of rows to get a DataFrame
+>>> pt.db['stocks_ma_dev'] = df            # save the results back to the database
 ```
 
 ## Why pynto?
- - Expressive: Pythonic syntax; Combinatory logic for modular, reusable code 
+ - Expressive: Pythonic syntax; Combinatory logic for modular, reusable code
  - Performant: Memoization to eliminate duplicate operations
  - Batteries included:  Built-in time series database
- - Interoperable: Seemlessly integration with Pandas/numpy
+ - Interoperable: Seamless integration with Pandas/numpy
 
 ## Get pynto
 ```
@@ -44,72 +40,93 @@ pip install pynto
 
 ### The Basics
 
-## Constant literals
-Add constant-value columns to the stack using literals that start with `c`, followed by a number with `-` and `.` characters replaced by `_`.  `r`_n_ adds whole number-value constant columns up to _n - 1_.
+## Composing words
+_Words_ are composed using the `+` operator. Each word resolves from the `pt` namespace.
 ```
->>> # Compose _words_ that add a column of 10s to the stack, duplicate the column, 
+>>> # Compose words that add a column of 10s to the stack, duplicate the column,
 >>> # and then multiply the columns together
->>> ten_squared = pt.c10_0.dup.mul         
+>>> ten_squared = pt.c(10) + pt.dup + pt.mul
+```
+
+## Constant literals
+Add constant-value columns to the stack using `pt.c(`_value_`)`.  You can also add constants directly with `+` using numeric literals.  `pt.r(`_n_`)` adds whole number-value constant columns from 0 to _n - 1_.
+```
+>>> ten_squared = pt.c(10) + pt.dup + pt.mul    # using pt.c()
+>>> ten_squared = 10 + pt.dup + pt.mul          # using numeric literal with +
 ```
 
 ## Row indexers
 To evaluate your expression, you use a row indexer.  Specify rows by date range using the `.rows[`_start_`:`_stop (exclusive)_`:`_periodicity_`]` syntax. None slicing arguments default to the widest range available.  _int_ indices also work with the `.rows` indexer. `.first`, and `.last` are included for convenience.
 ```
->>> ten_squared.rows['2021-06-01':'2021-06-03','B']                   # evaluate over a two business day date range                                                   
+>>> ten_squared.rows['2021-06-01':'2021-06-03','B']                   # evaluate over a two business day date range
                  c
 2021-06-01     100.0
 2021-06-02     100.0
 ```
 
 ## Quotations and Combinators
-Combinators are higher-order functions that allow pynto to do more complicated things like branching and looping.  Combinators operate on quotations, expressions that are pushed to the stack instead of operating on the stack.  To push a quotation to the stack, put words in between `q` and `p` (or put an expression in the local namespace within the parentheses of `pt.q(_expression_)`).  THe `map` combinator evaluated a quotation at the top of the stack over each column below in the stack.
+Combinators are higher-order functions that allow pynto to do more complicated things like branching and looping.  Combinators operate on quotations, expressions that are pushed to the stack instead of operating on the stack.  Use the `~` operator to create a quotation from a word or expression.  The `map` combinator applies a quotation at the top of the stack over each column below in the stack.
 ```
->>> pt.c9.c10.q.dup.mul.p.map.last
+>>> (pt.c(9) + pt.c(10) + ~(pt.dup + pt.mul) + pt.map).last
                  c         c
 2021-06-02      81.0     100.0
+```
+
+`~` supports single words, expressions, and nesting:
+```
+>>> ~pt.neg                                        # quote a single word
+>>> ~(pt.dup + pt.mul)                             # quote an expression
+>>> ~(~(pt.c(100) + pt.sub) + pt.call) + pt.map   # nested quotation
+>>> ~~quoted_expr                                  # unquote (convert quotation back to word)
 ```
 
 ## Headers
 Each column has a string header.  `hset` sets the header to a new value.  Headers are useful for filtering or arranging columns.
 ```
->>> pt.c9.c10.q.dup.mul.p.map.hset('a','b').last
+>>> (pt.c(9) + pt.c(10) + ~(pt.dup + pt.mul) + pt.map + pt.hset('a','b')).last
                  a         b
 2021-06-02      81.0     100.0
 ```
 
 ## Column indexers
-Column indexers specify the columns on which a _word_ operates, overiding the _word's_ default.  Postive _int_ indices start from the bottom (left) of the stack and negative indices start from the top.
+Column indexers specify the columns on which a _word_ operates, overriding the _word's_ default.  Use `.cols[`_indexer_`]` to set the column indexer.  Positive _int_ indices start from the bottom (left) of the stack and negative indices start from the top.
 
 By default `add` has a column indexer of [-2:]
 ```
->>> pt.r5.add.last
+>>> (pt.r5 + pt.add).last
               c    c    c    c
 2021-06-02  0.0  1.0  2.0  7.0
 ```
 Change the column indexer of `add` to [:] to sum all columns
 ```
->>> pt.r5.add[:].last
+>>> (pt.r5 + pt.add.cols[:]).last
                c
 2025-06-02  10.0
 ```
 You can also index columns by header, using regular expressions
 ```
->>> pt.r3.hset('a,b,c').add['(a|c)'].last
+>>> (pt.r3 + pt.hset('a,b,c') + pt.add.cols['(a|c)']).last
               b    a
 2025-06-02  1.0  2.0
 ```
 
-## Defining words
-_Words_ in the local namespace can be composed using the  `+` operator.  
+Use `.copy` to keep the original columns and `.discard` to remove non-selected columns:
 ```
->>> squared = pt.dup.mul
->>> ten_squared2 = pt.c10_0 + squared    # same thing
+>>> (pt.r5 + pt.pull.cols[2:4].copy).values[0]     # copy selected, keep originals
+>>> (pt.r5 + pt.pull.cols[2:4].discard).values[0]   # move selected, discard rest
+>>> (pt.r5 + pt.pull.copy).values[0]                # copy with default selector
+```
+
+## Defining words
+_Words_ are composed using the `+` operator.
+```
+>>> squared = pt.dup + pt.mul
+>>> ten_squared2 = pt.c(10) + squared    # same thing
 ```
 
 _Words_ can also be defined globally in the pynto vocabulary.
 ```
->>> pt.define['squared'] = pt.dup.mul
->>> ten_squared3 = pt.c10_0.squared    # same thing
+>>> pt.define['squared'] = pt.dup + pt.mul
 ```
 
 
@@ -161,9 +178,13 @@ swap|[-2:]||Swaps top and bottom selected columns
 
 ### Quotation
 
-Word | Default Selector | Parameters | Description
-:---|:---|:---|:---
-q|[-1:]|_quoted_, _this_|Wraps the following words until *p* as a quotation, or wraps _quoted_ expression as a quotation
+Use the `~` operator to create quotations:
+
+Expression | Description
+:---|:---
+`~pt.word`|Wraps a single word as a quotation
+`~(pt.word1 + pt.word2)`|Wraps an expression as a quotation
+`~~quoted`|Unwraps a quotation back into a standard word
 
 ### Header manipulation
 
@@ -173,7 +194,7 @@ halpha|[:]||Set headers to alphabetical values
 happly|[:]|_header_func_|Apply _header_func_ to headers_
 hformat|[:]|_format_spec_|Apply _format_spec_ to headers
 hreplace|[:]|_old_, _new_|Replace _old_ with _new_ in headers
-hset|[:]|_headers_|Set headers to _*headers_ 
+hset|[:]|_headers_|Set headers to _*headers_
 hsetall|[:]|_headers_|Set headers to _*headers_ repeating, if necessary
 
 ### Combinators
@@ -197,7 +218,7 @@ repeat|[:]|_times_|Applies quotation _times_ times
 Word | Default Selector | Parameters | Description
 :---|:---|:---|:---
 ffill|[:]|_lookback_, _leave_end_|Fills nans with previous values, looking back _lookback_ before range and leaving trailing nans unless not _leave_end_
-fill|[:]||Fills nans with _value_ 
+fill|[:]||Fills nans with _value_
 fillfirst|[-1:]|_lookback_|Fills first row with previous non-nan value, looking back _lookback_  before range
 join|[-2:]|_date_|Joins two columns at _date_
 sync|[:]||Align available data by setting all values to NaN when any values is NaN
@@ -323,4 +344,3 @@ neg|[-1:]||Additive inverse
 rank|[:]||Row-wise rank
 sign|[-1:]||Sign
 sqrt|[-1:]||Square root
-
