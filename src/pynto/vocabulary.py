@@ -114,6 +114,15 @@ class Vocabulary(dict[str, Entry]):
         else:
             return None
 
+    def __getattr__(self, name: str) -> Any:
+        if name == 'resolve':
+            return self.__getattribute__('resolve')
+        word = self.resolve(name)
+        if word is not None:
+            return word
+        else:
+            return self.__getattribute__(name)
+
 
 vocab: Vocabulary = Vocabulary()
 
