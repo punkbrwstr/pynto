@@ -110,7 +110,10 @@ class Vocabulary(dict[str, Entry]):
         elif re.match(r'r\d+', name) is not None:
             return Constant('c', self)(*range(int(name[1:])))
         elif name in self:
-            return self[name][-1](name, self)
+            entry = self[name]
+            word = entry[-1](name, self)
+            word.__doc__ = entry[1]
+            return word
         else:
             return None
 

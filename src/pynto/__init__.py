@@ -19,6 +19,10 @@ def now():
     return Periodicity.B.current()[-1]
 
 
+def __dir__() -> list[str]:
+    return sorted(set(__all__) | set(vocab.keys()))
+
+
 def __getattr__(name: str) -> Any:
     if not name.startswith('__'):
         word = vocab.resolve(name)
