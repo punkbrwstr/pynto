@@ -242,6 +242,8 @@ vocab['halpha'] = (cat, 'Set headers to alphabetical values', HeaderAlphabetize)
 
 cat = 'Combinators'
 vocab['call'] = (cat, 'Applies quotation', Call)
+vocab['call0'] = (cat, 'Shortcut for applying quotation without consuming anything from stack',
+                    lambda name, vocab: Call(name, vocab).cols[-1:0])
 vocab['map'] = (cat, 'Applies quotation in groups of _every_', Map)
 vocab['repeat'] = (cat, 'Applies quotation _times_ times', Repeat)
 vocab['hmap'] = (
