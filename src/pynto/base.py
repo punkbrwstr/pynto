@@ -459,7 +459,7 @@ class Word:
         ignore = (
             'prev next_ closed called generator slice_ filters copy_selected'
             + ' discard_excluded inverse_selection operation __doc__'
-            + ' name allow_sibling_drops ascending raise_on_empty vocab'
+            + ' name allow_group_drops ascending raise_on_empty vocab'
         )
         str_args = []
         for k, v in self.__dict__.items():
