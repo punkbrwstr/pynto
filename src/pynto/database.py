@@ -179,9 +179,15 @@ class Db:
     def make_safe(self, frame: str, column: str | None, row: str | None) -> str:
         key = struct.pack('<256s', frame.encode())
         if column:
-            key += struct.pack('<128s', column.encode())
-        if row:
-            key += struct.pack('<128s', row.encode())
+            if column.endswith('*'):
+                key += column[:-1].encode()
+            else:
+                key += struct.pack('<128s', column.encode())
+                if row:
+                    if row.endswith('*'):
+                        key += row[:-1].encode()
+                    else:
+                        key += struct.pack('<128s', row.encode())
         return key.decode()
 
     def get_metadata(self, key: str) -> list[Metadata]:
@@ -198,10 +204,21 @@ class Db:
     def columns(self, key: str) -> list[str]:
         return list(dict.fromkeys([md.col_header for md in self.get_metadata(key)]))
 
-    def all_keys(self) -> list[str]:
-        return list(
-            set([Metadata.unpack(p).key for p in self.connection.zrange(INDEX, 0, -1)])
-        )
+    def keys(self) -> list[str]:
+        keys = []
+        for p in self.connection.zrange(INDEX, 0, -1):
+            k = p[:256].decode().strip('\x00')
+            if len(keys) == 0 or k != keys[-1]:
+                keys.append(k)
+        return keys
+
+    def keys_for_prefix(self, prefix: str) -> list[str]:
+        keys = []
+        for p in self.connection.zrangebylex(INDEX, f'[{prefix}', f'[{prefix}\xff'):
+            k = p[:256].decode().strip('\x00')
+            if len(keys) == 0 or k != keys[-1]:
+                keys.append(k)
+        return keys
 
     def all_series(self) -> dict[str, list[tuple[str, str]]]:
         mds = [Metadata.unpack(p) for p in self.connection.zrange(INDEX, 0, -1)]
