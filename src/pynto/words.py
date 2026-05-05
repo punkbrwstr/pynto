@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 import copy
 import datetime
 import sys
@@ -86,6 +87,39 @@ class Daycount(GeneratorWord):
     @staticmethod
     def generate(range_: Range, values: np.ndarray) -> None:
         values[:] = np.array(range_.day_counts(), dtype=np.float64)[:, None]
+
+    def __init__(self, name: str, vocab: Vocabulary):
+        super().__init__(name, vocab, self.generate)
+
+
+def _actual_actual_year_fraction(start: datetime.date, end: datetime.date) -> float:
+    if start == end:
+        return 0.0
+    if start > end:
+        return -_actual_actual_year_fraction(end, start)
+
+    total = 0.0
+    current = start
+    while current < end:
+        next_year = datetime.date(current.year + 1, 1, 1)
+        period_end = min(end, next_year)
+        days_in_year = 366 if calendar.isleap(current.year) else 365
+        total += (period_end - current).days / days_in_year
+        current = period_end
+    return total
+
+
+class YearFraction(GeneratorWord):
+    @staticmethod
+    def generate(range_: Range, values: np.ndarray) -> None:
+        dates = [p[-1] for p in range_.expand(-1)]
+        values[:] = np.array(
+            [
+                _actual_actual_year_fraction(start, end)
+                for end, start in zip(dates[1:], dates[:-1])
+            ],
+            dtype=np.float64,
+        )[:, None]
 
     def __init__(self, name: str, vocab: Vocabulary):
         super().__init__(name, vocab, self.generate)
