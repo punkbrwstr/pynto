@@ -204,17 +204,13 @@ class Db:
     def columns(self, key: str) -> list[str]:
         return list(dict.fromkeys([md.col_header for md in self.get_metadata(key)]))
 
-    def keys(self) -> list[str]:
+    def keys(self, prefix: str = None) -> list[str]:
+        if prefix:
+            all_keys = self.connection.zrangebylex(INDEX, f'[{prefix}', f'[{prefix}\xff')
+        else:
+            all_keys = self.connection.zrange(INDEX, 0, -1)
         keys = []
-        for p in self.connection.zrange(INDEX, 0, -1):
-            k = p[:256].decode().strip('\x00')
-            if len(keys) == 0 or k != keys[-1]:
-                keys.append(k)
-        return keys
-
-    def keys_for_prefix(self, prefix: str) -> list[str]:
-        keys = []
-        for p in self.connection.zrangebylex(INDEX, f'[{prefix}', f'[{prefix}\xff'):
+        for p in all_keys:
             k = p[:256].decode().strip('\x00')
             if len(keys) == 0 or k != keys[-1]:
                 keys.append(k)
