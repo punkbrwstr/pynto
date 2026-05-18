@@ -497,15 +497,6 @@ class Quotation(Word):
     def __init__(self, name: str, vocab: Vocabulary, slice_: slice = slice(-1, 0)):
         super().__init__(name, vocab, slice_)
 
-    def __call__(self, quoted: Word | None = None) -> Word:
-        if quoted is None:
-            return self
-        else:
-            this = self.copy_expression()
-            this.quoted = quoted
-            return this
-
-
 def resample(
     to_range: Range,
     to_values: np.ndarray,
