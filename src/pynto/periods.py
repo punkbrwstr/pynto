@@ -307,7 +307,7 @@ class Periodicity(PeriodicityMixin, Enum):
 
     def next(self) -> Period:
         ny = datetime.datetime.now(datetime.UTC).astimezone(
-            zoneinfo.ZoneInfo(key='US/Eastern')
+            zoneinfo.ZoneInfo(key='America/New_York')
         )
         ny_date = ny.date()
         if ny.hour >= 17:
