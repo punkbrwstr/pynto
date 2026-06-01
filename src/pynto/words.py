@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from dataclasses import dataclass
 from functools import partial
-from typing import Callable, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from .vocabulary import Vocabulary
@@ -181,22 +181,31 @@ class PandasColumn(Column):
 
 
 class FromPandas(Word):
+    pandas: pd.DataFrame
+    round_: bool
+
     def __init__(self, name: str, vocab: Vocabulary):
         super().__init__(name, vocab, slice(-1, 0))
 
     def __call__(self, pandas: pd.DataFrame | pd.Series, round_: bool = False) -> Word:
         if isinstance(pandas, pd.Series):
-            self.pandas = self.pandas.toframe()  # type: ignore[operator]
+            self.pandas = pandas.to_frame()
         else:
             self.pandas = pandas
-        if self.pandas.index.freq is None:  # type: ignore[attr-defined]
-            self.pandas.index.freq = pd.infer_freq(self.pandas.index)  # type: ignore[attr-defined,arg-type]
+        index = cast(pd.DatetimeIndex, self.pandas.index)
+        if index.freq is None:
+            freq = pd.infer_freq(index)
+            if freq is not None:
+                self.pandas.index = pd.DatetimeIndex(index, freq=freq)
         self.round_ = round_
         return super().__call__()
 
     def operate(self, stack):
-        if self.pandas.index.freq is None:  # type: ignore[attr-defined]
-            self.pandas.index.freq = pd.infer_freq(self.pandas.index)  # type: ignore[attr-defined,arg-type]
+        index = cast(pd.DatetimeIndex, self.pandas.index)
+        if index.freq is None:
+            freq = pd.infer_freq(index)
+            if freq is not None:
+                self.pandas.index = pd.DatetimeIndex(index, freq=freq)
         group = GroupShared(allow_drops=False)
         for header in self.pandas.columns:
             stack.append(
@@ -207,6 +216,8 @@ class FromPandas(Word):
 
 
 class Saved(Word):
+    key: str
+
     def __init__(self, name: str, vocab: Vocabulary):
         super().__init__(name, vocab, slice(-1, 0))
 
@@ -254,6 +265,8 @@ class Call(Combinator):
 
 
 class IfExists(Combinator):
+    count: int
+
     def __call__(self, count: int = 1) -> Word:
         return super().__call__(locals())
 
@@ -263,6 +276,8 @@ class IfExists(Combinator):
 
 
 class IfExistsElse(Combinator):
+    count: int
+
     def __init__(self, name: str, vocab: Vocabulary):
         super().__init__(name, vocab, num_quotations=2)
 
@@ -277,6 +292,8 @@ class IfExistsElse(Combinator):
 
 
 class IfHeaders(Combinator):
+    predicate: Callable[[list[str]], bool]
+
     def __call__(self, predicate: Callable[[list[str]], bool]) -> Word:
         return super().__call__(locals())
 
@@ -286,6 +303,8 @@ class IfHeaders(Combinator):
 
 
 class IfHeadersElse(Combinator):
+    predicate: Callable[[list[str]], bool]
+
     def __init__(self, name: str, vocab: Vocabulary):
         super().__init__(name, vocab, num_quotations=2)
 
@@ -395,7 +414,7 @@ class Compose(Quotation, Combinator):
     def __init__(self, name: str, vocab: Vocabulary):
         Combinator.__init__(self, name, vocab, num_quotations=2)
 
-    def __call__(self, num_quotations: int = 2) -> Word:  # type: ignore[override]
+    def __call__(self, num_quotations: int = 2) -> Word:
         self.num_quotations = num_quotations
         return super().__call__()
 
@@ -491,6 +510,8 @@ class StartColumn(Column):
 
 
 class SetStart(Word):
+    start: datelike | int
+
     def __init__(self, name: str, vocab: Vocabulary):
         super().__init__(name, vocab, slice(-1, None))
 
@@ -536,6 +557,8 @@ class FillFirstColumn(Column):
 
 
 class FillFirst(Word):
+    lookback: int
+
     def __init__(self, name: str, vocab: Vocabulary):
         super().__init__(name, vocab, slice(-1, None))
 
@@ -567,6 +590,8 @@ class FillColumn(Column):
 
 
 class Fill(Word):
+    value: float
+
     def __call__(self, value: float) -> Word:
         return super().__call__(locals())
 
@@ -602,6 +627,9 @@ class FFillColumn(Column):
 
 
 class FFill(Word):
+    lookback: int
+    leave_end: bool
+
     def __call__(self, lookback: int = 10, leave_end: bool = True) -> Word:
         return super().__call__(locals())
 
@@ -677,6 +705,8 @@ class ReductionColumn(Column):
 
 
 class Reduction(Word):
+    ignore_nans: bool
+
     def __init__(
         self,
         name: str,
@@ -738,6 +768,8 @@ class RollingColumn(Column):
 
 
 class Rolling(Word):
+    window: int
+
     def __init__(
         self,
         name: str,
@@ -889,6 +921,8 @@ class HeaderSetAll(Word):
 
 
 class HeaderFormat(Word):
+    format_spec: str
+
     def __call__(self, format_spec: str) -> Word:
         return super().__call__(locals())
 
@@ -898,6 +932,9 @@ class HeaderFormat(Word):
 
 
 class HeaderReplace(Word):
+    old: str
+    new: str
+
     def __call__(self, old: str, new: str = '') -> Word:
         return super().__call__(locals())
 
@@ -907,6 +944,8 @@ class HeaderReplace(Word):
 
 
 class HeaderApply(Word):
+    header_func: Callable[[str], str]
+
     def __call__(self, header_func: Callable[[str], str]) -> Word:
         return super().__call__(locals())
 

@@ -416,7 +416,7 @@ class Range:
     def change_periodicity(self, periodicity: Periodicity | str) -> Range:
         if isinstance(periodicity, str):
             periodicity = Periodicity[periodicity.upper()]
-        result = periodicity[self[0][0] : self[-1][-1]]  # type: ignore[misc]
+        result = periodicity[self[0][0] : self[-1][-1]]
         assert isinstance(result, Range)
         return result.expand()
 

@@ -34,7 +34,7 @@ def expanding_mean(x: np.ndarray) -> np.ndarray:
     shape = [1] * x.ndim
     shape[0] = N
     counts = counts.reshape(shape)
-    return csum / counts  # type: ignore[no-any-return]
+    return csum / counts
 
 
 def expanding_var(x: np.ndarray) -> np.ndarray:

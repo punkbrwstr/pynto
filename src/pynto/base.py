@@ -190,7 +190,7 @@ class Column:
             'All input ranges must be the same to use input_values funtion'
         )
         assert inputs[0].range_ is not None
-        return np.concatenate([c.values for c in inputs]).reshape(  # type: ignore[no-any-return]
+        return np.concatenate([c.values for c in inputs]).reshape(
             (len(inputs[0].range_), len(inputs)), order='F'
         )
 
@@ -313,6 +313,7 @@ class Word:
             and hasattr(self, 'quoted')
             and self.prev is None
         ):
+            assert self.quoted is not None
             return self.quoted.copy_expression()
         q = Quotation('q', self.vocab)
         q.quoted = self.copy_expression()
@@ -495,7 +496,9 @@ class Word:
 
 class Quotation(Word):
     def __init__(self, name: str, vocab: Vocabulary, slice_: slice = slice(-1, 0)):
+        self.quoted: Word | None = None
         super().__init__(name, vocab, slice_)
+
 
 def resample(
     to_range: Range,
@@ -590,7 +593,8 @@ class Evaluator:
                 else:
                     assert min_ is not None
                     stop = p[min_] + stop
-            range_ = p[start or min_ : stop or max_]  # type: ignore[misc]
+            range_ = p[start or min_ : stop or max_]
+            assert isinstance(range_, Range)
         else:
             raise TypeError('Unsupported indexer')
         logger.debug('Setting ranges')
@@ -611,7 +615,7 @@ class Evaluator:
         flat.reverse()
         saveds = [col for col in flat if isinstance(col, SavedColumn)]
         if saveds:
-            p = db.get_client().connection.pipeline()
+            batch = db.get_client().connection.batch()
             offsets: list[int] = []
             needed_saveds: list[SavedColumn] = []
             resample_ranges: list[Range | None] = []
@@ -624,10 +628,12 @@ class Evaluator:
                     else:
                         r = col.range_
                         resample_ranges.append(None)
-                    offsets.append(db.get_client()._req(col.md, r.start, r.stop, p))
+                    offsets.append(
+                        db.get_client()._req(col.md, r.start, r.stop, batch)
+                    )
                     needed_saveds.append(col)
             for col, offset, bytes_, r_ in zip(
-                needed_saveds, offsets, p.execute(), resample_ranges
+                needed_saveds, offsets, batch.execute(), resample_ranges
             ):
                 col.values[:] = np.nan
                 if len(bytes_) > 0:
