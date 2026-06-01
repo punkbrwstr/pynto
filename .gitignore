@@ -1,36 +1,138 @@
-# Build artifacts
-build/
-dist/
-*.egg-info/
-
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+.coverage.*
 
 # Virtual environments
-venv/
+.env
+.venv
 env/
+venv/
 ENV/
+env.bak/
+venv.bak/
 
-# IDE
+# IDEs and editors
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# OS
+*~
 .DS_Store
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+.ipython
+
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Database files
+.pynto/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Archive
+archive/
+
+# Config files with potential secrets
+config.ini
+settings.ini
+.env.local
+.env.production
+
+# Data files
+#data/
+#*.csv
+*.xlsx
+*.xls
+*.parquet
+*.h5
+*.hdf5
+
+# Financial data files
+*.bdh
+*.bdp
+*.ref
+bloomberg_data/
+market_data/
+
+# Cache directories
+.cache/
+cache/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS generated files
 Thumbs.db
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 
-# Test artifacts
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
+# Redis dump files
+dump.rdb
 
-# Documentation
-docs/_build/
+# SSL certificates
+*.pem
+*.key
+*.crt
+*.cert
+
+# API keys and credentials
+credentials.json
+api_keys.txt
+*.token
 
 .claude
+.envrc.local
