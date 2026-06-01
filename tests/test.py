@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import pynto as pt
 from pynto.connection import SQLiteConnection
+from pynto.database import INDEX, DataType, Metadata
 
 
 def get_test_data():
@@ -87,6 +88,50 @@ class TestDatabaseSync(unittest.TestCase):
                 {b'field': b'value'},
             )
             self.assertEqual(destination.connection.set_members('aux:set'), [b'member'])
+
+    def test_sync_appends_literal_dollar_column_header(self):
+        with self._dbs() as (source, destination):
+            source_md = Metadata(
+                0,
+                5,
+                pt.Periodicity.B,
+                DataType.N,
+                'sync_literal',
+                0,
+                'price$asset',
+                '',
+            )
+            destination_md = Metadata(
+                0,
+                3,
+                pt.Periodicity.B,
+                DataType.N,
+                'sync_literal',
+                0,
+                'price$asset',
+                '',
+            )
+            source_values = np.arange(5).astype('int64')
+            destination_values = np.arange(3).astype('int64')
+            source_batch = source.connection.batch()
+            source_batch.set_range(source_md.data_key, 0, source_values.tobytes())
+            source_batch.add_set_members(INDEX, [source_md.pack()])
+            source_batch.execute()
+            destination_batch = destination.connection.batch()
+            destination_batch.set_range(
+                destination_md.data_key, 0, destination_values.tobytes()
+            )
+            destination_batch.add_set_members(INDEX, [destination_md.pack()])
+            destination_batch.execute()
+
+            result = pt.sync_data(source, destination)
+
+            self.assertEqual(result.series_appended, 1)
+            synced_md = destination.get_metadata('sync_literal')[0]
+            synced_values = np.frombuffer(
+                destination.connection.get(synced_md.data_key), '<i8'
+            )
+            self.assertTrue(np.array_equal(synced_values, source_values))
 
 
 class TestRowIndexing(unittest.TestCase):

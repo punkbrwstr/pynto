@@ -353,7 +353,7 @@ def _sync_frame(
     source_mds = source.get_metadata(key)
     result.series_seen += len(source_mds)
     try:
-        destination_mds = destination.get_metadata(key)
+        destination_mds = _get_metadata_with_packed(destination, key)
     except KeyError:
         frame = source[key]
         destination[key] = frame
@@ -370,7 +370,8 @@ def _sync_frame(
         return
 
     destination_by_header = {
-        (md.col_header, md.row_header): md for md in destination_mds
+        (md.col_header, md.row_header): (md, packed)
+        for md, packed in destination_mds
     }
     copied = 0
     appended = 0
@@ -392,8 +393,9 @@ def _sync_frame(
             )
             continue
 
-        _check_sync_compatible(source_md, destination_md, series_key)
-        if source_md.start < destination_md.start:
+        destination_metadata, destination_packed = destination_md
+        _check_sync_compatible(source_md, destination_metadata, series_key)
+        if source_md.start < destination_metadata.start:
             skipped_older += 1
             result.series_skipped_older += 1
             logger.info(
@@ -401,24 +403,30 @@ def _sync_frame(
                 'destination start %s',
                 series_key,
                 source_md.start,
-                destination_md.start,
+                destination_metadata.start,
             )
-        if source_md.stop <= destination_md.stop:
+        if source_md.stop <= destination_metadata.stop:
             current += 1
             result.series_current += 1
             continue
-        if source_md.start > destination_md.stop:
+        if source_md.start > destination_metadata.stop:
             raise ValueError(
                 f'Cannot sync {series_key}: source starts at {source_md.start}, '
-                f'destination stops at {destination_md.stop}'
+                f'destination stops at {destination_metadata.stop}'
             )
-        frame = source[(series_key, slice(destination_md.stop, source_md.stop))]
-        destination[series_key] = frame
+        append_rows = source_md.stop - destination_metadata.stop
+        _append_series_data(
+            source,
+            destination,
+            source_md,
+            destination_metadata,
+            destination_packed,
+        )
         appended += 1
         result.series_appended += 1
         logger.info(
             'Appended %s rows to %s',
-            source_md.stop - destination_md.stop,
+            append_rows,
             series_key,
         )
 
@@ -434,12 +442,48 @@ def _sync_frame(
     )
 
 
+def _get_metadata_with_packed(db: Db, key: str) -> list[tuple[Metadata, bytes]]:
+    safe_key = db.make_safe(*db.split_key(key))
+    packed_members = db.connection.set_members_by_prefix(INDEX, safe_key)
+    if not packed_members:
+        raise KeyError(f"Db key '{key}' not found")
+    result = [(Metadata.unpack(packed), packed) for packed in packed_members]
+    result.sort(key=lambda item: item[0].ordinal)
+    return result
+
+
 def _copy_series_data(source: Db, destination: Db, md: Metadata) -> None:
     data = source.connection.get(md.data_key)
     batch = destination.connection.batch()
     batch.set_range(md.data_key, 0, data)
     batch.add_set_members(INDEX, [md.pack(keep_timestamp=True)])
     batch.execute()
+
+
+def _append_series_data(
+    source: Db,
+    destination: Db,
+    source_md: Metadata,
+    destination_md: Metadata,
+    destination_packed: bytes,
+) -> None:
+    batch = source.connection.batch()
+    batch.get_range(
+        source_md.data_key,
+        (destination_md.stop - source_md.start) * source_md.type_.length,
+        (source_md.stop - source_md.start) * source_md.type_.length - 1,
+    )
+    data = batch.execute()[0]
+    destination_batch = destination.connection.batch()
+    destination_batch.set_range(
+        destination_md.data_key,
+        (destination_md.stop - destination_md.start) * destination_md.type_.length,
+        data,
+    )
+    destination_md.stop = source_md.stop
+    destination_batch.remove_set_members(INDEX, destination_packed)
+    destination_batch.add_set_members(INDEX, [destination_md.pack()])
+    destination_batch.execute()
 
 
 def _metadata_key(md: Metadata) -> str:
