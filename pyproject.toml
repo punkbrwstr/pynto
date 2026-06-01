@@ -26,6 +26,7 @@ dependencies = [
     "bottleneck",
     "redis",
     "hiredis",
+    "boto3",
 ]
 
 [project.urls]
@@ -51,4 +52,3 @@ disallow_incomplete_defs = true
 check_untyped_defs = true
 no_implicit_optional = true
 pretty = true
-

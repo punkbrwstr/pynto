@@ -1,8 +1,12 @@
 import unittest
 import datetime
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 import pandas as pd
 import numpy as np
 import pynto as pt
+from pynto.connection import SQLiteConnection
 
 
 def get_test_data():
@@ -11,6 +15,78 @@ def get_test_data():
         columns=['a', 'b', 'c', 'd'],
         index=pd.date_range('1/1/2019', periods=3, freq='B'),
     )
+
+
+class TestDatabaseSync(unittest.TestCase):
+    def _db(self, directory: str, name: str) -> pt.Db:
+        return pt.Db(connection=SQLiteConnection(f'{directory}/{name}.sqlite3'))
+
+    @contextmanager
+    def _dbs(self) -> Iterator[tuple[pt.Db, pt.Db]]:
+        with tempfile.TemporaryDirectory() as directory:
+            source = self._db(directory, 'source')
+            destination = self._db(directory, 'destination')
+            try:
+                yield source, destination
+            finally:
+                source.connection.close()
+                destination.connection.close()
+
+    def test_sync_copies_new_frame(self):
+        with self._dbs() as (source, destination):
+            frame = get_test_data()
+            source['sync_new_frame'] = frame
+
+            result = pt.sync_data(source, destination)
+
+            self.assertEqual(result.frames_copied, 1)
+            self.assertEqual(result.series_copied, 4)
+            pd.testing.assert_frame_equal(destination['sync_new_frame'], frame)
+
+    def test_sync_appends_existing_series(self):
+        with self._dbs() as (source, destination):
+            frame = pd.DataFrame(
+                np.arange(10).astype('int64').reshape(5, 2),
+                columns=['a', 'b'],
+                index=pd.date_range('1/1/2019', periods=5, freq='B'),
+            )
+            source['sync_append'] = frame
+            destination['sync_append'] = frame.iloc[:3]
+
+            result = pt.sync_data(source, destination)
+
+            self.assertEqual(result.frames_copied, 0)
+            self.assertEqual(result.series_appended, 2)
+            pd.testing.assert_frame_equal(destination['sync_append'], frame)
+
+    def test_sync_copies_new_series_in_existing_frame(self):
+        with self._dbs() as (source, destination):
+            frame = pd.DataFrame(
+                np.arange(12).astype('int64').reshape(4, 3),
+                columns=['a', 'b', 'c'],
+                index=pd.date_range('1/1/2019', periods=4, freq='B'),
+            )
+            source['sync_new_series'] = frame
+            destination['sync_new_series'] = frame[['a', 'b']]
+
+            result = pt.sync_data(source, destination)
+
+            self.assertEqual(result.series_copied, 1)
+            self.assertEqual(result.series_current, 2)
+            pd.testing.assert_frame_equal(destination['sync_new_series'], frame)
+
+    def test_sync_copies_auxiliary_data(self):
+        with self._dbs() as (source, destination):
+            source.connection.hmset('aux:hash', {'field': 'value'})
+            source.connection.zadd('aux:set', {'member': 0.0})
+
+            pt.sync_data(source, destination, auxiliary_prefix='aux:')
+
+            self.assertEqual(
+                destination.connection.hgetall('aux:hash'),
+                {b'field': b'value'},
+            )
+            self.assertEqual(destination.connection.set_members('aux:set'), [b'member'])
 
 
 class TestRowIndexing(unittest.TestCase):
