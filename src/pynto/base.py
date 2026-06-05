@@ -229,7 +229,7 @@ class _ColsAccessor:
     def __init__(self, word: Word):
         self._word = word
 
-    def __getitem__(self, key: int | slice | str | list[str]) -> Word:
+    def __getitem__(self, key: int | slice | str | list[str] | tuple[str, ...]) -> Word:
         if isinstance(key, int):
             if key == -1:
                 self._word.slice_ = slice(key, None)
@@ -239,8 +239,8 @@ class _ColsAccessor:
             self._word.slice_ = key
         elif isinstance(key, str):
             self._word.filters = [key]
-        elif isinstance(key, list):
-            self._word.filters = key
+        elif isinstance(key, list | tuple):
+            self._word.filters = list(key)
         else:
             raise IndexError('Invalid column indexer')
         return self._word
@@ -529,12 +529,12 @@ def resample(
             to_values[idx] = from_values[idx_input]
         case ResampleMethod.SUM:
             sums = np.nancumsum(from_values)
-            to_values[idx[0]] = from_values[idx_input[0]]
+            to_values[idx[0]] = sums[idx_input[0]]
             to_values[idx[1:]] = (sums[idx_input[1:]] - sums[idx_input[:-1]])[:, None]
         case ResampleMethod.AVG:
             sums = np.nancumsum(from_values)
             counts = np.nancumsum(from_values / from_values)
-            to_values[idx[0]] = from_values[idx_input[0]]
+            to_values[idx[0]] = sums[idx_input[0]]
             to_values[idx[1:]] = (sums[idx_input[1:]] - sums[idx_input[:-1]])[:, None]
             to_values[idx[1:]] /= (counts[idx_input[1:]] - counts[idx_input[:-1]])[
                 :, None
@@ -628,9 +628,7 @@ class Evaluator:
                     else:
                         r = col.range_
                         resample_ranges.append(None)
-                    offsets.append(
-                        db.get_client()._req(col.md, r.start, r.stop, batch)
-                    )
+                    offsets.append(db.get_client()._req(col.md, r.start, r.stop, batch))
                     needed_saveds.append(col)
             for col, offset, bytes_, r_ in zip(
                 needed_saveds, offsets, batch.execute(), resample_ranges

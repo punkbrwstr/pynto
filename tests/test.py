@@ -209,6 +209,12 @@ class TestColumnIndexing(unittest.TestCase):
             np.array_equal(a, np.array([[0.0, 1.0, 2.0, 3.0, 4.0, 2.0, 3.0]]))
         )
 
+    def test_tuple_header_filter(self):
+        a = (pt.r5 + pt.hset('a,b,c,d,e') + pt.pull.cols[('c', 'd')].copy).values[0]
+        self.assertTrue(
+            np.array_equal(a, np.array([[0.0, 1.0, 2.0, 3.0, 4.0, 2.0, 3.0]]))
+        )
+
     def test_multiple_header_with_groups(self):
         a = (
             pt.r4 + pt.inc.cols[:] + pt.halpha + pt.div.cols[['a', 'c']].copy + pt.radd
