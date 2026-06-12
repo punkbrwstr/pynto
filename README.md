@@ -193,7 +193,7 @@ Word | Default Selector | Parameters | Description
 halpha|[:]||Set headers to alphabetical values
 happly|[:]|_header_func_|Apply _header_func_ to headers_
 hformat|[:]|_format_spec_|Apply _format_spec_ to headers
-hreplace|[:]|_old_, _new_|Replace _old_ with _new_ in headers
+hreplace|[:]|_old_, _new_, _regex=False_, _flags=0_|Replace _old_ with _new_ in headers; set _regex=True_ for regex replacement
 hset|[:]|_headers_|Set headers to _*headers_
 hsetall|[:]|_headers_|Set headers to _*headers_ repeating, if necessary
 

@@ -1,5 +1,6 @@
 import unittest
 import datetime
+import re
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -258,6 +259,22 @@ class TestOtherColumnIndexingWords(unittest.TestCase):
         self.assertTrue(
             np.array_equal(a, np.array([[0.0, 1.0, 2.0, 3, 4.0, 1.0, 3.0]]))
         )
+
+    def test_hreplace_default_is_literal(self):
+        a = (pt.r2 + pt.hset('Fund|A', 'B') + pt.hreplace(r'^[^|]+\|', '')).columns
+        self.assertEqual(a, ['Fund|A', 'B'])
+
+    def test_hreplace_regex(self):
+        a = (
+            pt.r2 + pt.hset('Fund|A', 'B') + pt.hreplace(r'^[^|]+\|', '', regex=True)
+        ).columns
+        self.assertEqual(a, ['A', 'B'])
+
+    def test_hreplace_compiled_regex(self):
+        a = (
+            pt.r2 + pt.hset('Fund|A', 'B') + pt.hreplace(re.compile(r'^[^|]+\|'), '')
+        ).columns
+        self.assertEqual(a, ['A', 'B'])
 
 
 class TestOperators(unittest.TestCase):
@@ -942,18 +959,21 @@ class TestResample(DbTest):
 
     def test_per_sum(self):
         # Feb values 1..20: sum = 210.
-        # (First-period SUM uses from_values[last_B_of_Jan] = NaN, so test Feb.)
+        # Request both months because first-period SUM is cumulative from the
+        # fetched source range start.
         result = (pt.load(self.KEY) + pt.resample_sum + pt.set_periodicity('M')).rows[
-            1:2:'M'
+            0:2:'M'
         ]
-        self.assertEqual(result.iloc[0, 0], 210.0)
+        self.assertEqual(result.iloc[1, 0], 210.0)
 
     def test_per_avg(self):
         # Feb mean of 1..20 = 10.5.
+        # Request both months because first-period AVG is cumulative from the
+        # fetched source range start.
         result = (pt.load(self.KEY) + pt.resample_avg + pt.set_periodicity('M')).rows[
-            1:2:'M'
+            0:2:'M'
         ]
-        self.assertAlmostEqual(result.iloc[0, 0], 10.5)
+        self.assertAlmostEqual(result.iloc[1, 0], 10.5)
 
     def test_per_first(self):
         # First B day of Feb = 1.
