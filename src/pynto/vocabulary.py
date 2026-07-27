@@ -242,7 +242,11 @@ vocab['hsetall'] = (
     HeaderSetAll,
 )
 vocab['hformat'] = (cat, 'Apply _format_spec_ to headers', HeaderFormat)
-vocab['hreplace'] = (cat, 'Replace _old_ with _new_ in headers', HeaderReplace)
+vocab['hreplace'] = (
+    cat,
+    'Replace _old_ with _new_ in headers; set _regex=True_ for regex replacement',
+    HeaderReplace,
+)
 vocab['happly'] = (cat, 'Apply _header_func_ to headers_', HeaderApply)
 vocab['halpha'] = (cat, 'Set headers to alphabetical values', HeaderAlphabetize)
 

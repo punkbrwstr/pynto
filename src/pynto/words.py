@@ -3,6 +3,7 @@ from __future__ import annotations
 import calendar
 import copy
 import datetime
+import re
 import sys
 import logging
 import numpy as np
@@ -932,13 +933,26 @@ class HeaderFormat(Word):
 
 
 class HeaderReplace(Word):
-    old: str
+    old: str | re.Pattern
     new: str
+    regex: bool
+    flags: int
 
-    def __call__(self, old: str, new: str = '') -> Word:
+    def __call__(
+        self, old: str | re.Pattern, new: str = '', regex: bool = False, flags: int = 0
+    ) -> Word:
         return super().__call__(locals())
 
     def operate(self, stack: list[Column]) -> None:
+        if self.regex or isinstance(self.old, re.Pattern):
+            pattern = (
+                self.old
+                if isinstance(self.old, re.Pattern)
+                else re.compile(self.old, self.flags)
+            )
+            for col in stack:
+                col.header = pattern.sub(self.new, col.header)
+            return
         for col in stack:
             col.header = col.header.replace(self.old, self.new)
 
