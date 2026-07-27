@@ -310,7 +310,7 @@ class Periodicity(PeriodicityMixin, Enum):
             zoneinfo.ZoneInfo(key='America/New_York')
         )
         ny_date = ny.date()
-        if ny.hour >= 17:
+        if ny.hour >= 16:
             ny_date += datetime.timedelta(days=1)
         result = self[ny_date]
         assert isinstance(result, Period)
