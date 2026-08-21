@@ -660,6 +660,9 @@ class Metadata(Range):
     def data_key(self):
         return DATA_PREFIX + self.id_.bytes
 
+    def to_range(self) -> Range:
+        return Range(self.start, self.stop, self.periodicity)
+
     def pack(self, keep_timestamp: bool = False) -> bytes:
         key = self._pack_string(self.key, KEY_LENGTH, 'key')
         col_header = self._pack_string(

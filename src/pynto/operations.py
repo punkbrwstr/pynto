@@ -103,7 +103,14 @@ def rolling_cov(x: np.ndarray, window: int) -> np.ndarray:
 
 def rolling_cor(x: np.ndarray, window: int) -> np.ndarray:
     vars_ = bn.move_var(x, window, axis=0)
-    return rolling_cov(x, window) / np.multiply.reduce(vars_, axis=1)  # type: ignore[no-any-return]
+    covariance = rolling_cov(x, window)
+    denominator = np.sqrt(np.multiply.reduce(vars_, axis=1))
+    return np.divide(
+        covariance,
+        denominator,
+        out=np.full_like(covariance, np.nan),
+        where=denominator > 0,
+    )
 
 
 def rolling_ewma(data: np.ndarray, window: int) -> np.ndarray:

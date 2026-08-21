@@ -320,8 +320,9 @@ class IfHeadersElse(Combinator):
 
 
 class Map(Combinator):
-    def __call__(self, every: int = 1) -> Word:
-        self.every = every
+    def __call__(self, every: int | None = None) -> Word:
+        if every is not None or not self.called:
+            self.every = 1 if every is None else every
         return super().__call__()
 
     def operate(self, stack: list[Column]) -> None:
@@ -754,11 +755,12 @@ class RollingColumn(Column):
         mask = ~np.any(np.isnan(data), axis=1)
         idx = np.where(mask)[0]
         out = self.group_values
-        if np.any(idx >= self.lookback):
+        if len(idx) >= self.window and np.any(idx >= self.lookback):
             start = np.where(idx >= self.lookback)[0][0]
-            out[(idx - self.lookback)[start:]] = self.operation(
-                data[mask], self.window
-            )[start:]
+            values = self.operation(data[mask], self.window)[start:]
+            if values.ndim == 1:
+                values = values[:, None]
+            out[(idx - self.lookback)[start:]] = values
             if not np.all(mask):
                 idx = np.where(~mask)[0]
                 if np.any(idx >= self.lookback):

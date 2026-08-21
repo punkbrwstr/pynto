@@ -135,6 +135,25 @@ class TestDatabaseSync(unittest.TestCase):
             self.assertTrue(np.array_equal(synced_values, source_values))
 
 
+class TestMetadata(unittest.TestCase):
+    def test_to_range_discards_metadata_fields(self):
+        metadata = Metadata(
+            10,
+            20,
+            pt.Periodicity.B,
+            DataType.F,
+            'test',
+            0,
+            'value',
+            '',
+        )
+
+        result = metadata.to_range()
+
+        self.assertIs(type(result), pt.Range)
+        self.assertEqual(result, pt.Range(10, 20, pt.Periodicity.B))
+
+
 class TestRowIndexing(unittest.TestCase):
     def test_int_index(self):
         with self.subTest('Positive index'):
@@ -359,6 +378,13 @@ class TestStackManipulation(unittest.TestCase):
 
 
 class TestCombinators(unittest.TestCase):
+    def test_map_copy_preserves_every(self):
+        result = (pt.id + 2 + 3 + ~pt.mul + pt.map(every=2).copy()).last
+
+        self.assertTrue(
+            np.array_equal(result.values, np.array([2.0, 3.0, 6.0]))
+        )
+
     def test_locals_quote(self):
         result = (pt.c(5) + pt.c(6) + ~pt.add + pt.call).rows['2019-01-01'].iloc[0, -1]
         self.assertEqual(result, 11)
@@ -682,7 +708,7 @@ class TestRollingSpecial(unittest.TestCase):
     # Expected outputs at the last row, computed with rolling_cov/cor/ewma on the
     # 7-row lookback window (rows 13..19):
     COV_EXPECTED = -0.025080091449840018
-    COR_EXPECTED = -0.034949284471091864
+    COR_EXPECTED = -0.02960627046153315
     EWM_EXPECTED = -0.05362102194787367
 
     def _df(self, cols=None):
@@ -696,10 +722,33 @@ class TestRollingSpecial(unittest.TestCase):
         result = (pt.from_pandas(self._df()) + pt.rcov(self.WINDOW)).values[last]
         self.assertAlmostEqual(result[0, 0], self.COV_EXPECTED, places=10)
 
+    def test_rcov_multiple_rows(self):
+        result = (pt.from_pandas(self._df()) + pt.rcov(self.WINDOW)).rows[-10:]
+        expected = (
+            self._df()['x']
+            .rolling(self.WINDOW)
+            .cov(self._df()['y'], ddof=0)
+            .iloc[-10:]
+        )
+        np.testing.assert_allclose(result.iloc[:, 0], expected)
+
+    def test_rcov_with_insufficient_observations(self):
+        data = self._df().copy()
+        data.iloc[:-6] = np.nan
+
+        result = (pt.from_pandas(data) + pt.rcov(10)).rows[-5:]
+
+        self.assertTrue(result.iloc[:, 0].isna().all())
+
     def test_rcor(self):
         last = self._df().index[-1]
         result = (pt.from_pandas(self._df()) + pt.rcor(self.WINDOW)).values[last]
         self.assertAlmostEqual(result[0, 0], self.COR_EXPECTED, places=10)
+
+    def test_rcor_multiple_rows(self):
+        result = (pt.from_pandas(self._df()) + pt.rcor(self.WINDOW)).rows[-10:]
+        expected = self._df()['x'].rolling(self.WINDOW).corr(self._df()['y']).iloc[-10:]
+        np.testing.assert_allclose(result.iloc[:, 0], expected)
 
     def test_ewm_mean(self):
         last = self._df([0]).index[-1]
