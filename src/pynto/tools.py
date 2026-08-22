@@ -434,7 +434,7 @@ class SortedSet:
         return self.range_by_lex(min_lex, max_lex, start, count, reverse=True)
 
 
-def print_vocab_tables():
+def print_vocab_tables(heading_level: int = 2) -> None:
     """
     Prints markdown tables showing all entries in vocab dict from vocabulary.py.
     Creates separate tables for each category (first element in value tuples).
@@ -446,9 +446,9 @@ def print_vocab_tables():
             categories[category] = []
         categories[category].append((word, description, callable_obj))
 
-    # Print each category as a separate table
+    heading = '#' * heading_level
     for category, entries in sorted(categories.items()):
-        print(f'\n## {category}\n')
+        print(f'\n{heading} {category}\n')
         print('| Word | Description | Parameters | Column Indexer |')
         print('|------|-------------|------------|----------------|')
 
@@ -456,14 +456,16 @@ def print_vocab_tables():
             # Get parameter information
             try:
                 # Create an instance to examine the __call__ method
-                word_instance = callable_obj(word)
+                word_instance = callable_obj(word, vocab)
                 call_method = getattr(word_instance, '__call__')
                 sig = inspect.signature(call_method)
 
                 # Extract parameters with defaults and type hints
                 params = []
                 for param_name, param in sig.parameters.items():
-                    if param_name in ['self', 'kwargs']:
+                    if param_name in ['self', 'kwargs'] or (
+                        param.kind == inspect.Parameter.VAR_POSITIONAL
+                    ):
                         continue
 
                     # Build parameter string with type hint

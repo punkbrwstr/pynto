@@ -3,7 +3,27 @@ import bottleneck as bn  # type: ignore[import-untyped]
 
 
 def rank(inputs: np.ndarray, out: np.ndarray) -> None:
-    out[:] = inputs.argsort(axis=1).argsort(axis=1)
+    out[:] = np.nan
+    for input_row, output_row in zip(inputs, out):
+        valid = ~np.isnan(input_row)
+        output_row[valid] = input_row[valid].argsort().argsort()
+
+
+def ntile(inputs: np.ndarray, out: np.ndarray, bucket_count: int) -> None:
+    rank(inputs, out)
+    for output_row in out:
+        valid = ~np.isnan(output_row)
+        output_row[valid] = output_row[valid] * bucket_count // valid.sum() + 1
+
+
+def percentile(inputs: np.ndarray, out: np.ndarray) -> None:
+    rank(inputs, out)
+    for output_row in out:
+        valid = ~np.isnan(output_row)
+        if valid.sum() == 1:
+            output_row[valid] = 0.0
+        elif valid.any():
+            output_row[valid] /= valid.sum() - 1
 
 
 def zero_first_op(x: np.ndarray, out: np.ndarray) -> None:
@@ -96,13 +116,17 @@ def rolling_ret(x: np.ndarray, window: int) -> np.ndarray:
 
 
 def rolling_cov(x: np.ndarray, window: int) -> np.ndarray:
+    if window < 2:
+        return np.full(x.shape[0], np.nan)
     means = bn.move_mean(x, window, axis=0)
     meanXY = bn.move_mean(np.multiply.reduce(x, axis=1), window)
-    return meanXY - np.multiply.reduce(means, axis=1)  # type: ignore[no-any-return]
+    return (  # type: ignore[no-any-return]
+        (meanXY - np.multiply.reduce(means, axis=1)) * window / (window - 1)
+    )
 
 
 def rolling_cor(x: np.ndarray, window: int) -> np.ndarray:
-    vars_ = bn.move_var(x, window, axis=0)
+    vars_ = bn.move_var(x, window, axis=0, ddof=1)
     covariance = rolling_cov(x, window)
     denominator = np.sqrt(np.multiply.reduce(vars_, axis=1))
     return np.divide(

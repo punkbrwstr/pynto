@@ -173,6 +173,9 @@ class Connection(ABC):
     def hgetall(self, key: str) -> dict[bytes, bytes]:
         raise UnsupportedConnectionFeature('Hash reads are not supported')
 
+    def hdel(self, key: str, field: str) -> None:
+        raise UnsupportedConnectionFeature('Hash writes are not supported')
+
     def hash_keys(self, prefix: str = '') -> list[str]:
         raise UnsupportedConnectionFeature('Hash key listing is not supported')
 
@@ -282,6 +285,9 @@ class RedisConnection(Connection):
 
     def hgetall(self, key: str) -> dict[bytes, bytes]:
         return cast(dict[bytes, bytes], self._client.hgetall(key))
+
+    def hdel(self, key: str, field: str) -> None:
+        self._client.hdel(key, field)
 
     def hash_keys(self, prefix: str = '') -> list[str]:
         return [
@@ -492,6 +498,13 @@ class SQLiteConnection(Connection):
                 (key,),
             )
         }
+
+    def hdel(self, key: str, field: str) -> None:
+        with self._db:
+            self._db.execute(
+                'DELETE FROM hash_values WHERE hash_key = ? AND field = ?',
+                (key, field),
+            )
 
     def hash_keys(self, prefix: str = '') -> list[str]:
         upper = _prefix_upper_bound(prefix.encode())
@@ -932,6 +945,9 @@ class DynamoDBConnection(Connection):
                 return result
             kwargs['ExclusiveStartKey'] = last_key
 
+    def hdel(self, key: str, field: str) -> None:
+        self._hashes.delete_item(Key={'hash_key': key, 'field': field})
+
     def hash_keys(self, prefix: str = '') -> list[str]:
         return self._scan_string_keys(
             self._hashes,
@@ -1292,6 +1308,9 @@ class S3Connection(Connection):
             )
             for object_key in self._list_keys(prefix)
         }
+
+    def hdel(self, key: str, field: str) -> None:
+        self._delete_objects([self._hash_field_key(key, field)])
 
     def hash_keys(self, prefix: str = '') -> list[str]:
         object_prefix = self._key(f'{S3_HASH_PREFIX}{_encode_set_key(prefix)}')

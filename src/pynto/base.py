@@ -117,6 +117,9 @@ class Column:
     id_: int = field(default_factory=_IDs.get_next)
     name: str | None = None
     _is_copy: bool = False
+    _computed_key: tuple[int, ResampleMethod] | None = None
+    _inputs_key: int | None = None
+    _inputs_cache: list[Column] | None = None
 
     def __post_init__(self):
         self.shared.columns.add(self)
@@ -136,20 +139,34 @@ class Column:
         self.group.outputs[(self.range_, self.resampler)] = np.empty(
             (len(self.range_), len(self.group.members)), order='F'
         )
+        self._computed_key = (id(self.range_), self.resampler)
         self.operate()
         if self.range_ in self.group.closed_inputs:
             del self.group.closed_inputs[self.range_]
 
     @property
     def inputs(self) -> list[Column]:
-        key = self.range_
-        return (
-            self.group.closed_inputs.get(key) if key is not None else None
-        ) or self.shared.open_inputs
+        if self.range_ is None:
+            return self.shared.open_inputs
+        key = id(self.range_)
+        if self._inputs_key == key and self._inputs_cache is not None:
+            return self._inputs_cache
+        inputs = self.group.closed_inputs.get(self.range_) or self.shared.open_inputs
+        self._inputs_key = key
+        self._inputs_cache = inputs
+        return inputs
 
     @property
     def computed(self) -> bool:
-        return (self.range_, self.resampler) in self.group.outputs
+        if self.range_ is None:
+            return False
+        key = (id(self.range_), self.resampler)
+        if self._computed_key == key:
+            return True
+        if (self.range_, self.resampler) in self.group.outputs:
+            self._computed_key = key
+            return True
+        return False
 
     @property
     def group_values(self) -> np.ndarray:

@@ -77,6 +77,48 @@ class TestDatabaseSync(unittest.TestCase):
             self.assertEqual(result.series_current, 2)
             pd.testing.assert_frame_equal(destination['sync_new_series'], frame)
 
+    def test_overwrite_assignment_replaces_existing_frame(self):
+        with self._dbs() as (database, _):
+            initial = pd.DataFrame(
+                {'old': [1, 2], 'removed': [3, 4]},
+                index=pd.date_range('2019-01-01', periods=2, freq='B'),
+            )
+            replacement = pd.DataFrame(
+                {'new': [5, 6]},
+                index=pd.date_range('2020-01-01', periods=2, freq='B'),
+            )
+            database['replace'] = initial
+
+            database['replace', True] = replacement
+
+            pd.testing.assert_frame_equal(database['replace'], replacement)
+
+    def test_request_excludes_series_starting_at_range_stop(self):
+        class Batch:
+            def __init__(self):
+                self.request = None
+
+            def get_range(self, key, start, stop):
+                self.request = (key, start, stop)
+
+        with self._dbs() as (database, _):
+            metadata = Metadata(
+                10,
+                20,
+                pt.Periodicity.B,
+                DataType.F,
+                'test',
+                0,
+                'value',
+                '',
+            )
+            batch = Batch()
+
+            offset = database._req(metadata, 5, 10, batch)
+
+            self.assertEqual(offset, -1)
+            self.assertEqual(batch.request, (metadata.data_key, -1, 0))
+
     def test_sync_copies_auxiliary_data(self):
         with self._dbs() as (source, destination):
             source.connection.hmset('aux:hash', {'field': 'value'})
@@ -89,6 +131,17 @@ class TestDatabaseSync(unittest.TestCase):
                 {b'field': b'value'},
             )
             self.assertEqual(destination.connection.set_members('aux:set'), [b'member'])
+
+    def test_deletes_hash_field(self):
+        with self._dbs() as (database, _):
+            database.connection.hmset('aux:hash', {'removed': 'value', 'kept': 'value'})
+
+            database.connection.hdel('aux:hash', 'removed')
+
+            self.assertEqual(
+                database.connection.hgetall('aux:hash'),
+                {b'kept': b'value'},
+            )
 
     def test_sync_appends_literal_dollar_column_header(self):
         with self._dbs() as (source, destination):
@@ -338,6 +391,45 @@ class TestOperators(unittest.TestCase):
         a = (pt.from_pandas(df) + pt.rank).values[:]
         self.assertTrue(np.array_equal(a[2], np.array([3.0, 4.0, 0.0, 1.0, 2.0])))
         self.assertTrue(np.array_equal(a[3], np.array([0.0, 1.0, 2.0, 3.0, 4.0])))
+
+    def test_ntile(self):
+        result = (pt.r5 + pt.ntile(3)).values[0]
+
+        np.testing.assert_array_equal(result, [[1.0, 1.0, 2.0, 2.0, 3.0]])
+
+    def test_percentile(self):
+        result = (pt.r5 + pt.percentile).values[0]
+
+        np.testing.assert_allclose(result, [[0.0, 0.25, 0.5, 0.75, 1.0]])
+
+    def test_cross_sectional_ranking_ignores_nans(self):
+        df = pd.DataFrame(
+            [[np.nan, 3.0, 1.0, np.nan, 2.0]],
+            index=pt.periods.Periodicity.B[:1].to_index(),
+            columns=['missing_first', 'three', 'one', 'missing_last', 'two'],
+        )
+        word = pt.from_pandas(df)
+
+        np.testing.assert_allclose(
+            (word + pt.rank).values[0],
+            [[np.nan, 2.0, 0.0, np.nan, 1.0]],
+            equal_nan=True,
+        )
+        np.testing.assert_allclose(
+            (word + pt.ntile(3)).values[0],
+            [[np.nan, 3.0, 1.0, np.nan, 2.0]],
+            equal_nan=True,
+        )
+        np.testing.assert_allclose(
+            (word + pt.percentile).values[0],
+            [[np.nan, 1.0, 0.0, np.nan, 0.5]],
+            equal_nan=True,
+        )
+
+    def test_div_last_divides_all_columns_by_final_column(self):
+        result = (pt.c(1) + pt.c(2) + pt.c(4) + pt.div_last).values[0]
+
+        np.testing.assert_allclose(result, [[0.25, 0.5]])
 
 
 class TestNullary(unittest.TestCase):
@@ -658,6 +750,33 @@ class TestUnaryOps(unittest.TestCase):
         self.assertEqual(result[0, 0], 4.0)
 
 
+class TestComparisonOps(unittest.TestCase):
+    def test_binary_comparisons_return_float_indicators(self):
+        cases = [
+            ('greater', 3, 2, 1.0),
+            ('greater', 2, 3, 0.0),
+            ('greater_equal', 3, 3, 1.0),
+            ('greater_equal', 2, 3, 0.0),
+            ('less', 2, 3, 1.0),
+            ('less', 3, 2, 0.0),
+            ('less_equal', 3, 3, 1.0),
+            ('less_equal', 3, 2, 0.0),
+            ('not_equal', 2, 3, 1.0),
+            ('not_equal', 3, 3, 0.0),
+            ('equal', 3, 3, 1.0),
+            ('equal', 2, 3, 0.0),
+        ]
+        for word, left, right, expected in cases:
+            with self.subTest(word=word):
+                result = (pt.c(left) + pt.c(right) + getattr(pt, word)).values[0]
+                self.assertEqual(result[0, 0], expected)
+
+    def test_comparisons_only_consume_the_last_two_columns(self):
+        result = (pt.c(10) + pt.c(3) + pt.c(2) + pt.greater).values[0]
+
+        np.testing.assert_array_equal(result, [[10.0, 1.0]])
+
+
 class TestNanIgnoring(unittest.TestCase):
     def test_nadd(self):
         # add[:] with any NaN in row → NaN output
@@ -707,7 +826,7 @@ class TestRollingSpecial(unittest.TestCase):
     WINDOW = 5
     # Expected outputs at the last row, computed with rolling_cov/cor/ewma on the
     # 7-row lookback window (rows 13..19):
-    COV_EXPECTED = -0.025080091449840018
+    COV_EXPECTED = -0.031350114312299955
     COR_EXPECTED = -0.02960627046153315
     EWM_EXPECTED = -0.05362102194787367
 
@@ -727,7 +846,7 @@ class TestRollingSpecial(unittest.TestCase):
         expected = (
             self._df()['x']
             .rolling(self.WINDOW)
-            .cov(self._df()['y'], ddof=0)
+            .cov(self._df()['y'])
             .iloc[-10:]
         )
         np.testing.assert_allclose(result.iloc[:, 0], expected)
@@ -933,6 +1052,27 @@ class SeriesTest(DbTest):
         f = pt.db['test']
         self.assertEqual(f.shape[1], 1)
         self.assertEqual(f.shape[0], 5)
+
+
+class AllNanSeriesTest(DbTest):
+    KEY = 'all_nan'
+
+    def setUp(self):
+        self.index = pd.date_range('2019-01-01', periods=5, freq='B')
+        pt.db[self.KEY] = pd.DataFrame(
+            {'all_nan': np.full(len(self.index), np.nan)},
+            index=self.index,
+        )
+
+    def tearDown(self):
+        del pt.db[self.KEY]
+
+    def test_all_nan_series_is_stored_over_its_full_range(self):
+        result = pt.db[self.KEY]
+
+        self.assertTrue(result.index.equals(self.index))
+        self.assertTrue(result['all_nan'].isna().all())
+        self.assertEqual(len(result), len(self.index))
 
 
 class MultiIndexFrameTest(DbTest):

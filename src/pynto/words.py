@@ -736,6 +736,41 @@ class Reduction(Word):
 
 
 @dataclass(kw_only=True, eq=False)
+class DivideByLastColumn(Column):
+    def operate(self) -> None:
+        np.divide(
+            self.input_values[:, :-1],
+            self.input_values[:, -1:],
+            out=self.group_values,
+        )
+
+    @property
+    def inputs(self) -> list[Column]:
+        return super().inputs if self.shared.open_inputs else []
+
+
+class DivideByLast(Word):
+    def __init__(self, name: str, vocab: Vocabulary):
+        super().__init__(name, vocab, slice(None))
+
+    def operate(self, stack: list[Column]) -> None:
+        if len(stack) < 2:
+            raise ValueError('div_last requires at least one numerator and a denominator')
+        inputs = stack[:]
+        stack.clear()
+        group = GroupShared()
+        for index, numerator in enumerate(inputs[:-1]):
+            column = DivideByLastColumn(
+                header=numerator.header,
+                group=group,
+                name=self.name,
+            )
+            if index == 0:
+                column.shared.open_inputs.extend(inputs)
+            stack.append(column)
+
+
+@dataclass(kw_only=True, eq=False)
 class RollingColumn(Column):
     operation: Callable[[np.ndarray, int], np.ndarray]
     window: int
@@ -845,6 +880,28 @@ class GroupOperator(Word):
             )
             sib.shared.open_inputs.append(i)
             stack.append(sib)
+
+
+class Ntile(GroupOperator):
+    def __init__(self, name: str, vocab: Vocabulary):
+        from .operations import ntile
+
+        self.ntile = ntile
+        super().__init__(
+            name,
+            vocab,
+            operation=self.ntile,
+            slice_=slice(None),
+            allow_group_drops=False,
+        )
+
+    def __call__(self, bucket_count: int = 2) -> Word:
+        if not isinstance(bucket_count, int) or bucket_count < 1:
+            raise ValueError('bucket_count must be a positive integer')
+        from functools import partial
+
+        self.operation = partial(self.ntile, bucket_count=bucket_count)
+        return super().__call__(locals())
 
 
 @dataclass(kw_only=True, eq=False)

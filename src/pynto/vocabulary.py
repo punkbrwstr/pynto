@@ -19,6 +19,7 @@ from .operations import (
     expanding_std,
     expanding_var,
     inc_op,
+    percentile,
     rank,
     rolling_cor,
     rolling_cov,
@@ -38,6 +39,7 @@ from .words import (
     Compose,
     Constant,
     ConstantRange,
+    DivideByLast,
     Daycount,
     FFill,
     Fill,
@@ -59,6 +61,7 @@ from .words import (
     Interleave,
     Join,
     Map,
+    Ntile,
     Partial,
     PeriodOrdinal,
     Quotation,
@@ -417,14 +420,14 @@ _funcs = [
     (
         'min',
         'Minimum',
-        partial(bn.nanmax, axis=1),
+        partial(bn.nanmin, axis=1),
         partial(bn.move_min, axis=0),
         np.minimum.accumulate,
     ),
     (
         'max',
         'Maximum',
-        partial(bn.nanmin, axis=1),
+        partial(bn.nanmax, axis=1),
         partial(bn.move_max, axis=0),
         np.maximum.accumulate,
     ),
@@ -476,6 +479,33 @@ for code, desc, red, roll, scan in _funcs:
                 name, vocab, expanding_wrapper(func), ascending=False
             ),
         )
+
+
+def _comparison(operation: Callable[[np.ndarray, np.ndarray], np.ndarray]):
+    def compare(inputs: np.ndarray) -> np.ndarray:
+        return operation(inputs[:, 0], inputs[:, 1]).astype(float)
+
+    return compare
+
+
+_comparisons = [
+    ('greater', 'Greater than', np.greater),
+    ('greater_equal', 'Greater than or equal to', np.greater_equal),
+    ('less', 'Less than', np.less),
+    ('less_equal', 'Less than or equal to', np.less_equal),
+    ('not_equal', 'Not equal to', np.not_equal),
+    ('equal', 'Equal to', np.equal),
+]
+for code, desc, operation in _comparisons:
+    vocab[code] = (
+        'Row-wise Comparison',
+        desc,
+        lambda name, vocab, operation=operation: Reduction(
+            name, vocab, _comparison(operation)
+        ),
+    )
+
+
 vocab['rcov'] = (
     'Rolling Window',
     'Covariance',
@@ -548,6 +578,23 @@ vocab['rank'] = (
     lambda name, vocab: GroupOperator(
         name, vocab, rank, slice_=slice(None), allow_group_drops=False
     ),
+)
+vocab['ntile'] = (
+    cat,
+    'Row-wise buckets',
+    Ntile,
+)
+vocab['percentile'] = (
+    cat,
+    'Row-wise percentile rank',
+    lambda name, vocab: GroupOperator(
+        name, vocab, percentile, slice_=slice(None), allow_group_drops=False
+    ),
+)
+vocab['div_last'] = (
+    cat,
+    'Divides all columns by the final column',
+    DivideByLast,
 )
 vocab['inc'] = (
     cat,

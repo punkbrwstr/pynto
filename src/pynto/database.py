@@ -598,12 +598,10 @@ def _redis_kwargs_from_env() -> dict[str, Any]:
     return args
 
 
-def _trim_values(series: pd.Series) -> pd.Series | None:
+def _trim_values(series: pd.Series) -> pd.Series:
     if series.values.dtype.kind == 'f':
         nz = (~np.isnan(series.to_numpy())).nonzero()[0]
-        if len(nz) == 0:  # don't save if all nans
-            return None
-        else:
+        if len(nz) != 0:
             series = series.iloc[nz.min() : nz.max() + 1]
     return series
 
@@ -826,7 +824,19 @@ class Db:
         if total:
             logger.info('Cleared %s/%s pynto series', total, total)
 
-    def __setitem__(self, key: str, pandas: pd.Series | pd.DataFrame) -> None:
+    def __setitem__(
+        self, key: str | tuple[str, bool], pandas: pd.Series | pd.DataFrame
+    ) -> None:
+        if isinstance(key, tuple):
+            if (
+                len(key) != 2
+                or not isinstance(key[0], str)
+                or not isinstance(key[1], bool)
+            ):
+                raise TypeError('Assignment key tuple must contain a string and bool')
+            key, overwrite = key
+            if overwrite:
+                del self[key]
         saved: dict[tuple[str, str], Any] = {}
         series: list[tuple[str, str, pd.Series]] = []
         frame, column, row = self.split_key(key)
@@ -863,12 +873,8 @@ class Db:
             assert not isinstance(s.dtype, pd.api.extensions.ExtensionDtype)
             type_ = DataType.from_dtype(s.dtype.str)
             md_tuple = saved.get((col, row))
-            s_trimmed: pd.Series | None = None
             if not md_tuple:
-                s_trimmed = _trim_values(s)
-                if s_trimmed is None:
-                    continue
-                s = s_trimmed
+                s = _trim_values(s)
             range_ = Range.from_index(s.index)  # type: ignore[arg-type]
             data = s.to_numpy()
             if not md_tuple:
@@ -983,7 +989,7 @@ class Db:
         self, saved: Metadata, start: int, stop: int, p: Batch
     ) -> int:
         offset: int
-        if start < saved.stop and stop >= saved.start:
+        if start < saved.stop and stop > saved.start:
             offset = max(0, saved.start - start)
             start = max(start, saved.start)
             stop = min(stop, saved.stop)
