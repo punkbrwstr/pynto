@@ -211,6 +211,7 @@ pynto has built-in database functionality that lets you save DataFrames and Seri
 | halpha | Set headers to alphabetical values |  | [:] |
 | happly | Apply _header_func_ to headers_ | header_func: Callable[[str], str] | [:] |
 | hformat | Apply _format_spec_ to headers | format_spec: str | [:] |
+| hindex | Slice headers from _start_ to _stop_ | start: int \| None, stop: int \| None | [:] |
 | hreplace | Replace _old_ with _new_ in headers; set _regex=True_ for regex replacement | old: str \| re.Pattern, new: str = '', regex: bool = False, flags: int = 0 | [:] |
 | hset | Set headers to _*headers_  |  | [:] |
 | hsetall | Set headers to _*headers_ repeating, if necessary |  | [:] |

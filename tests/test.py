@@ -610,6 +610,12 @@ class TestHeaders(unittest.TestCase):
             'B',
         )
 
+    def test_hindex(self):
+        self.assertEqual(
+            (pt.r2 + pt.hset('prefix:first', 'prefix:second') + pt.hindex(7, None)).columns,
+            ['first', 'second'],
+        )
+
     def test_hsetall(self):
         # hsetall repeats the given headers cyclically
         cols = (pt.r6 + pt.hsetall('x', 'y')).columns

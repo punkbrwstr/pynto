@@ -1027,6 +1027,18 @@ class HeaderApply(Word):
             col.header = self.header_func(col.header)
 
 
+class HeaderIndex(Word):
+    start: int | None
+    stop: int | None
+
+    def __call__(self, start: int | None, stop: int | None) -> Word:
+        return super().__call__(locals())
+
+    def operate(self, stack: list[Column]) -> None:
+        for col in stack:
+            col.header = col.header[self.start : self.stop]
+
+
 class HeaderAlphabetize(Word):
     @staticmethod
     def alphabet_generator():

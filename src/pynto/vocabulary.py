@@ -51,6 +51,7 @@ from .words import (
     HeaderAlphabetize,
     HeaderApply,
     HeaderFormat,
+    HeaderIndex,
     HeaderReplace,
     HeaderSet,
     HeaderSetAll,
@@ -251,6 +252,7 @@ vocab['hreplace'] = (
     HeaderReplace,
 )
 vocab['happly'] = (cat, 'Apply _header_func_ to headers_', HeaderApply)
+vocab['hindex'] = (cat, 'Slice headers from _start_ to _stop_', HeaderIndex)
 vocab['halpha'] = (cat, 'Set headers to alphabetical values', HeaderAlphabetize)
 
 cat = 'Combinators'
