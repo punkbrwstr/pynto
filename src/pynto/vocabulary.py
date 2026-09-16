@@ -36,6 +36,7 @@ from .operations import (
 from .words import (
     Call,
     Cleave,
+    Coalesce,
     Compose,
     Constant,
     ConstantRange,
@@ -506,6 +507,13 @@ for code, desc, operation in _comparisons:
             name, vocab, _comparison(operation)
         ),
     )
+
+
+vocab['coalesce'] = (
+    'Row-wise Reduction',
+    'Returns the first non-nan value across selected columns for each row',
+    Coalesce,
+)
 
 
 vocab['rcov'] = (

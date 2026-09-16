@@ -312,6 +312,7 @@ pynto has built-in database functionality that lets you save DataFrames and Seri
 |------|-------------|------------|----------------|
 | add | Addition | ignore_nans: bool = False | [-2:] |
 | avg | Arithmetic average | ignore_nans: bool = False | [-2:] |
+| coalesce | Returns the first non-nan value across selected columns for each row |  | [:] |
 | div | Division | ignore_nans: bool = False | [-2:] |
 | max | Maximum | ignore_nans: bool = False | [-2:] |
 | med | Median | ignore_nans: bool = False | [-2:] |

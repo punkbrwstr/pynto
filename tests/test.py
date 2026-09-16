@@ -431,6 +431,23 @@ class TestOperators(unittest.TestCase):
 
         np.testing.assert_allclose(result, [[0.25, 0.5]])
 
+    def test_coalesce_returns_first_non_nan_value_per_row(self):
+        df = pd.DataFrame(
+            [
+                [np.nan, 2.0, 3.0],
+                [1.0, 2.0, 3.0],
+                [np.nan, np.nan, 3.0],
+                [np.nan, np.nan, np.nan],
+            ],
+            index=pt.periods.Periodicity.B[:4].to_index(),
+        )
+
+        result = (pt.from_pandas(df) + pt.coalesce).values[:]
+
+        np.testing.assert_allclose(
+            result, [[2.0], [1.0], [3.0], [np.nan]], equal_nan=True
+        )
+
 
 class TestNullary(unittest.TestCase):
     df = pd.DataFrame(

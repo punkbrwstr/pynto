@@ -736,6 +736,29 @@ class Reduction(Word):
 
 
 @dataclass(kw_only=True, eq=False)
+class CoalesceColumn(Column):
+    def operate(self) -> None:
+        inputs = self.input_values
+        valid = ~np.isnan(inputs)
+        indices = valid.argmax(axis=1)
+        values = inputs[np.arange(len(inputs)), indices]
+        values[~valid.any(axis=1)] = np.nan
+        self.values[:] = values[:, None]
+
+
+class Coalesce(Word):
+    def __init__(self, name: str, vocab: Vocabulary):
+        super().__init__(name, vocab, slice(None))
+
+    def operate(self, stack: list[Column]) -> None:
+        if stack:
+            column = CoalesceColumn(stack[0].header, name=self.name)
+            column.shared.open_inputs.extend(stack)
+            stack.clear()
+            stack.append(column)
+
+
+@dataclass(kw_only=True, eq=False)
 class DivideByLastColumn(Column):
     def operate(self) -> None:
         np.divide(
