@@ -1,5 +1,6 @@
 import unittest
 import datetime
+import json
 import re
 import tempfile
 from collections.abc import Iterator
@@ -9,6 +10,7 @@ import numpy as np
 import pynto as pt
 from pynto.connection import SQLiteConnection
 from pynto.database import INDEX, DataType, Metadata
+from pynto.message_bus import RedisMessageBus
 
 
 def get_test_data():
@@ -17,6 +19,44 @@ def get_test_data():
         columns=['a', 'b', 'c', 'd'],
         index=pd.date_range('1/1/2019', periods=3, freq='B'),
     )
+
+
+class TestRedisMessageBus(unittest.TestCase):
+    def test_request_uses_short_uuid_response_id(self):
+        class PubSub:
+            def __init__(self):
+                self.channel = None
+                self.closed = False
+
+            def subscribe(self, channel):
+                self.channel = channel
+
+            def get_message(self):
+                return {'data': '{"response": "ok"}'}
+
+            def close(self):
+                self.closed = True
+
+        class Connection:
+            def __init__(self):
+                self.pubsub_ = PubSub()
+                self.published = []
+
+            def pubsub(self, **_):
+                return self.pubsub_
+
+            def publish(self, channel, payload):
+                self.published.append((channel, json.loads(payload)))
+
+        connection = Connection()
+        result = RedisMessageBus(connection).request('test', {})
+
+        self.assertEqual(result, 'ok')
+        self.assertEqual(connection.published[0][0], 'pynto:req')
+        req_id = connection.published[0][1]['id']
+        self.assertRegex(req_id, r'^[0-9a-f]{8}$')
+        self.assertEqual(connection.pubsub_.channel, f'pynto:res:{req_id}')
+        self.assertTrue(connection.pubsub_.closed)
 
 
 class TestDatabaseSync(unittest.TestCase):

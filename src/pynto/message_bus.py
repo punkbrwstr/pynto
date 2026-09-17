@@ -15,10 +15,8 @@ from .database import _has_redis_env, _redis_kwargs_from_env
 
 REDIS_REQUEST_CHANNEL_ENV_VAR = 'PYNTO_REDIS_MESSAGE_REQUEST_CHANNEL'
 REDIS_RESPONSE_CHANNEL_ENV_VAR = 'PYNTO_REDIS_MESSAGE_RESPONSE_CHANNEL'
-REDIS_COUNTER_KEY_ENV_VAR = 'PYNTO_REDIS_MESSAGE_COUNTER_KEY'
 REDIS_DEFAULT_REQUEST_CHANNEL = 'pynto:req'
 REDIS_DEFAULT_RESPONSE_CHANNEL = 'pynto:res:{}'
-REDIS_DEFAULT_COUNTER_KEY = 'pynto:req:id'
 SQS_REQUEST_QUEUE_ENV_VAR = 'PYNTO_SQS_REQUEST_QUEUE'
 SQS_RESPONSE_QUEUE_PREFIX_ENV_VAR = 'PYNTO_SQS_RESPONSE_QUEUE_PREFIX'
 SQS_DEFAULT_REQUEST_QUEUE = 'pynto-requests'
@@ -60,7 +58,6 @@ class RedisMessageBus(MessageBus):
         *,
         request_channel: str | None = None,
         response_channel: str | None = None,
-        counter_key: str | None = None,
     ) -> None:
         self.connection = connection or RedisConnection(**_redis_kwargs_from_env())
         self.request_channel = request_channel or os.environ.get(
@@ -68,9 +65,6 @@ class RedisMessageBus(MessageBus):
         )
         self.response_channel = response_channel or os.environ.get(
             REDIS_RESPONSE_CHANNEL_ENV_VAR, REDIS_DEFAULT_RESPONSE_CHANNEL
-        )
-        self.counter_key = counter_key or os.environ.get(
-            REDIS_COUNTER_KEY_ENV_VAR, REDIS_DEFAULT_COUNTER_KEY
         )
 
     def request(
@@ -81,7 +75,7 @@ class RedisMessageBus(MessageBus):
         encoder: type[json.JSONEncoder] | None = None,
         timeout_seconds: float = 180.0,
     ) -> Any:
-        req_id = self.connection.incr(self.counter_key)
+        req_id = uuid.uuid4().hex[:8]
         payload = {'id': req_id, 'type': request_type}
         payload.update(request)
         pubsub = self.connection.pubsub(ignore_subscribe_messages=True)
